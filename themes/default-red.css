@@ -1,0 +1,41 @@
+/*
+ * EDLD — default-red
+ *
+ * Dark theme with red accent.
+ * Select with:  Theme = "default-red"  in config.toml [GUI]
+ *
+ * Only colours are defined here.  All structural CSS lives in base.css,
+ * loaded automatically alongside this file.
+ */
+
+:root {
+    /* ── Backgrounds ──────────────────────────────────────────────── */
+    --bg-deep:        #0d0f12;
+    --bg-mid:         #161a1f;
+    --bg-panel:       #1c2128;
+    --bg-log:         #0f1215;
+
+    /* ── Foreground ───────────────────────────────────────────────── */
+    --fg:             #d8dce5;
+    --fg-dim:         #606878;
+    --fg-log:         #c0c8d4;
+    --fg-sep:         #445566;
+    --fg-rate:        #8899aa;
+
+    /* ── Accent ───────────────────────────────────────────────────── */
+    --accent:         #cc3333;
+    --accent-dim:     #8f2323;
+    --accent-hover:   rgba(204, 51, 51, 0.15);
+    --accent-log-hover: rgba(204, 51, 51, 0.08);
+
+    /* ── Border ───────────────────────────────────────────────────── */
+    --border:         #2a3040;
+
+    /* ── Status colours (do not change without good reason) ──────── */
+    --green:          #57e389;
+    --amber:          #f8e45c;
+    --red:            #e05c5c;
+    --health-good:    #4caf50;
+    --health-warn:    #ff9800;
+    --health-crit:    #f44336;
+}

@@ -1,0 +1,51 @@
+name: Sync Wiki
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'README.md'
+      - 'INSTALL.md'
+      - 'docs/**'
+
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required to push to the wiki
+
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Checkout wiki repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run sync script
+        env:
+          REPO_DIR: ${{ github.workspace }}/repo
+          WIKI_DIR: ${{ github.workspace }}/wiki
+        run: bash repo/scripts/sync_wiki.sh
+
+      - name: Commit and push wiki changes
+        working-directory: wiki
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No wiki changes to commit."
+          else
+            git commit -m "docs: sync wiki from main repo [skip ci]"
+            git push
+          fi
