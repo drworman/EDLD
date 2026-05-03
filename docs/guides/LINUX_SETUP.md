@@ -101,7 +101,15 @@ export ED_JOURNAL_DIR="$HOME/games/ED-Logs/EDP1/"
 export STEAM_COMPAT_DATA_PATH="$HOME/.local/share/Steam/steamapps/compatdata/EDP1"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
 
-VENV="$HOME/.venv"
+# If compat data path doesn't exist, copy from 359320 (default ED install)
+if [ ! -d "$STEAM_COMPAT_DATA_PATH" ]; then
+  cp -r "$HOME/.local/share/Steam/steamapps/compatdata/359320" "$STEAM_COMPAT_DATA_PATH"
+fi
+
+# Ensure directories from env vars exist
+for dir in "$ED_JOURNAL_DIR" "$STEAM_COMPAT_DATA_PATH" "$STEAM_COMPAT_CLIENT_INSTALL_PATH"; do
+  mkdir -p "$dir"
+done
 
 # Launch Elite Dangerous via Minimal ED Launcher
 "$HOME/games/ed-mods/medl/MinEdLauncher" \
@@ -115,16 +123,8 @@ VENV="$HOME/.venv"
   /frontier \
   edp1 &
 
-# Activate virtual environment for supporting tools
-echo "Activating virtual environment..."
-source "$VENV/bin/activate"
-
 # Wait for the game to reach the main menu before launching companions
 sleep 60
-python "$HOME/games/ed-mods/edmc/EDMarketConnector.py" \
-  "--config" "$HOME/.local/share/EDMarketConnector/edp1.toml" &
-
-sleep 90
 python "$HOME/.local/bin/EDLD/edld.py" -p EDP1 &
 ```
 
@@ -144,63 +144,7 @@ need more time.
 
 ---
 
-## Step 4 — Python virtual environment
-
-A virtual environment keeps the Python dependencies for your ED tools isolated
-from your system packages.
-
-```bash
-python -m venv "$HOME/.venv"
-source "$HOME/.venv/bin/activate"
-```
-
----
-
-## Step 5 — Elite Dangerous Market Connector
-
-[EDMC](https://github.com/EDCD/EDMarketConnector) submits your in-game data to
-third-party services (EDSM, Inara, EDDN, and others). Clone it and install its
-dependencies into your virtual environment:
-
-```bash
-git clone https://github.com/EDCD/EDMarketConnector.git ~/games/ed-mods/edmc
-source ~/.venv/bin/activate
-pip install -r ~/games/ed-mods/edmc/requirements.txt
-```
-
-Run EDMC once to generate its default configuration, set your preferences, then
-close it:
-
-```bash
-python ~/games/ed-mods/edmc/EDMarketConnector.py
-```
-
-The default config file is created at
-`~/.local/share/EDMarketConnector/config.toml`. Copy it for your pilot:
-
-```bash
-cp ~/.local/share/EDMarketConnector/config.toml \
-   ~/.local/share/EDMarketConnector/edp1.toml
-```
-
-Open `edp1.toml` and clear out any auto-populated commander credentials — these
-will be populated properly when EDMC authenticates for the first time under that
-profile:
-
-```toml
-cmdrs = [""]
-edsm_cmdrs = [""]
-edsm_usernames = [""]
-edsm_apikeys = [""]
-fdev_apikeys = [""]
-inara_cmdrs = [""]
-inara_apikeys = [""]
-fcms_cmdrs = [""]
-```
-
----
-
-## Step 6 — EDLD
+## ## ## Step 5 — EDLD
 
 [EDLD](https://github.com/drworman/EDLD) monitors your Elite Dangerous journal
 in real time, posting kill counts, hull and shield events, fuel warnings, and
@@ -239,7 +183,6 @@ vim ~/.local/bin/edquit
 TARGETS=(
     "EliteDangerous64.exe"
     "MinEdLauncher"
-    "EDMarketConnector.py"
     "edld.py"
 )
 
@@ -277,7 +220,7 @@ Only the four named processes are targeted. Nothing else is touched.
 ## Adjusting sleep timers
 
 The `sleep 60` and `sleep 90` values in the launch script are starting points.
-If EDMC or EDLD attach before the game has finished loading, they may miss early
+If EDLD attach before the game has finished loading, they may miss early
 journal events. If your machine is slower, increase the values. If your SSD
 makes loading instantaneous, you can reduce them. There is no penalty for
 erring on the side of a longer wait.

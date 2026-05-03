@@ -23,14 +23,17 @@ journals, so two readers on the same files is safe.
 ## Prerequisites
 
 On both machines:
+
 - EDLD installed and working
 - Python 3.11+
 - SSH client (`openssh`)
 
 On the secondary machine only:
+
 - `sshfs` — for mounting the remote journal directory
 
 Install sshfs if needed:
+
 ```bash
 # Arch
 sudo pacman -S sshfs
@@ -50,6 +53,7 @@ You need to be able to SSH from your secondary machine to your game machine
 without a password prompt. If you already have this working, skip to Step 2.
 
 **On the secondary machine**, generate an SSH key if you don't have one:
+
 ```bash
 ssh-keygen -t ed25519 -C "edld-remote"
 # Accept the default path (~/.ssh/id_ed25519)
@@ -57,11 +61,13 @@ ssh-keygen -t ed25519 -C "edld-remote"
 ```
 
 **Copy the public key to the game machine:**
+
 ```bash
 ssh-copy-id username@gamestation
 ```
 
 **Test it:**
+
 ```bash
 ssh username@gamestation echo "OK"
 # Should print OK with no password prompt
@@ -76,12 +82,14 @@ hostname that points to your game machine's public IP. DuckDNS provides this
 for free.
 
 **Create a DuckDNS account and subdomain:**
+
 1. Go to [duckdns.org](https://www.duckdns.org) and sign in
 2. Create a subdomain — e.g. `gamestation.duckdns.org`
 3. Note your token from the account page
 
 **Install the auto-update client on the game machine** so DuckDNS always has
 your current IP. Create a script at `~/duckdns/duck.sh`:
+
 ```bash
 mkdir -p ~/duckdns
 cat > ~/duckdns/duck.sh << 'EOF'
@@ -92,6 +100,7 @@ chmod +x ~/duckdns/duck.sh
 ```
 
 **Run it on a schedule** with a systemd timer or cron:
+
 ```bash
 # Cron — update every 5 minutes
 crontab -e
@@ -102,12 +111,14 @@ crontab -e
 **Forward SSH port on your router:**
 Your router needs to forward port 22 (or a custom port) to your game machine's
 local IP. This varies by router — consult your router's manual. Once done, test:
+
 ```bash
 ssh username@gamestation.duckdns.org echo "OK"
 ```
 
 **Optional — use a custom port for WAN SSH** (recommended for security):
 Add to `~/.ssh/config` on the secondary machine:
+
 ```
 Host gamestation.duckdns.org
     Port 2222
@@ -127,6 +138,7 @@ once. The `[REMOTE]` profile is already included in `example.config.toml` as a
 starting point.
 
 The key line to set is the journal mount point on the secondary machine:
+
 ```toml
 [REMOTE]
 Settings.JournalFolder = "/home/username/mnt/ed-journals"
@@ -176,17 +188,20 @@ same value as `DESKTOP_LAN` — the script will simply try the same host twice,
 which is harmless.
 
 **Make it executable and create the mount point:**
+
 ```bash
 chmod +x edld_launch.sh
 mkdir -p ~/mnt/ed-journals
 ```
 
 **Run it:**
+
 ```bash
 ./edld_launch.sh
 ```
 
 The script will:
+
 1. Detect which machine it is on by hostname
 2. **Game machine** — launch EDLD with GUI using your normal profile
 3. **Secondary machine**:
@@ -200,6 +215,7 @@ The script will:
 ## Step 5 — Test the connection
 
 **LAN test** (both machines on the same network):
+
 ```bash
 # On the secondary machine
 ssh gamestation.local.net echo "SSH OK"
@@ -209,11 +225,13 @@ fusermount -u ~/mnt/ed-journals
 ```
 
 **WAN test** (secondary machine on a different network — use a phone hotspot):
+
 ```bash
 ssh gamestation.duckdns.org echo "SSH OK"
 ```
 
 **Full launch test:**
+
 ```bash
 ./edld_launch.sh
 # Watch the output — it will report each step
@@ -230,22 +248,26 @@ Check with `hostname -s` on each machine and update `DESKTOP_SHORT` /
 **sshfs mount succeeds but journal files are not visible**
 Check `JOURNAL_REMOTE` in the script — it must be the absolute path to the
 journal directory on the game machine. Verify with:
+
 ```bash
 ssh gamestation ls ~/games/ED-Logs/EDP1
 ```
 
 **Stale mount after network drop**
 If the mount becomes unresponsive after a reconnect, unmount and remount:
+
 ```bash
 fusermount -u ~/mnt/ed-journals
 ./edld_launch.sh
 ```
+
 The `-o reconnect` sshfs option handles brief drops automatically, but a
 prolonged disconnection may require a manual remount.
 
 **EDLD starts on the secondary machine but shows no events**
 Confirm the `[REMOTE]` profile's `JournalFolder` matches the mount point
 exactly, and that journal files are visible at that path:
+
 ```bash
 ls /home/username/mnt/ed-journals
 ```
