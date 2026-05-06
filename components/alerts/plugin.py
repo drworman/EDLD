@@ -78,6 +78,53 @@ class AlertsPlugin(BasePlugin):
         gq = self.core.gui_queue
         if gq: gq.put(("alerts_update", None))
 
+    # ── Public API for non-event-driven sources ──────────────────────────────
+    # Lets background subsystems (CAPI auth, network workers, etc.) surface
+    # alerts that don't originate from a journal event.  Routes through the
+    # standard emit pipeline AND the alerts deque so a single call lands in
+    # the terminal, the GUI/TUI alerts pane, the GUI event log, and Discord
+    # (with @-ping when loglevel > 2).  Safe to call from any thread:
+    # deque.appendleft and queue.Queue.put are atomic; emit's state mutations
+    # are not strictly thread-safe but the worst case is a transient
+    # duplicate-counter glitch on Discord, which doesn't matter for one-shot
+    # external alerts.
+    def push_external(
+        self,
+        emoji: str,
+        text: str,
+        *,
+        loglevel: int | str = 3,
+        msg_term: str | None = None,
+        msg_discord: str | None = None,
+        sigil: str | None = None,
+    ) -> None:
+        """Surface an alert from outside the journal-event pipeline.
+
+        loglevel: int (direct level, 0–3) or str (key into core.notify_levels).
+                  When passing a string key, the configured level wins over
+                  any default; missing keys fall back to 3.
+        msg_term / msg_discord: optional richer text variants.  When omitted,
+                                the plain `text` is used.
+        sigil: optional left-margin tag for terminal output (e.g. '^  CAPI').
+        """
+        if isinstance(loglevel, str):
+            level = int(self.core.notify_levels.get(loglevel, 3))
+        else:
+            level = int(loglevel)
+
+        self._push(emoji, text)
+        try:
+            self.core.emitter.emit(
+                msg_term=msg_term or text,
+                msg_discord=msg_discord or f"**{text}**",
+                emoji=emoji,
+                sigil=sigil,
+                loglevel=level,
+            )
+        except Exception:
+            # Never let an emit failure break a caller in another thread.
+            pass
+
     def on_event(self, event: dict, state) -> None:
         core     = self.core
         notify   = core.notify_levels
