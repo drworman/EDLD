@@ -288,6 +288,11 @@ CFG_DEFAULTS_NOTIFY = {
     "PeriodicFaction":  0,
     "PeriodicCredits":  2,
     "PeriodicMerits":   2,
+    # CAPI / external service health
+    # Frontier's CAPI refresh token is valid for ~30 days.  When it expires,
+    # all CAPI features stop working until the user re-runs the OAuth flow.
+    # Default level 3 so it pings Discord and lands in the Alerts pane.
+    "CapiAuthRequired": 3,
 }
 
 
