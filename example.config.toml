@@ -102,6 +102,7 @@ ShieldEvent      = 3   # Ship shield dropped or raised
 HullEvent        = 3   # Ship hull damage
 Died             = 3   # Ship destroyed
 CargoLost        = 3   # Cargo stolen
+CapiAuthRequired = 3   # Notifies on expired CAPI Authorization
 LowCargoValue    = 2   # NPC declined to attack due to low cargo value
 PoliceScan       = 2   # Security vessel scanned your ship
 PoliceAttack     = 3   # Security vessel is attacking you
