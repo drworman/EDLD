@@ -260,7 +260,7 @@ class InaraPlugin(BasePlugin):
         # Powerplay
         "Powerplay", "PowerplayJoin", "PowerplayLeave",
         "PowerplayDefect", "PowerplayRank", "PowerplayMerits",
-        # Credits
+        # Total wealth
         "Statistics",
         # Missions
         "MissionAccepted", "MissionCompleted",
@@ -303,6 +303,41 @@ class InaraPlugin(BasePlugin):
         self._micro_items:    list[dict]        = []   # last ShipLockerMaterials snapshot
         self._last_loadout:   dict | None       = None  # dedup: only send changed loadouts
 
+        # Wealth tracking — replicates Inara's journal-import behavior.
+        # Statistics events provide Bank_Account.Current_Wealth which is FDev's
+        # all-up wealth (credits + ships + modules + carrier purchase + carrier
+        # services + carrier bank balance).  Inara holds the non-credits
+        # portion of that figure constant between Statistics events and adjusts
+        # only by credit deltas.  We replicate that: cache the most recent
+        # Current_Wealth and the credits balance at that moment, then on every
+        # subsequent commanderCredits push compute commanderAssets via
+        # carry-forward = _last_wealth + (current_credits - _last_wealth_credits).
+        # Skipping the bundled assets push (when we have no Statistics anchor
+        # yet) creates the 5.7B "no marker" entries we previously saw — Inara
+        # falls back to its own internal rollup which excludes carrier.
+        self._last_wealth:         int | None = None
+        self._last_wealth_credits: int | None = None
+        self._last_credits:        int | None = None
+
+        # Fleet reconciliation state (Changes 3+4)
+        # ── _seen_ship_ids:  numeric ShipIDs we've sent setCommanderShip for at
+        #    any point.  Persisted to data.json so cross-run sells/transfers
+        #    we missed can still be reconciled against the next CAPI poll.
+        # ── _reconciled:     one-shot flag.  Reconcile fires on the first event
+        #    after CAPI's /profile poll has populated state.capi_raw, then
+        #    never again until next process start.
+        self._seen_ship_ids:   set[int] = set()
+        self._reconciled:      bool     = False
+        try:
+            saved = self.storage.read_json("data.json") or {}
+            for x in saved.get("seen_ship_ids", []):
+                try:
+                    self._seen_ship_ids.add(int(x))
+                except (TypeError, ValueError):
+                    continue
+        except Exception:
+            pass
+
         cfg = core.load_setting("Inara", CFG_DEFAULTS, warn=False)
 
         if not bool(core.cfg.app_settings.get("PrimaryInstance", True)):
@@ -327,6 +362,12 @@ class InaraPlugin(BasePlugin):
         self._load_note = f"uploading as CMDR {self._cmdr_name}"
 
     def on_unload(self) -> None:
+        # Persist tracked ship IDs so a cross-run sell can be reconciled
+        # against the next CAPI poll.  Best-effort — never block shutdown.
+        try:
+            self._save_seen()
+        except Exception:
+            pass
         if self._sender:
             self._sender.stop()
             self._sender.join(timeout=5)
@@ -346,14 +387,33 @@ class InaraPlugin(BasePlugin):
         if "beta" in game_version.lower() or game_version.startswith("3."):
             return
 
+        # ── Fleet reconciliation (one-shot, on first CAPI-ready event) ────────
+        # Cheap fast-path: if we've already reconciled, this is a single bool
+        # check.  Otherwise tries to reconcile; the method itself bails out
+        # quickly when CAPI data isn't ready yet.
+        if not self._reconciled:
+            try:
+                self._reconcile_fleet(state, ts)
+            except Exception as e:
+                # Never let reconciliation errors break event processing.
+                print(f"  [Inara] fleet reconcile error: {e}")
+                self._reconciled = True  # don't retry indefinitely on a broken state
+
         match ev:
 
             case "LoadGame":
                 credits = event.get("Credits")
                 if credits is not None and credits >= 0:
-                    self._push(ts, "setCommanderCredits", {
-                        "commanderCredits": int(credits),
-                    })
+                    self._last_credits = int(credits)
+                    payload: dict = {"commanderCredits": int(credits)}
+                    # Bundle commanderAssets via carry-forward when we have
+                    # a Statistics anchor.  Without bundling, Inara falls
+                    # back to its internal rollup (no carrier), creating
+                    # the 5.7B fallback entries we don't want.
+                    wealth = self._wealth_for_credits(int(credits))
+                    if wealth is not None:
+                        payload["commanderAssets"] = int(wealth)
+                    self._push(ts, "setCommanderCredits", payload)
                 # Flush current rank snapshot
                 if self._rank_values:
                     self._push_ranks(ts)
@@ -369,16 +429,25 @@ class InaraPlugin(BasePlugin):
                     if journal_key in event:
                         self._rank_progress[inara_key] = event[journal_key] / 100.0
 
+            # Total wealth snapshot.  Bank_Account.Current_Wealth is FDev's
+            # canonical all-up wealth and matches what Inara's journal-import
+            # path attaches to entries imported directly.  Push it unmodified
+            # as commanderAssets, then cache the snapshot (wealth + credits at
+            # this moment) so subsequent commanderCredits pushes can carry
+            # forward via _wealth_for_credits.
             case "Statistics":
-                # Bank_Account.Current_Wealth is total wealth (liquid + ship/module
-                # values + carrier balance), NOT liquid credits.  Report it only as
-                # commanderAssets.  Liquid commanderCredits come from LoadGame.Credits
-                # or a post-CAPI-poll update (assets_balance), never from Statistics.
                 bank   = event.get("Bank_Account", {})
-                assets = bank.get("Assets_Total") or bank.get("Current_Wealth")
-                if assets is not None and assets >= 0:
+                wealth = bank.get("Current_Wealth")
+                if wealth is not None and wealth >= 0:
                     self._push(ts, "setCommanderCredits",
-                               {"commanderAssets": int(assets)})
+                               {"commanderAssets": int(wealth)})
+                    self._last_wealth = int(wealth)
+                    # Anchor the carry-forward computation on the credit
+                    # balance current at this moment.  Statistics doesn't
+                    # carry credits itself; use the most recently observed
+                    # value (typically a LoadGame from seconds earlier).
+                    if self._last_credits is not None:
+                        self._last_wealth_credits = self._last_credits
 
             case "Reputation":
                 # Post major faction reputations
@@ -557,7 +626,7 @@ class InaraPlugin(BasePlugin):
                     if fuel_cap  is not None: ship_data["fuelCapacity"]     = round(float(fuel_cap), 2)
                     if cargo_cap is not None: ship_data["cargoCapacity"]    = int(cargo_cap)
                     if max_jump  is not None: ship_data["maxJumpRange"]     = round(float(max_jump), 2)
-                    self._push(ts, "setCommanderShip", ship_data)
+                    self._push_ship(ts, ship_data)
 
                 # Full loadout — use Inara camelCase field names (not journal PascalCase)
                 modules = event.get("Modules", [])
@@ -672,6 +741,14 @@ class InaraPlugin(BasePlugin):
                     if ship_id is not None:
                         d["shipGameID"] = int(ship_id)
                     self._push(ts, "setCommanderShipDestroyed", d)
+                # Mirror the deletion in our seen set so reconcile won't
+                # ever try to re-emit destroy for an already-sold ship.
+                if ship_id is not None:
+                    try:
+                        self._seen_ship_ids.discard(int(ship_id))
+                        self._save_seen()
+                    except (TypeError, ValueError):
+                        pass
 
             case "StoredShips":
                 def _push_stored(ship, in_garage: bool) -> None:
@@ -687,6 +764,12 @@ class InaraPlugin(BasePlugin):
                     if sident: d["shipIdent"] = sident
                     val = ship.get("Value")
                     if val is not None: d["shipHullValue"] = int(val)
+                    # Change 2: StoredShips carries hull only — augment with
+                    # CAPI's modules value so Inara doesn't keep an inflated
+                    # stale figure from a pre-strip Loadout.
+                    capi_mods = self._capi_modules_value(state, sid)
+                    if capi_mods is not None:
+                        d["shipModulesValue"] = capi_mods
                     hot = ship.get("Hot")
                     if hot is not None: d["shipIsHot"] = bool(hot)
                     if in_garage:
@@ -696,7 +779,7 @@ class InaraPlugin(BasePlugin):
                         if sta: d["shipStation"]    = sta
                         in_t = ship.get("InTransit")
                         if in_t is not None: d["shipInTransit"] = bool(in_t)
-                    self._push(ts, "setCommanderShip", d)
+                    self._push_ship(ts, d)
                 for ship in event.get("ShipsHere", []):
                     _push_stored(ship, False)
                 for ship in event.get("ShipsRemote", []):
@@ -717,7 +800,7 @@ class InaraPlugin(BasePlugin):
                     ident = event.get("UserShipId")
                     if name:  d["shipName"]  = name
                     if ident: d["shipIdent"] = ident
-                    self._push(ts, "setCommanderShip", d)
+                    self._push_ship(ts, d)
 
             case "Died":
                 killer_ship = event.get("KillerShip", "")
@@ -840,10 +923,20 @@ class InaraPlugin(BasePlugin):
         """Push an authoritative liquid credit balance to Inara.
         Called by the CAPI plugin after a successful /profile poll.
         Uses current time as the event timestamp.
+
+        Bundles commanderAssets via carry-forward when a Statistics anchor
+        exists, so this push doesn't create the 5.7B fallback entries that
+        Inara generates when given commanderCredits without an accompanying
+        commanderAssets value.
         """
         import time
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        self._push(ts, "setCommanderCredits", {"commanderCredits": int(credits)})
+        self._last_credits = int(credits)
+        payload: dict = {"commanderCredits": int(credits)}
+        wealth = self._wealth_for_credits(int(credits))
+        if wealth is not None:
+            payload["commanderAssets"] = int(wealth)
+        self._push(ts, "setCommanderCredits", payload)
 
     def _push(self, timestamp: str, event_name: str, event_data) -> None:
         """Enqueue a single Inara API event."""
@@ -866,3 +959,275 @@ class InaraPlugin(BasePlugin):
                 entry["rankProgress"] = round(progress, 4)
             ranks.append(entry)
         self._push(timestamp, "setCommanderRankPilot", ranks)
+
+    # ── Fleet reconciliation (Changes 3+4) ────────────────────────────────────
+
+    def _push_ship(self, ts: str, ship_data: dict) -> None:
+        """setCommanderShip wrapper that records the ship ID for reconciliation.
+
+        Every code path that sends setCommanderShip should go through this so
+        we have a complete record of ships Inara has been told about.  The
+        record persists across runs in data.json.
+        """
+        self._push(ts, "setCommanderShip", ship_data)
+        sid = ship_data.get("shipGameID")
+        if sid is None:
+            return
+        try:
+            sid_int = int(sid)
+        except (TypeError, ValueError):
+            return
+        if sid_int in self._seen_ship_ids:
+            return
+        self._seen_ship_ids.add(sid_int)
+        self._save_seen()
+
+    def _save_seen(self) -> None:
+        """Persist _seen_ship_ids to data.json.  Best-effort."""
+        try:
+            self.storage.write_json(
+                {"seen_ship_ids": sorted(self._seen_ship_ids)},
+                "data.json",
+            )
+        except Exception:
+            pass
+
+    def _reconcile_fleet(self, state, ts: str) -> None:
+        """One-shot fleet reconciliation against the authoritative CAPI roster.
+
+        Runs once per process, on the first event after a successful CAPI
+        /profile poll has populated state.capi_raw["profile"].  Three effects:
+
+          1. Ships in _seen_ship_ids that are no longer in CAPI get a
+             setCommanderShipDestroyed — these are sells/transfers we missed
+             while EDLD was offline (or, on first run, will be empty).
+          2. Every ship currently in CAPI is re-emitted via setCommanderShip
+             with hull + modules values from CAPI, so stored ships' values
+             in Inara match reality even if their last journal Loadout is
+             ancient.
+          3. Every ship currently in CAPI also gets a setCommanderShipLoadout
+             built from CAPI's per-ship modules dict — gives Inara correct
+             per-module engineering data for stored ships, which otherwise
+             only get loadout uploads when swapped to in-game.
+
+        Skipped while state.in_preload is True so historical bootstrap doesn't
+        trigger a flush.
+        """
+        if self._reconciled:
+            return
+        if not self._enabled or self._sender is None:
+            return
+        if getattr(state, "in_preload", False):
+            return
+
+        capi_profile = (getattr(state, "capi_raw", {}) or {}).get("profile") or {}
+        capi_ships   = capi_profile.get("ships") or {}
+        if not capi_ships:
+            return  # CAPI not yet populated — try again next event
+
+        # Build the set of ShipIDs CAPI considers currently owned.
+        capi_ids: set[int] = set()
+        for sid_key in capi_ships.keys():
+            try:
+                capi_ids.add(int(sid_key))
+            except (TypeError, ValueError):
+                continue
+
+        # 1) Phantom cleanup — ships we've reported to Inara that no longer exist.
+        stale = self._seen_ship_ids - capi_ids
+        for sid in sorted(stale):
+            self._push(ts, "setCommanderShipDestroyed", {"shipGameID": int(sid)})
+            self._seen_ship_ids.discard(sid)
+
+        # 2) Refresh values for every currently-owned ship.
+        current_ship_id = (capi_profile.get("ship") or {}).get("id")
+        try:
+            current_ship_id = int(current_ship_id) if current_ship_id is not None else None
+        except (TypeError, ValueError):
+            current_ship_id = None
+
+        for sid_key, ship in capi_ships.items():
+            try:
+                sid = int(sid_key)
+            except (TypeError, ValueError):
+                continue
+            stype = (ship.get("name") or "").lower()
+            if not stype:
+                continue
+            d: dict = {
+                "shipType":      stype,
+                "shipGameID":    sid,
+                "isCurrentShip": (sid == current_ship_id),
+                "shipInGarage":  (sid != current_ship_id),
+            }
+            if ship.get("shipName"):
+                d["shipName"]  = ship["shipName"]
+            if ship.get("shipID"):  # alphanumeric ident, e.g. "URS-10"
+                d["shipIdent"] = ship["shipID"]
+
+            val = ship.get("value") or {}
+            hull_val = val.get("hull")
+            mod_val  = val.get("modules")
+            # Only set values when CAPI has meaningful data.  CAPI sometimes
+            # reports 0 for stored ships; sending 0 would clobber a good
+            # value from a prior journal Loadout.
+            if isinstance(hull_val, (int, float)) and hull_val > 0:
+                d["shipHullValue"] = int(hull_val)
+            if isinstance(mod_val, (int, float)) and mod_val > 0:
+                d["shipModulesValue"] = int(mod_val)
+
+            # Location for stored ships, when CAPI has it.
+            if sid != current_ship_id:
+                ss = ship.get("starsystem") or {}
+                if isinstance(ss, dict) and ss.get("name"):
+                    d["shipStarSystem"] = ss["name"]
+                st = ship.get("station") or {}
+                if isinstance(st, dict) and st.get("name"):
+                    d["shipStation"] = st["name"]
+
+            self._push_ship(ts, d)
+
+            # Change 5: emit setCommanderShipLoadout from CAPI per-ship modules.
+            # The active ship's loadout is already kept fresh by the journal
+            # Loadout handler — but stored ships only get loadout uploads here
+            # (or never, before this change).  CAPI's ships[<id>].modules dict
+            # carries the same data as a journal Loadout, just with different
+            # key casing; _capi_loadout_for_ship translates.
+            loadout = self._capi_loadout_for_ship(ship, stype, sid)
+            if loadout is not None:
+                self._push(ts, "setCommanderShipLoadout", loadout)
+
+        # Make sure every current ship is in the seen set, even ones we
+        # may not have touched (defensive).
+        self._seen_ship_ids |= capi_ids
+        self._save_seen()
+        self._reconciled = True
+
+    def _capi_loadout_for_ship(self, ship: dict, ship_type: str,
+                               ship_id: int | None) -> dict | None:
+        """Translate a CAPI per-ship loadout dict into Inara's
+        setCommanderShipLoadout payload.  Returns None when CAPI doesn't
+        carry usable module data for this ship.
+
+        CAPI schema (per ship):
+            modules: { "<slotName>": {
+                name, on, priority, value, health, hot,
+                engineering: { BlueprintName, Level, Quality,
+                               ExperimentalEffect, Modifiers: [...] }
+            }, ... }
+
+        Inara setCommanderShipLoadout schema:
+            shipType, shipGameID, shipLoadout: [
+                { slotName, itemName, isOn, itemPriority, itemHealth,
+                  itemValue?, isHot?, engineering?: {
+                      blueprintName, blueprintLevel, blueprintQuality,
+                      experimentalEffect?, modifiers: [
+                          { name, value?, originalValue?, lessIsGood? }
+                      ]
+                  } }, ...
+            ]
+        """
+        if not ship_type:
+            return None
+        capi_modules = ship.get("modules") or {}
+        if not isinstance(capi_modules, dict) or not capi_modules:
+            return None
+
+        loadout_modules: list[dict] = []
+        for slot_name, mod in capi_modules.items():
+            if not isinstance(mod, dict):
+                continue
+            item = mod.get("name", "")
+            if not slot_name or not item:
+                continue
+            entry: dict = {
+                "slotName":     slot_name,
+                "itemName":     item,
+                "isOn":         bool(mod.get("on", True)),
+                "itemPriority": int(mod.get("priority", 0)),
+            }
+            # itemHealth: CAPI stores as 0–1000000 sometimes, 0–1 elsewhere.
+            # Mirror the assets plugin's defensive handling.
+            health = mod.get("health")
+            if isinstance(health, (int, float)):
+                hv = float(health)
+                if hv > 1.0:
+                    hv = hv / 1000000.0 if hv > 100 else hv / 100.0
+                entry["itemHealth"] = round(max(0.0, min(1.0, hv)), 4)
+            value = mod.get("value")
+            if isinstance(value, (int, float)) and value > 0:
+                entry["itemValue"] = int(value)
+            hot = mod.get("hot")
+            if hot is not None:
+                entry["isHot"] = bool(hot)
+
+            eng = mod.get("engineering")
+            if isinstance(eng, dict) and eng.get("BlueprintName"):
+                bp: dict = {
+                    "blueprintName":  eng["BlueprintName"],
+                    "blueprintLevel": int(eng.get("Level", 0)),
+                    "blueprintQuality": round(float(eng.get("Quality", 0)), 2),
+                }
+                if eng.get("ExperimentalEffect"):
+                    bp["experimentalEffect"] = eng["ExperimentalEffect"]
+                bp["modifiers"] = []
+                for m_in in (eng.get("Modifiers") or []):
+                    if not isinstance(m_in, dict):
+                        continue
+                    m_out: dict = {"name": m_in.get("Label", "")}
+                    # Preserve the same numeric/string discrimination the
+                    # journal Loadout handler uses, so Inara sees consistent
+                    # data regardless of which path emitted it.
+                    if "OriginalValue" in m_in:
+                        m_out["value"]         = m_in.get("Value")
+                        m_out["originalValue"] = m_in["OriginalValue"]
+                        m_out["lessIsGood"]    = int(m_in.get("LessIsGood", 0))
+                    elif "ValueStr" in m_in:
+                        m_out["value"] = m_in["ValueStr"]
+                    elif "Value" in m_in:
+                        m_out["value"] = m_in["Value"]
+                    bp["modifiers"].append(m_out)
+                entry["engineering"] = bp
+            loadout_modules.append(entry)
+
+        if not loadout_modules:
+            return None
+        out: dict = {"shipType": ship_type, "shipLoadout": loadout_modules}
+        if ship_id is not None:
+            out["shipGameID"] = int(ship_id)
+        return out
+
+    def _wealth_for_credits(self, current_credits: int) -> int | None:
+        """Carry-forward commanderAssets value for a given credits balance.
+
+        Replicates Inara's journal-import behavior: hold the non-credits
+        portion of the most recent Statistics.Bank_Account.Current_Wealth
+        constant, and adjust by the credit delta since that snapshot.
+
+        Returns None until we've seen at least one Statistics event AND have
+        a credits anchor for it — in that state the caller should push
+        commanderCredits without commanderAssets, accepting that Inara may
+        show a fallback rollup until the next Statistics arrives.
+        """
+        if self._last_wealth is None or self._last_wealth_credits is None:
+            return None
+        return self._last_wealth + (int(current_credits) - self._last_wealth_credits)
+
+    def _capi_modules_value(self, state, ship_id: int | None) -> int | None:
+        """Look up the CAPI-reported modules value for a given ship ID.
+
+        Used by the StoredShips handler (Change 2) — StoredShips events
+        carry only the hull value, so without this lookup Inara would keep
+        a stale shipModulesValue from before the ship was de-fitted.
+        Returns None when CAPI data is missing or zero.
+        """
+        if ship_id is None:
+            return None
+        capi_profile = (getattr(state, "capi_raw", {}) or {}).get("profile") or {}
+        capi_ships   = capi_profile.get("ships") or {}
+        ship         = capi_ships.get(str(ship_id)) or capi_ships.get(int(ship_id)) or {}
+        mod_val      = (ship.get("value") or {}).get("modules")
+        if isinstance(mod_val, (int, float)) and mod_val > 0:
+            return int(mod_val)
+        return None
+
