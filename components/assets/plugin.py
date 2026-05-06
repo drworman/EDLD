@@ -198,7 +198,7 @@ class AssetsPlugin(BasePlugin):
         """
         # ── Profile → current ship + stored fleet ─────────────────────────
         try:
-            profile_data = self.storage.read_sibling_json("capi", "capi_profile.json")
+            profile_data = self.storage.read_sibling_json("core", "capi_profile.json")
             if profile_data:
                 state = self.core.state
                 ship_raw  = profile_data.get("ship")  or {}
@@ -297,7 +297,7 @@ class AssetsPlugin(BasePlugin):
 
         # ── Fleet carrier ─────────────────────────────────────────────────
         try:
-            fc_data = self.storage.read_sibling_json("capi", "capi_fleetcarrier.json")
+            fc_data = self.storage.read_sibling_json("core", "capi_fleetcarrier.json")
             if fc_data:
                 from components.assets.plugin import AssetsPlugin as _AP
                 # Reuse the existing carrier parser
@@ -433,7 +433,7 @@ class AssetsPlugin(BasePlugin):
             _capi_profile_data: dict = {}
             if not capi_ships_raw:
                 try:
-                    _capi_profile_data = self.storage.read_sibling_json("capi", "capi_profile.json")
+                    _capi_profile_data = self.storage.read_sibling_json("core", "capi_profile.json")
                     capi_ships_raw = (_capi_profile_data.get("ships") or {})
                 except Exception:
                     pass
@@ -450,7 +450,7 @@ class AssetsPlugin(BasePlugin):
             # and would be dropped from the roster.
             if not _capi_profile_data:
                 try:
-                    _capi_profile_data = self.storage.read_sibling_json("capi", "capi_profile.json")
+                    _capi_profile_data = self.storage.read_sibling_json("core", "capi_profile.json")
                 except Exception:
                     pass
             _capi_current_sid = (_capi_profile_data.get("ship") or {}).get("id")
@@ -1218,7 +1218,7 @@ class AssetsPlugin(BasePlugin):
                     # does not reappear on the next restart before a fresh
                     # CAPI poll overwrites the file.
                     try:
-                        profile = self.storage.read_sibling_json("capi", "capi_profile.json")
+                        profile = self.storage.read_sibling_json("core", "capi_profile.json")
                         if profile:
                             ships = profile.get("ships") or {}
                             for key in list(ships.keys()):
@@ -1229,7 +1229,7 @@ class AssetsPlugin(BasePlugin):
                                     if key in (str(sell_id), str(sell_id_i)):
                                         del ships[key]
                             profile["ships"] = ships
-                            self.storage.write_sibling_json("capi", "capi_profile.json", profile)
+                            self.storage.write_sibling_json("core", "capi_profile.json", profile)
                     except Exception:
                         pass
                     self._save_to_storage()
