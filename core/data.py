@@ -391,6 +391,11 @@ class CAPISource:
         self._last_refresh        = 0.0
         self._auth_result         = None
         self._thread: threading.Thread | None = None
+        # Re-auth notification one-shot.  Set True when we've alerted the
+        # user that the refresh token expired; cleared by a successful
+        # OAuth flow or an explicit user disconnect (so the next failure
+        # alerts again).  Frontier's refresh token has a ~30-day lifetime.
+        self._auth_alerted: bool = False
 
     def start(self) -> None:
         """Load saved tokens and start background poll thread."""
@@ -448,6 +453,10 @@ class CAPISource:
     def disconnect(self) -> None:
         self._tokens = {}
         self._save_tokens({})
+        # User-initiated disconnect — suppress any pending "re-auth needed"
+        # alert that would fire on the next refresh attempt; they already
+        # know.  The flag re-arms naturally on the next successful auth.
+        self._auth_alerted = True
 
     def manual_poll(self) -> None:
         self._enqueue(None, True)
@@ -520,11 +529,49 @@ class CAPISource:
             return True
         except urllib.error.HTTPError as e:
             if e.code in (400, 401):
+                # Frontier rejected the refresh token — typically because
+                # it's older than ~30 days.  Tokens are no longer usable;
+                # surface a re-auth-required alert and wipe state.
                 self._tokens = {}
                 self._save_tokens({})
+                self._notify_reauth_needed()
             return False
         except Exception:
             return False
+
+    def _notify_reauth_needed(self) -> None:
+        """Surface a one-shot alert that the user must re-run the OAuth flow.
+
+        Routes through the alerts plugin's push_external so the message
+        lands in the alerts pane (GUI/TUI), the terminal, the GUI log, and
+        Discord (with @-ping at loglevel 3 — the configured default).
+        Cleared by a successful authenticate() or an explicit disconnect()
+        so the next refresh failure alerts again.
+        """
+        if self._auth_alerted:
+            return
+        self._auth_alerted = True
+        try:
+            self._dp._plugin_call(
+                "alerts", "push_external",
+                "🔑",
+                "CAPI re-auth required",
+                loglevel="CapiAuthRequired",
+                msg_term=(
+                    "CAPI authentication required — refresh token expired "
+                    "(Frontier requires re-auth every ~30 days). "
+                    "Reconnect via the CAPI panel."
+                ),
+                msg_discord=(
+                    "🔑 **CAPI authentication required** — refresh token "
+                    "expired. Reconnect via the CAPI panel."
+                ),
+                sigil="^  CAPI",
+            )
+        except Exception as e:
+            # If alerts isn't loaded for some reason, fall back to a plain
+            # trace so the message at least makes it to the log file.
+            self._trace(f"re-auth notify failed: {e}")
 
     def _run_auth_flow(self) -> None:
         try:
@@ -577,6 +624,9 @@ class CAPISource:
                 "scope":         SCOPE,
             }
             self._save_tokens(self._tokens)
+            # Successful re-auth — arm the notification path for the next
+            # 30-day window.
+            self._auth_alerted = False
             self._finish_auth("ok")
             self.manual_poll()
         except Exception as exc:
