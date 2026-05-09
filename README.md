@@ -3,33 +3,34 @@
 <img src="images/edld_avatar_512.png" width="140" alt="EDLD"/>
 
 # ED Linux Dash
-### EDLD
-
-**Real-time session monitoring dashboard for Elite Dangerous**
-
-*Session tracking · Combat · Trade · Mining · Exploration · Missions · Exobiology · PowerPlay · Fleet assets · CAPI · Discord · Textual TUI · GTK4 GUI*
-
----
-
-by **CMDR CALURSUS**
+**Commander monitoring dashboard for Elite Dangerous**
 
 [![Elite Dangerous](https://img.shields.io/badge/Game-Elite%20Dangerous-orange?style=flat-square)](https://www.elitedangerous.com)
-
-[![Linux](https://img.shields.io/badge/Platform-Linux-FCC624?style=flat-square)]() [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square)](https://python.org) [![GTK4](https://img.shields.io/badge/GUI-GTK4-4A86CF?style=flat-square)](https://gtk.org) [![Textual](https://img.shields.io/badge/TUI-Textual-1D8348?style=flat-square)](https://github.com/Textualize/textual) [![Discord](https://img.shields.io/badge/Discord-Webhook%20Support-5865F2?style=flat-square)]()
+[![Linux](https://img.shields.io/badge/Platform-Linux-FCC624?style=flat-square)]()
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square)](https://python.org)
+[![GTK4](https://img.shields.io/badge/GUI-GTK4-4A86CF?style=flat-square)](https://gtk.org)
+[![Textual](https://img.shields.io/badge/TUI-Textual-1D8348?style=flat-square)](https://github.com/Textualize/textual)
+[![Discord](https://img.shields.io/badge/Discord-Webhook%20Support-5865F2?style=flat-square)]()
 
 [![GitHub release](https://img.shields.io/github/v/release/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/releases)
 [![GitHub stars](https://img.shields.io/github/stars/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/network/members)
-
 [![License](https://img.shields.io/github/license/drworman/EDLD?style=flat-square)](LICENSE)
+
+<ins>Career & real-time session tracking</ins></br>
+Combat · Trade · Mining · Exploration · Missions · Exobiology · PowerPlay · Assets, and more
+
+<ins>Integrations</ins></br>
+FDev CAPI · EDDN · EDSM · EDAstro · Inara · Raven Colonial · Discord Webhooks
+
+<ins>Multiple Interface Options</ins></br>
+Terminal scroll · Textual TUI · GTK4 GUI
 
 </div>
 
----
-
 ## Overview
 
-EDLD is a real-time session monitoring dashboard for Elite Dangerous on Linux. It tails your journal and presents a live dashboard — either a GTK4 window or a Textual terminal UI — alongside the game, tracking everything you do across combat, trade, mining, exploration, missions, exobiology, and PowerPlay.
+EDLD is a CMDR career and real-time session monitoring dashboard for Elite Dangerous on Linux. It tails your journal and presents a feed or live dashboard — either a GTK4 window or a Textual terminal UI — alongside the game, tracking everything you do across combat, trade, mining, exploration, missions, exobiology, and PowerPlay.
 
 Alerts fire when things go wrong: shields down, hull taking damage, fuel running low, fighter destroyed. Session statistics accumulate across all activity types in a tabbed panel that shows only what's relevant to your current session.
 
