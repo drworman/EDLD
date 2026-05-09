@@ -2,7 +2,7 @@
 gui/blocks/missions.py — Mission Stack block.
 
 Shows the full massacre stack analysis: per-faction kill counts, rewards,
-delta-to-max, stack height, and warnings. Data is sourced directly from
+stack height, and warnings. Data is sourced directly from
 state.mission_detail_map which is now persisted through restarts.
 
 Live session kill progress (kills_this_session per mission) is shown when
@@ -131,29 +131,23 @@ class MissionsBlock(BlockWidget):
         target_factions: set[str]        = set()
         target_types:    set[str]        = set()
         total_reward     = 0
-        total_wing       = 0
 
         for mid, info in detail.items():
             src      = info.get("faction", "Unknown")
             kc       = int(info.get("kill_count", 0))
             reward   = int(info.get("reward", 0))
-            is_wing  = bool(info.get("wing", False))
             tgt_f    = info.get("target_faction", "")
             tgt_t    = _strip_target_type(info.get("target_type", ""))
             sess_k   = int(info.get("kills_this_session", 0))
 
             if src not in factions:
-                factions[src] = {"kill_count": 0, "reward": 0, "wing_reward": 0,
+                factions[src] = {"kill_count": 0, "reward": 0,
                                  "session_kills": 0}
             factions[src]["kill_count"]    += kc
             factions[src]["reward"]        += reward
             factions[src]["session_kills"] += sess_k
-            if is_wing:
-                factions[src]["wing_reward"] += reward
 
             total_reward += reward
-            if is_wing:
-                total_wing += reward
             if tgt_f:
                 target_factions.add(tgt_f)
             if tgt_t:
@@ -161,7 +155,6 @@ class MissionsBlock(BlockWidget):
 
         heights      = sorted((v["kill_count"] for v in factions.values()), reverse=True)
         stack_height = heights[0] if heights else 0
-        second_h     = heights[1] if len(heights) > 1 else stack_height
         n_missions   = len(getattr(s, "active_missions", []))
         done         = getattr(s, "missions_complete", 0)
         remaining    = n_missions - done
@@ -210,29 +203,16 @@ class MissionsBlock(BlockWidget):
             info   = factions[faction]
             kc     = info["kill_count"]
             rew_f  = info["reward"]
-            wing_f = info["wing_reward"]
-
-            delta = stack_height - kc
-            if delta == 0:
-                delta_str = f"Δ{second_h - kc:+d}" if second_h != kc else "★ max"
-            else:
-                delta_str = f"Δ{-delta:+d}"
 
             rew_f_str = f"{rew_f/1_000_000:.1f}M"
-            if wing_f and wing_f != rew_f:
-                rew_f_str += f" ({wing_f/1_000_000:.1f}M wing)"
-
-            val_str  = f"{kc} kills"
+            val_str   = f"{kc} kills"
 
             row = self._append_grid_row(grid, row,
                                         f"  {faction}", val_str,
-                                        f"{rew_f_str}  {delta_str}")
+                                        rew_f_str)
 
         # Stack height — shows computed kill height | total credit value of stack.
-        # Wing missions noted in parentheses when present.
-        rew_str  = fmt_credits(total_reward) if total_reward else "—"
-        if total_wing:
-            rew_str += f" ({fmt_credits(total_wing)} wing)"
+        rew_str = fmt_credits(total_reward) if total_reward else "—"
         row = self._append_grid_row(grid, row,
                                     "Stack height",
                                     str(stack_height),

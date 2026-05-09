@@ -96,19 +96,7 @@ class MissionsBlock(TuiBlock):
 
         rows.append(Label("─" * 40, classes="sep"))
         # Stack height: kills | total credit value — matches GTK4 layout.
-        # Wing credits noted in parentheses when present.
-        total_wing = sum(
-            int(info.get("reward", 0))
-            for info in detail.values()
-            if info.get("wing")
-        )
-        if total_wing:
-            # Wing suffix can't fit inline; append to the credit string
-            rew_display = f"{_fmt_rew(total_reward)} ({_fmt_rew(total_wing)}w)"
-            rows.append(KVRow("[dim]Stack height[/dim]",
-                              f"{str(stack_height):>5}  [dim]|  {rew_display:>12}[/dim]"))
-        else:
-            rows.append(KVRow("[dim]Stack height[/dim]", _val(str(stack_height), total_reward)))
+        rows.append(KVRow("[dim]Stack height[/dim]", _val(str(stack_height), total_reward)))
 
         if len(target_factions) > 1:
             rows.append(Label(f"[yellow]⚠ Mixed targets: {', '.join(sorted(target_factions))}[/yellow]"))
