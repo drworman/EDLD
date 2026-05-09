@@ -13,11 +13,15 @@
 
 by **CMDR CALURSUS**
 
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Platform](https://img.shields.io/badge/Platform-Linux-informational?style=flat-square)]()
-[![TUI](https://img.shields.io/badge/TUI-Textual-1D8348?style=flat-square&logo=python&logoColor=white)](https://github.com/Textualize/textual)
-[![Discord](https://img.shields.io/badge/Discord-Webhook%20Support-5865F2?style=flat-square&logo=discord&logoColor=white)]()
-[![License](https://img.shields.io/badge/License-MIT-brightgreen?style=flat-square)]()
+[![Elite Dangerous](https://img.shields.io/badge/Game-Elite%20Dangerous-orange?style=flat-square)](https://www.elitedangerous.com)
+
+[![Linux](https://img.shields.io/badge/Platform-Linux-FCC624?style=flat-square)]() [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square)](https://python.org) [![GTK4](https://img.shields.io/badge/GUI-GTK4-4A86CF?style=flat-square)](https://gtk.org) [![Textual](https://img.shields.io/badge/TUI-Textual-1D8348?style=flat-square)](https://github.com/Textualize/textual) [![Discord](https://img.shields.io/badge/Discord-Webhook%20Support-5865F2?style=flat-square)]()
+
+[![GitHub release](https://img.shields.io/github/v/release/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/releases)
+[![GitHub stars](https://img.shields.io/github/stars/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/network/members)
+
+[![License](https://img.shields.io/github/license/drworman/EDLD?style=flat-square)](LICENSE)
 
 </div>
 
