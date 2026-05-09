@@ -20,7 +20,7 @@ from pathlib import Path
 
 PROGRAM = "ED Linux Dash"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
-AUTHOR  = "CMDR HUGH JASSOLE"
+AUTHOR  = "CMDR CALURSUS"
 VERSION = (Path(__file__).parent / "version").read_text().strip()
 GITHUB_REPO = "drworman/EDLD"
 DEBUG_MODE  = False

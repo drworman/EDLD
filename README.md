@@ -11,7 +11,7 @@
 
 ---
 
-by **CMDR HUGH JASSOLE**
+by **CMDR CALURSUS**
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Platform](https://img.shields.io/badge/Platform-Linux-informational?style=flat-square)]()
@@ -178,6 +178,6 @@ UserID = 123456789012345678
 
 <img src="images/edld_avatar_512.png" width="56" alt="EDLD"/>
 
-**ED Linux Dash** · by CMDR HUGH JASSOLE
+**ED Linux Dash** · by CMDR CALURSUS
 
 </div>

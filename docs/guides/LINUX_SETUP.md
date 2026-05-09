@@ -231,4 +231,4 @@ erring on the side of a longer wait.
 
 ---
 
-*Guide by CMDR HUGH JASSOLE · [EDLD](https://github.com/drworman/EDLD)*
+*Guide by CMDR CALURSUS · [EDLD](https://github.com/drworman/EDLD)*
