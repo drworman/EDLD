@@ -18,7 +18,8 @@ class CrewSlfPlugin(BasePlugin):
     PLUGIN_VERSION = "1.0.0"
 
     SUBSCRIBED_EVENTS = [
-        "CrewAssign", "NpcCrewPaidWage", "NpcCrewRank",
+        "CrewAssign", "CrewHire", "CrewFire",
+        "NpcCrewPaidWage", "NpcCrewRank",
         "LaunchFighter", "DockFighter", "FighterDestroyed",
         "FighterRebuilt", "FighterOrders", "RestockVehicle",
         "HullDamage", "Loadout", "ShipyardSwap",
@@ -36,6 +37,13 @@ class CrewSlfPlugin(BasePlugin):
         core.register_block(self, priority=15)
         s = core.state
         if not hasattr(s, "slf_ship_id"): s.slf_ship_id = None
+        # Per-crew-name combat-rank cache.  Populated by CrewHire and
+        # NpcCrewRank events so we can restore the right rank when the
+        # active crew changes (CrewAssign for someone we already know).
+        # Ephemeral — not persisted across restarts.  Bootstrap recovers
+        # the active crew's rank from journals on startup; for inactive
+        # crew we'll see an NpcCrewRank within minutes of activation.
+        if not hasattr(s, "crew_known_ranks"): s.crew_known_ranks = {}
 
 
     def _bootstrap_type_from_journals(self) -> None:
@@ -300,11 +308,52 @@ class CrewSlfPlugin(BasePlugin):
                         timestamp=logtime, loglevel=notify["HullEvent"],
                     )
 
+            case "CrewHire":
+                # Hiring a new NPC crew member.  Frontier supplies their
+                # CombatRank in this event; cache it so a later CrewAssign
+                # can pick the right rank up immediately, instead of leaving
+                # the previous crew member's rank visible.
+                name = event.get("Name")
+                rank = event.get("CombatRank")
+                if name and isinstance(rank, int):
+                    if not hasattr(state, "crew_known_ranks"):
+                        state.crew_known_ranks = {}
+                    state.crew_known_ranks[name] = rank
+                    # Edge case: re-hiring while already active.  Refresh
+                    # the live rank too so the display doesn't go stale.
+                    if state.crew_name == name:
+                        state.crew_rank = rank
+                        if gq: gq.put(("crew_update", None))
+
+            case "CrewFire":
+                # Firing an NPC.  Drop them from the rank cache, and if
+                # they were the active crew, clear active state so the
+                # display doesn't keep showing a fired pilot's name and
+                # rank between the fire and the next CrewAssign.
+                name = event.get("Name")
+                if name:
+                    if hasattr(state, "crew_known_ranks"):
+                        state.crew_known_ranks.pop(name, None)
+                    if state.crew_name == name:
+                        state.crew_name       = None
+                        state.crew_rank       = None
+                        state.crew_active     = False
+                        state.crew_total_paid = 0
+                        if gq: gq.put(("crew_update", None))
+
             case "CrewAssign":
                 name = event.get("Name")
                 if name:
                     if state.crew_name != name:
                         state.crew_total_paid = 0
+                        # Crew member changed.  Refresh rank from the
+                        # known-ranks cache (populated by CrewHire and
+                        # NpcCrewRank); fall back to None when we have no
+                        # cached value so the display doesn't carry the
+                        # outgoing crew member's rank forward.  The next
+                        # NpcCrewRank event for this crew will refine.
+                        cached = (getattr(state, "crew_known_ranks", {}) or {}).get(name)
+                        state.crew_rank = cached  # None when unknown
                     state.crew_name   = name
                     state.crew_active = True
                 if gq: gq.put(("crew_update", None))
@@ -324,8 +373,17 @@ class CrewSlfPlugin(BasePlugin):
 
             case "NpcCrewRank":
                 rank_name = event.get("NpcCrewName")
+                new_rank  = event.get("RankCombat")
+                # Always cache by name — even when the rank-up is for an
+                # inactive crew member, we want the value ready for the
+                # moment they're activated.
+                if rank_name and isinstance(new_rank, int):
+                    if not hasattr(state, "crew_known_ranks"):
+                        state.crew_known_ranks = {}
+                    state.crew_known_ranks[rank_name] = new_rank
                 if not state.crew_name and rank_name:
                     state.crew_name = rank_name
                 if rank_name and rank_name == state.crew_name:
-                    state.crew_rank = event.get("RankCombat", state.crew_rank)
+                    if isinstance(new_rank, int):
+                        state.crew_rank = new_rank
                 if gq: gq.put(("crew_update", None))
