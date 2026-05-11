@@ -101,6 +101,26 @@ class _Sender(threading.Thread):
         self._stop_evt  = threading.Event()
         self._last_send = 0.0
 
+        # ── Diagnostic counters (thread-safe via _stats_lock) ─────────────────
+        # Per-session accounting for what we sent and how EDSM responded.
+        # Inspect via EDSMPlugin.get_stats() — useful when "is my data
+        # reaching EDSM?" is the question and the answer needs to be more
+        # specific than "I think so".
+        self._stats: dict = {
+            "events_sent":     0,   # POSTed (counted before HTTP attempt)
+            "events_accepted": 0,   # msgnum 100 (OK)
+            "events_warned":   0,   # msgnum 101-199 (accepted with notice)
+            "events_rejected": 0,   # msgnum 200+ (per-event reject) or batch-level reject
+            "http_failures":   0,   # HTTPError / socket / parse failures
+            "by_event":        {},  # event_name -> {sent, accepted, warned, rejected}
+        }
+        self._stats_lock = threading.Lock()
+        # Last raw EDSM response — useful for ad-hoc debugging from a console.
+        self._last_response:    dict | None = None
+        self._last_response_ts: float | None = None
+        # Whether we've already printed the "first successful batch" confirmation.
+        self._first_ok_printed: bool = False
+
     def push(self, event: dict) -> None:
         self._q.put(event)
 
@@ -180,17 +200,167 @@ class _Sender(threading.Thread):
                 },
                 method="POST",
             )
+            # Count outbound before the request so we record traffic even on
+            # transport failures.  The accepted/warned/rejected breakdown
+            # adjusts after we read the response body.
+            self._record_sent(events)
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
                 self._last_send = time.monotonic()
+                body_raw = resp.read()
+                try:
+                    body = json.loads(body_raw.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    with self._stats_lock:
+                        self._stats["http_failures"] += 1
+                    print(
+                        f"  [EDSM] Unparseable response body "
+                        f"({type(e).__name__}: {e}); queuing {len(events)} to disk"
+                    )
+                    self._persist(events)
+                    return
+                self._last_response    = body
+                self._last_response_ts = time.time()
+                self._inspect_response(body, events)
                 if resp.status != 200:
+                    # Non-200 HTTP — persist regardless of body interpretation.
                     self._persist(events)
 
         except urllib.error.HTTPError as e:
+            with self._stats_lock:
+                self._stats["http_failures"] += 1
             print(f"  [EDSM] HTTP {e.code} — queuing {len(events)} event(s) to disk")
             self._persist(events)
         except Exception as exc:
+            with self._stats_lock:
+                self._stats["http_failures"] += 1
             print(f"  [EDSM] Send error ({type(exc).__name__}: {exc}) — queuing to disk")
             self._persist(events)
+
+    # ── Response inspection ───────────────────────────────────────────────────
+
+    def _record_sent(self, events: list[dict]) -> None:
+        """Bump per-event-type sent counters before HTTP attempt."""
+        type_counts: dict[str, int] = {}
+        for ev in events:
+            t = ev.get("event", "?")
+            type_counts[t] = type_counts.get(t, 0) + 1
+        with self._stats_lock:
+            self._stats["events_sent"] += len(events)
+            for t, n in type_counts.items():
+                bt = self._stats["by_event"].setdefault(
+                    t, {"sent": 0, "accepted": 0, "warned": 0, "rejected": 0}
+                )
+                bt["sent"] += n
+
+    def _inspect_response(self, body: dict, events: list[dict]) -> None:
+        """Parse EDSM's response body and surface per-event status.
+
+        EDSM /api-journal-v1 response shape:
+            {
+              "msgnum": int,        # 100 = OK; 1xx = info; 2xx = error
+              "msg":    str,
+              "events": [            # per-event responses, parallel to request
+                  {"msgnum": int, "msg": str},
+                  ...
+              ]
+            }
+
+        msgnum semantics:
+            100         OK, event accepted
+            101-199     Accepted with notice (e.g. duplicate, stale system)
+            201         Authentication failure (whole batch)
+            202         Permission denied
+            203         Disabled in user settings
+            204         Software version too old
+            300+        Server / processing errors
+        """
+        top_msgnum = body.get("msgnum")
+        top_msg    = body.get("msg", "")
+
+        # Top-level error → whole batch rejected
+        if isinstance(top_msgnum, int) and top_msgnum >= 200:
+            with self._stats_lock:
+                self._stats["events_rejected"] += len(events)
+                for ev in events:
+                    bt = self._stats["by_event"].setdefault(
+                        ev.get("event", "?"),
+                        {"sent": 0, "accepted": 0, "warned": 0, "rejected": 0},
+                    )
+                    bt["rejected"] += 1
+            # Auth-class errors deserve a bright banner.
+            if top_msgnum in (201, 202, 203, 204):
+                print(
+                    f"  [EDSM] *** BATCH REJECTED ({top_msgnum}): {top_msg} ***  "
+                    f"Check CommanderName and ApiKey in config."
+                )
+            else:
+                print(f"  [EDSM] Batch rejected ({top_msgnum}): {top_msg}")
+            return
+
+        # First successful batch — print a one-time confirmation so the user
+        # knows the upload pipeline is actually flowing.
+        if not self._first_ok_printed:
+            self._first_ok_printed = True
+            print(
+                f"  [EDSM] First batch OK — uploaded {len(events)} event(s); "
+                f"response: msgnum={top_msgnum} {top_msg}"
+            )
+
+        # Per-event status array — index matches request order
+        per_event = body.get("events") or []
+        if not isinstance(per_event, list):
+            # Top-level OK with no per-event detail → assume all accepted
+            with self._stats_lock:
+                self._stats["events_accepted"] += len(events)
+                for ev in events:
+                    bt = self._stats["by_event"].setdefault(
+                        ev.get("event", "?"),
+                        {"sent": 0, "accepted": 0, "warned": 0, "rejected": 0},
+                    )
+                    bt["accepted"] += len(events)
+            return
+
+        for i, ev_resp in enumerate(per_event):
+            if not isinstance(ev_resp, dict):
+                continue
+            msgnum  = ev_resp.get("msgnum")
+            msg     = ev_resp.get("msg", "")
+            ev_name = events[i].get("event", "?") if i < len(events) else "?"
+
+            with self._stats_lock:
+                bt = self._stats["by_event"].setdefault(
+                    ev_name, {"sent": 0, "accepted": 0, "warned": 0, "rejected": 0}
+                )
+                if not isinstance(msgnum, int):
+                    self._stats["events_accepted"] += 1
+                    bt["accepted"] += 1
+                elif msgnum == 100:
+                    self._stats["events_accepted"] += 1
+                    bt["accepted"] += 1
+                elif msgnum < 200:
+                    self._stats["events_warned"] += 1
+                    bt["warned"] += 1
+                    # Print notice-level responses so the user sees why
+                    # something they expected didn't quite "take".
+                    print(f"  [EDSM] {ev_name} notice ({msgnum}): {msg}")
+                else:
+                    self._stats["events_rejected"] += 1
+                    bt["rejected"] += 1
+                    print(f"  [EDSM] {ev_name} REJECTED ({msgnum}): {msg}")
+
+    def get_stats(self) -> dict:
+        """Thread-safe snapshot of upload statistics."""
+        with self._stats_lock:
+            return {
+                "events_sent":     self._stats["events_sent"],
+                "events_accepted": self._stats["events_accepted"],
+                "events_warned":   self._stats["events_warned"],
+                "events_rejected": self._stats["events_rejected"],
+                "http_failures":   self._stats["http_failures"],
+                "by_event":        {k: dict(v) for k, v in self._stats["by_event"].items()},
+                "last_response_at": self._last_response_ts,
+                "last_response":   self._last_response,
+            }
 
     # ── Disk persistence ──────────────────────────────────────────────────────
 
@@ -311,8 +481,64 @@ class EDSMPlugin(BasePlugin):
 
     def on_unload(self) -> None:
         if self._sender:
+            # Print a closing summary so the user sees what happened over
+            # the session even if no errors fired.
+            try:
+                stats = self._sender.get_stats()
+                self._print_stats_summary(stats, label="Final")
+            except Exception:
+                pass
             self._sender.stop()
             self._sender.join(timeout=5)
+
+    def get_stats(self) -> dict:
+        """Public diagnostic snapshot of upload activity.
+
+        Returns a dict with:
+            events_sent / events_accepted / events_warned / events_rejected
+            http_failures
+            by_event: {event_name: {sent, accepted, warned, rejected}}
+            last_response: last JSON response body received from EDSM
+            last_response_at: unix timestamp of that response
+
+        Callable via core.plugin_call("edsm", "get_stats").  Returns an
+        empty dict if the plugin is disabled or the sender hasn't started.
+        """
+        if self._sender is None:
+            return {}
+        return self._sender.get_stats()
+
+    def print_stats(self) -> None:
+        """Print the current stats summary to stdout — handy from a REPL."""
+        if self._sender is None:
+            print("  [EDSM] Disabled — no stats available")
+            return
+        self._print_stats_summary(self._sender.get_stats(), label="Current")
+
+    @staticmethod
+    def _print_stats_summary(stats: dict, label: str = "Current") -> None:
+        print(
+            f"  [EDSM] {label} stats: "
+            f"{stats['events_sent']} sent, "
+            f"{stats['events_accepted']} accepted, "
+            f"{stats['events_warned']} warned, "
+            f"{stats['events_rejected']} rejected, "
+            f"{stats['http_failures']} HTTP failure(s)"
+        )
+        by_event = stats.get("by_event") or {}
+        # Show event types that have anything other than a clean accept,
+        # plus the busiest accepted ones, for orientation.
+        problems = [
+            (n, d) for n, d in by_event.items()
+            if d.get("warned") or d.get("rejected")
+        ]
+        if problems:
+            print("  [EDSM]   Per-event issues:")
+            for name, d in sorted(problems, key=lambda x: -(x[1].get("rejected", 0) + x[1].get("warned", 0))):
+                print(
+                    f"  [EDSM]     {name:<28} sent={d['sent']:>4}  "
+                    f"accepted={d['accepted']:>4}  warned={d['warned']:>3}  rejected={d['rejected']:>3}"
+                )
 
     def on_event(self, event: dict, state) -> None:
         ev = event.get("event", "")
@@ -324,8 +550,10 @@ class EDSMPlugin(BasePlugin):
         if not self._enabled or self._sender is None:
             return
         if ev in _ALWAYS_SKIP:
+            self._note_filtered(ev, "always_skip")
             return
         if ev in self._discard_set:
+            self._note_filtered(ev, "edsm_discard_list")
             return
 
         # Beta / legacy guard — EDSM only accepts live-galaxy data.  Without
@@ -335,6 +563,7 @@ class EDSMPlugin(BasePlugin):
         # legacy/Horizons branch where EDSM no longer accepts new data.
         gv = (self._game_version or "").lower()
         if "beta" in gv or gv.startswith("3."):
+            self._note_filtered(ev, f"beta_guard(gameversion={gv!r})")
             return
 
         # Inject EDSM transient state fields from our own tracking
@@ -355,10 +584,22 @@ class EDSMPlugin(BasePlugin):
         enriched.pop("_logtime", None)
         self._sender.push(enriched)
 
+        # Trace mode: surface every event we're about to send, so the user
+        # can correlate journal activity with EDSM uploads in real time.
+        # Skipped during preload to avoid drowning the console at startup.
+        if getattr(self.core, "trace_mode", False) and not getattr(state, "in_preload", False):
+            print(f"  [EDSM trace] queued {ev}")
+
         # Flush batch on key session transitions
         if ev in ("FSDJump", "CarrierJump", "Docked", "Undocked",
                   "Location", "LoadGame"):
             self._sender.flush()
+
+    def _note_filtered(self, ev: str, reason: str) -> None:
+        """Surface filter decisions when trace mode is on — answers
+        'why didn't EDSM see my X event' without re-running the journal."""
+        if getattr(self.core, "trace_mode", False):
+            print(f"  [EDSM trace] filtered {ev}  ({reason})")
 
     def _update_tracking(self, ev: str, event: dict) -> None:
         """Maintain internal location/session state from raw journal events."""
