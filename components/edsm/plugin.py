@@ -3,18 +3,35 @@ components/edsm/plugin.py — EDSM journal uploader for EDLD.
 
 Uploads journal events to the EDSM API (https://www.edsm.net/api-journal-v1).
 
+Subscription model — "send everything EDSM accepts":
+  The plugin subscribes with the wildcard "*" and receives every journal
+  event the dispatcher sees.  Filtering is then driven by:
+    1. _ALWAYS_SKIP    — meta-events with no semantic content (Fileheader,
+                         continued, Shutdown/ShutDown).
+    2. EDSM's published discard list, fetched at startup from
+       /api-journal-v1/discard.  EDSM tells us exactly which event names
+       it does not want; everything else is fair game.
+    3. Beta-build guard — beta/legacy game versions never POST to live EDSM.
+
+  This means new journal events introduced by future game updates flow to
+  EDSM automatically without code changes, until EDSM chooses to discard
+  them.  Flight logs, mission history, suit/weapon/engineer activity,
+  carrier ops, squadron events, NavRoute, Friends, Wing, Interdiction,
+  Resurrect, EngineerCraft and everything else FDev emits are now covered.
+
 Config [EDSM]:
     Enabled        = false          # opt-in
     CommanderName  = ""             # your EDSM commander name
     ApiKey         = ""             # your EDSM API key (from EDSM settings)
 
 EDSM notes:
-  - Live galaxy only; beta/legacy data is suppressed.
+  - Live galaxy only; beta/legacy data is suppressed via the in-plugin
+    beta-guard, not just by EDSM's server-side rejection.
   - Rate limit: ~1 request per 10 s (360/hr).  We batch events and flush
     on session transitions to stay well within this.
-  - A discard list is fetched at startup; events EDSM doesn't want are dropped.
-  - Transient state fields (_systemAddress, _systemName, etc.) are injected
-    into each event so EDSM can link entries to the galaxy map.
+  - Transient state fields (_systemAddress, _systemName, _systemCoordinates,
+    _marketId, _stationName, _shipId) are injected into each event so EDSM
+    can link entries to the galaxy map and to your ship/station context.
 """
 
 import gzip
@@ -43,7 +60,8 @@ STARTUP_DELAY_S    = 10      # seconds after load before we begin uploading
 def _queue_file() -> Path:
     return cmdr_data_dir() / "edsm_queue.jsonl"
 
-# Events that are always suppressed regardless of discard list
+# Events that are always suppressed regardless of discard list — these
+# are meta-frames or shutdown markers that EDSM cannot meaningfully use.
 _ALWAYS_SKIP = frozenset({
     "Fileheader",
     "continued",
@@ -51,44 +69,10 @@ _ALWAYS_SKIP = frozenset({
     "ShutDown",
 })
 
-# Events we subscribe to — broad set; discard list prunes at runtime
-SUBSCRIBED_EVENTS = [
-    "LoadGame", "Commander", "NewCommander", "ClearSavedGame",
-    "Location", "FSDJump", "CarrierJump", "Docked", "Undocked",
-    "SupercruiseEntry", "SupercruiseExit", "ApproachSettlement",
-    "Scan", "SAAScanComplete", "SAASignalsFound", "FSSBodySignals",
-    "FSSDiscoveryScan", "FSSSignalDiscovered", "NavBeaconScan",
-    "BuyExplorationData", "SellExplorationData",
-    "MarketBuy", "MarketSell", "BuyAmmo", "BuyDrones",
-    "SellDrones", "RefuelAll", "RefuelPartial", "Repair",
-    "RepairAll", "RebootRestore", "RestockVehicle", "FetchRemoteModule",
-    "Missions", "MissionAccepted", "MissionCompleted", "MissionFailed",
-    "MissionAbandoned", "MissionRedirected",
-    "Bounty", "RedeemVoucher", "CrimeVictim", "Died",
-    "Rank", "Progress", "Reputation", "Statistics", "Promotion",
-    "Powerplay", "PowerplaySalary", "PowerplayDefect", "PowerplayJoin",
-    "PowerplayLeave", "PowerplayVote", "PowerplayCollect",
-    "EngineerProgress", "MaterialCollected", "MaterialDiscarded",
-    "MaterialTrade", "MiningRefined", "ProspectedAsteroid",
-    "Synthesis", "TechnologyBroker",
-    "ShipyardBuy", "ShipyardSell", "ShipyardSwap", "ShipyardTransfer",
-    "ModuleBuy", "ModuleSell", "ModuleSellRemote", "ModuleStore",
-    "ModuleRetrieve", "ModuleSwap",
-    "Loadout", "SetUserShipName",
-    "StoredModules", "StoredShips",
-    "CargoDepot", "CollectCargo", "EjectCargo", "SellMicroResources",
-    "CrewHire", "CrewAssign", "CrewFire", "NpcCrewRank",
-    "FactionKillBond", "CommitCrime", "PayFines", "PayLegacyFines",
-    "PayBounties",
-    "CommunityGoal", "CommunityGoalJoin", "CommunityGoalReward",
-    "USSDrop", "Screenshot",
-    "Touchdown", "Liftoff", "EmbarkDismembark",
-    "CodexEntry",
-    "ScanOrganic", "SellOrganicData",
-    "SRVHandbrake",  # included so discard list can prune it
-    "Music",
-    "ReceiveText", "SendText",
-]
+# Wildcard subscription: receive every event the dispatcher sees.  Filtering
+# is done at runtime via _ALWAYS_SKIP + EDSM's published discard list + the
+# beta guard.  See the file docstring for rationale.
+SUBSCRIBED_EVENTS = ["*"]
 
 CFG_DEFAULTS = {
     "Enabled":       False,
@@ -342,6 +326,15 @@ class EDSMPlugin(BasePlugin):
         if ev in _ALWAYS_SKIP:
             return
         if ev in self._discard_set:
+            return
+
+        # Beta / legacy guard — EDSM only accepts live-galaxy data.  Without
+        # this, EDSM would reject the batch HTTP-side and we'd waste a slot
+        # in our rate budget plus persist a doomed retry to disk.  "beta" in
+        # gameversion catches all FDev beta phases; "3." catches the 3.x
+        # legacy/Horizons branch where EDSM no longer accepts new data.
+        gv = (self._game_version or "").lower()
+        if "beta" in gv or gv.startswith("3."):
             return
 
         # Inject EDSM transient state fields from our own tracking

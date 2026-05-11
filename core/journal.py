@@ -580,6 +580,12 @@ def build_dispatch_map(plugins: list) -> dict:
 
     Called once after PluginLoader.load_all() completes.  The resulting dict
     is passed into monitor_journal / run_monitor as plugin_dispatch.
+
+    Wildcard subscriptions: a plugin may include the sentinel ``"*"`` in its
+    SUBSCRIBED_EVENTS list to receive every journal event.  Wildcard
+    subscribers are stored under the literal ``"*"`` key and dispatched
+    after name-specific subscribers, with deduplication so a plugin
+    declaring both "*" and a specific event name only fires once.
     """
     dispatch: dict = {}
     for plugin in plugins:
@@ -622,14 +628,33 @@ def handle_event(
         logtime = datetime.fromisoformat(j["timestamp"]) if "timestamp" in j else None
         j["_logtime"] = logtime
         state.event_time = logtime
-        for plugin in plugin_dispatch.get(ev_name, []):
-            try:
-                plugin.on_event(j, state)
-            except Exception as e:
-                print(
-                    f"{Terminal.WARN}Warning:{Terminal.END} "
-                    f"Plugin {plugin.PLUGIN_NAME!r} error on {ev_name!r}: {e}"
-                )
+        # Name-specific subscribers fire first.  Wildcard subscribers (key "*")
+        # fire after, with dedupe so plugins declaring both "*" and a specific
+        # name only see the event once.  Empty event names get no dispatch.
+        fired_ids: set = set()
+        if ev_name:
+            for plugin in plugin_dispatch.get(ev_name, []):
+                if id(plugin) in fired_ids:
+                    continue
+                fired_ids.add(id(plugin))
+                try:
+                    plugin.on_event(j, state)
+                except Exception as e:
+                    print(
+                        f"{Terminal.WARN}Warning:{Terminal.END} "
+                        f"Plugin {plugin.PLUGIN_NAME!r} error on {ev_name!r}: {e}"
+                    )
+            for plugin in plugin_dispatch.get("*", []):
+                if id(plugin) in fired_ids:
+                    continue
+                fired_ids.add(id(plugin))
+                try:
+                    plugin.on_event(j, state)
+                except Exception as e:
+                    print(
+                        f"{Terminal.WARN}Warning:{Terminal.END} "
+                        f"Plugin {plugin.PLUGIN_NAME!r} error on {ev_name!r}: {e}"
+                    )
         # Anchor the session clock on LoadGame so ALL activity types (not just
         # combat) get periodic summaries.  Only set on the first LoadGame seen —
         # subsequent ones (ship swap back from menu) preserve the existing anchor.
