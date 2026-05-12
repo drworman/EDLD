@@ -1061,15 +1061,34 @@ class CAPISource:
                 pass
 
     def _extract_shipyard(self, data: dict, state) -> None:
-        ships_raw  = data.get("ships") or {}
-        ships_list = []
+        # CAPI /shipyard returns one of two layouts depending on station kind:
+        #   A) data["ships"] = {"shiplist": {sid: ship_dict, ...},
+        #                       "unavailable_list": [...]}        ← stations
+        #   B) data["ships"] = {sid: ship_dict, ...}             ← carriers / some legacy
+        # The "unavailable_list" key under (A) is a list, so the previous
+        # implementation crashed on it with "'list' object has no attribute
+        # 'get'".  Normalize both shapes into a single ships dict, and
+        # defensively skip any entry whose value isn't itself a dict.
+        ships_raw = data.get("ships")
+        ships_map: dict = {}
         if isinstance(ships_raw, dict):
-            for sid, sv in ships_raw.items():
-                ships_list.append({
-                    "type":       sv.get("name",          ""),
-                    "name_local": sv.get("nameLocalized") or sv.get("name", ""),
-                    "price":      int(sv.get("basevalue", 0)),
-                })
+            inner = ships_raw.get("shiplist")
+            if isinstance(inner, dict):
+                # Layout A — drill down to shiplist
+                ships_map = inner
+            else:
+                # Layout B — ships_raw itself is the sid->ship dict.  Filter
+                # out any non-dict siblings (e.g. "unavailable_list").
+                ships_map = ships_raw
+        ships_list: list[dict] = []
+        for sid, sv in ships_map.items():
+            if not isinstance(sv, dict):
+                continue
+            ships_list.append({
+                "type":       sv.get("name",          ""),
+                "name_local": sv.get("nameLocalized") or sv.get("name", ""),
+                "price":      int(sv.get("basevalue", 0) or 0),
+            })
         state.capi_shipyard = {
             "station_name": data.get("name", ""),
             "market_id":    data.get("id",    0),

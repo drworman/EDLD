@@ -34,7 +34,6 @@ EDSM notes:
     can link entries to the galaxy map and to your ship/station context.
 """
 
-import gzip
 import json
 import queue
 import threading
@@ -92,7 +91,8 @@ class _Sender(threading.Thread):
     Call stop() for clean shutdown.
     """
 
-    def __init__(self, commander_name: str, api_key: str, queue_file) -> None:
+    def __init__(self, commander_name: str, api_key: str, queue_file,
+                 metadata_provider=None) -> None:
         super().__init__(daemon=True, name="edsm-sender")
         self._cmdr      = commander_name
         self._key       = api_key
@@ -100,6 +100,16 @@ class _Sender(threading.Thread):
         self._q:        queue.Queue = queue.Queue()
         self._stop_evt  = threading.Event()
         self._last_send = 0.0
+
+        # Optional callable: () -> dict of version metadata to merge into
+        # any drained event that lacks it.  Drained events from earlier bug
+        # eras (JSON-body, gzip, missing version metadata) have no
+        # gameversion/build, and EDSM 207-rejects the whole batch if any
+        # event is missing them.  When this callable is set and returns
+        # data with a gameversion, _drain_disk uses it to fix up old events
+        # before retry.  When unset or returns no gameversion, the disk
+        # queue is left intact for a later attempt.
+        self._metadata_provider = metadata_provider
 
         # ── Diagnostic counters (thread-safe via _stats_lock) ─────────────────
         # Per-session accounting for what we sent and how EDSM responded.
@@ -180,23 +190,79 @@ class _Sender(threading.Thread):
         if gap > 0:
             time.sleep(gap)
 
-        payload = {
-            "commanderName": self._cmdr,
-            "apiKey":        self._key,
-            "fromSoftware":  SOFTWARE_NAME,
+        # Pre-flight credential check.  If something cleared self._cmdr or
+        # self._key after construction (shouldn't happen, but defensive),
+        # don't send a body that EDSM will trivially reject — persist
+        # instead so the events can be re-driven later with valid creds.
+        if not self._cmdr or not self._key:
+            with self._stats_lock:
+                self._stats["http_failures"] += 1
+            print(
+                f"  [EDSM] Pre-flight failed — empty credentials at send time "
+                f"(cmdr={self._cmdr!r}, key=<{len(self._key)} chars>); "
+                f"persisting {len(events)} event(s) to disk."
+            )
+            self._persist(events)
+            return
+
+        # EDSM's /api-journal-v1 is an application/x-www-form-urlencoded
+        # endpoint — NOT a JSON-body endpoint.  The "message" form field
+        # carries the events as a JSON-encoded string (single event object
+        # or an array of event objects).  Sending the whole body as a JSON
+        # object causes EDSM to respond with msgnum 206 "Cannot decode JSON"
+        # because it looks for a form field named "message" and finds none.
+        #
+        # Also: EDSM does NOT honor Content-Encoding: gzip on this endpoint.
+        # If we gzip the body, EDSM treats the binary bytes as raw form data,
+        # finds no recognizable key=value pairs, and rejects with msgnum 201
+        # "Missing commander name".  EDMC (the canonical EDSM uploader) sends
+        # plain form data; we do the same.
+        # Resolve version metadata for both per-event injection (already
+        # done in EDSMPlugin.on_event) and the top-level form fields EDSM
+        # checks at the batch level.  Without fromGameVersion / fromGameBuild
+        # at the form-field level (alongside commanderName / apiKey /
+        # fromSoftware / fromSoftwareVersion / message), EDSM rejects the
+        # entire batch with msgnum 207 "Game/Build version not found"
+        # before it even examines the events.  EDMC sends these — we must too.
+        md: dict = {}
+        if self._metadata_provider:
+            try:
+                md = self._metadata_provider() or {}
+            except Exception as e:
+                print(f"  [EDSM] Metadata provider error: {e}")
+                md = {}
+
+        if not md.get("gameversion"):
+            # No Fileheader/LoadGame seen yet this session — EDSM will reject
+            # any batch we send without fromGameVersion.  Persist and bail.
+            with self._stats_lock:
+                self._stats["http_failures"] += 1
+            print(
+                f"  [EDSM] Pre-flight failed — version metadata not yet known "
+                f"(Fileheader/LoadGame missing); persisting {len(events)} "
+                f"event(s) to disk for later retry."
+            )
+            self._persist(events)
+            return
+
+        form = {
+            "commanderName":       self._cmdr,
+            "apiKey":              self._key,
+            "fromSoftware":        SOFTWARE_NAME,
             "fromSoftwareVersion": SOFTWARE_VERSION,
-            "message":       events,
+            "fromGameVersion":     md["gameversion"],
+            "fromGameBuild":       md.get("build", ""),
+            "message":             json.dumps(events, separators=(",", ":")),
         }
         try:
-            raw     = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-            encoded = gzip.compress(raw)
+            import urllib.parse as _up
+            body = _up.urlencode(form).encode("utf-8")
             req = urllib.request.Request(
                 EDSM_JOURNAL_URL,
-                data=encoded,
+                data=body,
                 headers={
-                    "Content-Type":     "application/json",
-                    "Content-Encoding": "gzip",
-                    "User-Agent":       f"{SOFTWARE_NAME}/{SOFTWARE_VERSION}",
+                    "Content-Type":   "application/x-www-form-urlencoded",
+                    "User-Agent":     f"{SOFTWARE_NAME}/{SOFTWARE_VERSION}",
                 },
                 method="POST",
             )
@@ -287,11 +353,21 @@ class _Sender(threading.Thread):
                         {"sent": 0, "accepted": 0, "warned": 0, "rejected": 0},
                     )
                     bt["rejected"] += 1
-            # Auth-class errors deserve a bright banner.
-            if top_msgnum in (201, 202, 203, 204):
+            # Auth-class errors deserve a bright banner.  Surface the exact
+            # request-level credentials and version metadata we sent (cmdr
+            # visible, key length only) so the user can compare against their
+            # config — the most common causes are profile mismatch (e.g. EDP2
+            # active but EDP1 creds in play) or missing version metadata.
+            if top_msgnum in (201, 202, 203, 204, 205, 206, 207, 208):
+                gv = self._metadata_provider() if self._metadata_provider else {}
                 print(
-                    f"  [EDSM] *** BATCH REJECTED ({top_msgnum}): {top_msg} ***  "
-                    f"Check CommanderName and ApiKey in config."
+                    f"  [EDSM] *** BATCH REJECTED ({top_msgnum}): {top_msg} ***\n"
+                    f"  [EDSM]     Sent commanderName={self._cmdr!r}  "
+                    f"apiKey=<{len(self._key)} chars>\n"
+                    f"  [EDSM]     Sent fromGameVersion={gv.get('gameversion')!r}  "
+                    f"fromGameBuild={gv.get('build')!r}\n"
+                    f"  [EDSM]     Verify the [EDSM] / [<Profile>].EDSM.* values in "
+                    f"config.toml match the account on https://www.edsm.net/en/settings/api"
                 )
             else:
                 print(f"  [EDSM] Batch rejected ({top_msgnum}): {top_msg}")
@@ -387,8 +463,6 @@ class _Sender(threading.Thread):
         if not lines:
             return
 
-        print(f"  [EDSM] Replaying {len(lines)} queued event(s) from disk...")
-
         events = []
         for line in lines:
             line = line.strip()
@@ -400,13 +474,56 @@ class _Sender(threading.Thread):
             except Exception:
                 pass
 
-        if events:
-            # Send in batches with pacing
-            for i in range(0, len(events), BATCH_MAX):
-                chunk = events[i:i + BATCH_MAX]
-                self._send_batch(chunk)
-                if i + BATCH_MAX < len(events):
-                    time.sleep(SEND_INTERVAL_S)
+        if not events:
+            try:
+                self._queue_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return
+
+        # Re-enrich events that lack version metadata.  Old queued events
+        # from previous bug eras don't have gameversion/build/etc., and
+        # EDSM 207-rejects any batch containing such an event.  If we have
+        # current session metadata, inject it (setdefault preserves existing
+        # values where the event already had them).  If we don't yet have
+        # metadata — Fileheader/LoadGame not seen this session — defer the
+        # drain entirely; queue.jsonl stays intact for the next attempt.
+        metadata: dict = {}
+        if self._metadata_provider:
+            try:
+                metadata = self._metadata_provider() or {}
+            except Exception as e:
+                print(f"  [EDSM] Metadata provider error: {e}")
+
+        needs_enrich = sum(1 for ev in events if "gameversion" not in ev)
+        if needs_enrich and not metadata.get("gameversion"):
+            print(
+                f"  [EDSM] Deferring queue drain — {needs_enrich} of "
+                f"{len(events)} queued event(s) lack version metadata and "
+                f"Fileheader/LoadGame have not been seen yet this session."
+            )
+            return  # leave queue.jsonl intact; retry next session
+
+        if needs_enrich and metadata:
+            for ev in events:
+                if "gameversion" not in ev:
+                    for k, v in metadata.items():
+                        if v is not None:
+                            ev.setdefault(k, v)
+            print(
+                f"  [EDSM] Re-enriched {needs_enrich} drained event(s) "
+                f"with current session metadata (gameversion="
+                f"{metadata.get('gameversion')!r})."
+            )
+
+        print(f"  [EDSM] Replaying {len(events)} queued event(s) from disk...")
+
+        # Send in batches with pacing
+        for i in range(0, len(events), BATCH_MAX):
+            chunk = events[i:i + BATCH_MAX]
+            self._send_batch(chunk)
+            if i + BATCH_MAX < len(events):
+                time.sleep(SEND_INTERVAL_S)
 
         try:
             self._queue_file.unlink(missing_ok=True)
@@ -441,6 +558,11 @@ class EDSMPlugin(BasePlugin):
         self._cmdr_name:      str        = ""
         self._game_version:   str        = ""
         self._game_build:     str        = ""
+        # Horizons / Odyssey flags — EDSM uses these to confirm an event
+        # belongs to the live galaxy.  None until we observe Fileheader or
+        # LoadGame; once set, injected into every outbound event.
+        self._horizons:       bool | None = None
+        self._odyssey:        bool | None = None
         self._system_name:    str | None = None
         self._system_address: int | None = None
         self._star_pos:       list | None = None   # [x, y, z]
@@ -455,15 +577,37 @@ class EDSMPlugin(BasePlugin):
             return
         if not cfg["Enabled"]:
             return
-        if not cfg["CommanderName"] or not cfg["ApiKey"]:
-            print(
-                "  [EDSM] Disabled — CommanderName and ApiKey must both be set in config.toml"
-            )
+
+        # Strip whitespace — TOML preserves leading/trailing spaces inside
+        # quoted strings, and a stray space in the config makes EDSM return
+        # 201 "Missing commander name" with no further hint.  Validate the
+        # stripped values to give a clear error when the config is malformed.
+        cmdr_raw = cfg["CommanderName"]
+        key_raw  = cfg["ApiKey"]
+        cmdr     = cmdr_raw.strip() if isinstance(cmdr_raw, str) else ""
+        key      = key_raw.strip()  if isinstance(key_raw,  str) else ""
+
+        if not cmdr or not key:
+            # Differentiate between "missing entirely" and "blanked by
+            # whitespace" so the user knows what to fix in config.toml.
+            problems = []
+            if not cmdr:
+                if cmdr_raw and isinstance(cmdr_raw, str):
+                    problems.append(f"CommanderName is whitespace-only ({cmdr_raw!r})")
+                else:
+                    problems.append("CommanderName is empty")
+            if not key:
+                if key_raw and isinstance(key_raw, str):
+                    problems.append(f"ApiKey is whitespace-only ({key_raw!r})")
+                else:
+                    problems.append("ApiKey is empty")
+            print(f"  [EDSM] Disabled — {'; '.join(problems)}.  "
+                  f"Check the [EDSM] section (or [<Profile>].EDSM.*) in config.toml.")
             return
 
         self._enabled = True
-        self._cmdr    = cfg["CommanderName"]
-        self._key     = cfg["ApiKey"]
+        self._cmdr    = cmdr
+        self._key     = key
 
         # Fetch discard list in a background thread so startup isn't delayed
         threading.Thread(
@@ -472,11 +616,20 @@ class EDSMPlugin(BasePlugin):
             name="edsm-discard",
         ).start()
 
-        self._sender = _Sender(self._cmdr, self._key, self.storage.path / "queue.jsonl")
+        self._sender = _Sender(
+            self._cmdr, self._key,
+            self.storage.path / "queue.jsonl",
+            metadata_provider=self._get_metadata_snapshot,
+        )
         self._sender.start()
 
+        # Show both fields conspicuously at startup.  Key is length-only so
+        # the user can verify they pasted the full ~40-char EDSM key without
+        # exposing it in logs.  CommanderName is shown in full — if 201
+        # fires later, this line is the first thing to check against.
         print(
-            f"  [EDSM] Enabled — uploading as CMDR {self._cmdr}"
+            f"  [EDSM] Enabled — CommanderName={self._cmdr!r}  "
+            f"ApiKey=<{len(self._key)} chars>"
         )
 
     def on_unload(self) -> None:
@@ -581,6 +734,24 @@ class EDSMPlugin(BasePlugin):
         if self._ship_id is not None:
             enriched.setdefault("_shipId", self._ship_id)
 
+        # Game version / build metadata.  FDev's journal only emits these on
+        # Fileheader and LoadGame; every other event omits them.  EDSM
+        # rejects the batch with msgnum 207 "Game/Build version not found"
+        # unless each event carries the metadata.  We populate from our cache
+        # of the most recent Fileheader/LoadGame.  Field names match what
+        # FDev / EDMC use so EDSM can read whichever variant it expects.
+        if self._game_version:
+            enriched.setdefault("gameversion", self._game_version)
+        if self._game_build:
+            enriched.setdefault("build",     self._game_build)
+            enriched.setdefault("gamebuild", self._game_build)
+        if self._horizons is not None:
+            enriched.setdefault("horizons",  self._horizons)
+            enriched.setdefault("Horizons",  self._horizons)
+        if self._odyssey is not None:
+            enriched.setdefault("odyssey",   self._odyssey)
+            enriched.setdefault("Odyssey",   self._odyssey)
+
         enriched.pop("_logtime", None)
         self._sender.push(enriched)
 
@@ -601,17 +772,49 @@ class EDSMPlugin(BasePlugin):
         if getattr(self.core, "trace_mode", False):
             print(f"  [EDSM trace] filtered {ev}  ({reason})")
 
+    def _get_metadata_snapshot(self) -> dict:
+        """Snapshot of current version/galaxy fields for event enrichment.
+
+        Called by _Sender when re-enriching drained events from disk that
+        were queued before we started injecting these fields.  Returns
+        only fields that are populated; absent fields are omitted so the
+        caller can detect "metadata not yet known" by checking gameversion.
+        """
+        md: dict = {}
+        if self._game_version:
+            md["gameversion"] = self._game_version
+        if self._game_build:
+            md["build"]     = self._game_build
+            md["gamebuild"] = self._game_build
+        if self._horizons is not None:
+            md["horizons"] = self._horizons
+            md["Horizons"] = self._horizons
+        if self._odyssey is not None:
+            md["odyssey"]  = self._odyssey
+            md["Odyssey"]  = self._odyssey
+        return md
+
     def _update_tracking(self, ev: str, event: dict) -> None:
         """Maintain internal location/session state from raw journal events."""
         if ev == "Fileheader":
             self._game_version = event.get("gameversion", "") or ""
             self._game_build   = event.get("build", "") or ""
+            # Fileheader carries Odyssey (bool); Horizons comes from LoadGame
+            if "Odyssey" in event:
+                self._odyssey = bool(event.get("Odyssey"))
 
         elif ev == "LoadGame":
-            if not self._game_version:
-                self._game_version = event.get("gameversion", "") or ""
-            if not self._game_build:
-                self._game_build = event.get("build", "") or ""
+            # LoadGame is authoritative — it carries gameversion + build +
+            # both flags.  Always update so a mid-session game-mode change
+            # (e.g. legacy ↔ live, Horizons ↔ Odyssey) is reflected.
+            gv = event.get("gameversion", "") or ""
+            gb = event.get("build", "")       or ""
+            if gv: self._game_version = gv
+            if gb: self._game_build   = gb
+            if "Horizons" in event:
+                self._horizons = bool(event.get("Horizons"))
+            if "Odyssey" in event:
+                self._odyssey = bool(event.get("Odyssey"))
 
         elif ev == "Commander":
             name = event.get("Name", "")
