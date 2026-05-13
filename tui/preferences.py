@@ -68,10 +68,10 @@ _RESTART_KEYS: dict[str, set[str]] = {
     "Discord":  {"WebhookURL", "UserID", "Identity",
                  "ForumChannel", "ThreadCmdrNames", "Timestamp"},
     "UI":       {"Theme", "FontSize"},
-    "EDDN":     {"Enabled", "UploaderID", "TestMode"},
-    "EDSM":     {"Enabled", "CommanderName", "ApiKey"},
+    "EDDN":     {"Enabled", "TestMode"},
+    "EDSM":     {"Enabled", "ApiKey"},
     "EDAstro":  {"Enabled", "UploadCarrierEvents"},
-    "Inara":    {"Enabled", "ApiKey", "CommanderName"},
+    "Inara":    {"Enabled", "ApiKey"},
 }
 
 
@@ -298,11 +298,6 @@ class PreferencesScreen(ModalScreen):
                                     value="true" if eddn.get("Enabled", False) else "false",
                                     id="eddn-enabled", classes="pref-bool-sel", allow_blank=False)
                         with Horizontal(classes="pref-row"):
-                            yield Label("Uploader ID", classes="key")
-                            yield Input(value=str(eddn.get("UploaderID", "")),
-                                        placeholder="defaults to CMDR name",
-                                        id="eddn-uid", classes="pref-input")
-                        with Horizontal(classes="pref-row"):
                             yield Label("Test Mode", classes="key")
                             yield Select(
                                     [("Off", "false"), ("On", "true")],
@@ -317,10 +312,6 @@ class PreferencesScreen(ModalScreen):
                                     [("Off", "false"), ("On", "true")],
                                     value="true" if edsm.get("Enabled", False) else "false",
                                     id="edsm-enabled", classes="pref-bool-sel", allow_blank=False)
-                        with Horizontal(classes="pref-row"):
-                            yield Label("EDSM Commander Name", classes="key")
-                            yield Input(value=str(edsm.get("CommanderName", "")),
-                                        id="edsm-cmdr", classes="pref-input")
                         with Horizontal(classes="pref-row"):
                             yield Label("EDSM API Key", classes="key")
                             yield Input(value=str(edsm.get("ApiKey", "")),
@@ -348,10 +339,6 @@ class PreferencesScreen(ModalScreen):
                                     [("Off", "false"), ("On", "true")],
                                     value="true" if inara.get("Enabled", False) else "false",
                                     id="inara-enabled", classes="pref-bool-sel", allow_blank=False)
-                        with Horizontal(classes="pref-row"):
-                            yield Label("Commander Name", classes="key")
-                            yield Input(value=str(inara.get("CommanderName", "")),
-                                        id="inara-cmdr", classes="pref-input")
                         with Horizontal(classes="pref-row"):
                             yield Label("Inara API Key", classes="key")
                             yield Input(value=str(inara.get("ApiKey", "")),
@@ -473,10 +460,7 @@ class PreferencesScreen(ModalScreen):
             "g-warn-cd":    ("Settings",  "WarnCooldown",   int),
             "dc-webhook":   ("Discord",   "WebhookURL",     str),
             "dc-uid":       ("Discord",   "UserID",         int),
-            "eddn-uid":     ("EDDN",      "UploaderID",     str),
-            "edsm-cmdr":    ("EDSM",      "CommanderName",  str),
             "edsm-key":     ("EDSM",      "ApiKey",         str),
-            "inara-cmdr":   ("Inara",        "CommanderName",  str),
             "inara-key":    ("Inara",        "ApiKey",         str),
             "raven-key":    ("Colonisation", "ApiKey",         str),
         }

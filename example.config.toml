@@ -152,7 +152,6 @@ SoftwareRenderer = false       # set true if EDLD causes compositor starvation o
 
 [EDDN]
 Enabled    = false
-# UploaderID = ""      # anonymous uploader tag — defaults to your commander name
 # TestMode   = false   # send to /test schemas only (development use)
 
 # ── EDSM (Elite Dangerous Star Map) ─────────────────────────────────────────
@@ -162,8 +161,8 @@ Enabled    = false
 
 [EDSM]
 Enabled       = false
-# CommanderName = "YourCmdrName"   # must match your EDSM account name exactly
 # ApiKey        = ""               # from EDSM Settings → API Key
+# Commander name is sourced from your journal — no CommanderName setting.
 
 # ── EDAstro ──────────────────────────────────────────────────────────────────
 # Uploads exploration, Odyssey organic scan, and fleet carrier data to edastro.com.
@@ -181,8 +180,8 @@ UploadCarrierEvents = false   # set true to include CarrierStatus / CarrierJumpR
 
 [Inara]
 Enabled       = false
-# CommanderName = "YourCmdrName"   # in-game name only — do not include "CMDR"
 # ApiKey        = ""               # from Inara Settings → API Key
+# Commander name is sourced from your journal — no CommanderName setting.
 
 # ==============================================================================
 # Custom profiles (advanced)

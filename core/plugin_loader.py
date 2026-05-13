@@ -2,7 +2,13 @@
 core/plugin_loader.py — Discover, import, initialise, and lifecycle-manage
                         all components.
 
-All components live in components/ at the repo root.
+All components live as single files at the repo root in components/, named
+``components/<plugin_name>.py``.  The file stem is the plugin identifier;
+it determines:
+  - the on-disk data directory (``<cmdr_data>/plugins/<plugin_name>/``)
+  - the sandboxed open() write scope
+  - the module name in sys.modules
+
 Integration components (eddn, edsm, edastro, inara) are user-togglable.
 All other components are always-on.
 """
@@ -368,16 +374,19 @@ class PluginLoader:
 
         Integration components (eddn, edsm, edastro, inara) are user-togglable.
         All others are always-on.
+
+        Layout: each plugin is a single ``components/<name>.py`` file.  The
+        file stem (``<name>``) is used as the plugin identifier for storage
+        paths (``<cmdr_data>/plugins/<name>/``) and for sandbox isolation,
+        matching the previous directory-name semantics for backward compat
+        with on-disk plugin data.
         """
         components_dir = self._repo_root / "components"
 
-        for plugin_dir in sorted(components_dir.iterdir()):
-            if not plugin_dir.is_dir():
+        for plugin_file in sorted(components_dir.glob("*.py")):
+            if plugin_file.name == "__init__.py":
                 continue
-            plugin_file = plugin_dir / "plugin.py"
-            if not plugin_file.exists():
-                continue
-            dir_name       = plugin_dir.name
+            dir_name       = plugin_file.stem
             is_integration = dir_name in self.INTEGRATION_NAMES
             self._load_one(
                 plugin_file, "component", True, core_api,
@@ -397,7 +406,11 @@ class PluginLoader:
         always_on: bool = False,
         show_in_menu: bool = True,
     ) -> None:
-        dir_name    = plugin_file.parent.name
+        # Plugin identifier — file stem in the new single-file layout.
+        # This matches what was previously the parent directory name, so
+        # storage paths (cmdr_data_dir() / "plugins" / <name>) are stable
+        # across the refactor and user data continues to load.
+        dir_name    = plugin_file.stem
         module_name = f"_edld_plugin_{dir_name}"
 
         try:

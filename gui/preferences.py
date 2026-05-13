@@ -393,10 +393,10 @@ class PreferencesWindow(Gtk.Window):
         "Discord":  {"WebhookURL", "UserID", "Identity",
                      "ForumChannel", "ThreadCmdrNames", "Timestamp"},
         "UI":       {"Theme", "FontSize"},
-        "EDDN":     {"Enabled", "UploaderID", "TestMode"},
-        "EDSM":     {"Enabled", "CommanderName", "ApiKey"},
+        "EDDN":     {"Enabled", "TestMode"},
+        "EDSM":     {"Enabled", "ApiKey"},
         "EDAstro":  {"Enabled", "UploadCarrierEvents"},
-        "Inara":    {"Enabled", "ApiKey", "CommanderName"},
+        "Inara":    {"Enabled", "ApiKey"},
         "CAPI":     set(),   # no restart-required keys; managed live
     }
 
@@ -471,16 +471,6 @@ class PreferencesWindow(Gtk.Window):
         eddn_sw.connect("state-set", lambda w, v: self._track_eddn("Enabled", v))
         box.append(self._row("Enable EDDN", eddn_sw, restart_required=True))
 
-        uploader_entry = Gtk.Entry()
-        uploader_entry.set_text(eddn_cfg.get("UploaderID", ""))
-        uploader_entry.set_hexpand(True)
-        uploader_entry.set_width_chars(24)
-        uploader_entry.set_placeholder_text("defaults to commander name")
-        uploader_entry.connect(
-            "changed", lambda w: self._track_eddn("UploaderID", w.get_text())
-        )
-        box.append(self._row("Uploader ID", uploader_entry, restart_required=True))
-
         eddn_test_sw = Gtk.Switch()
         eddn_test_sw.set_active(bool(eddn_cfg.get("TestMode", False)))
         eddn_test_sw.set_valign(Gtk.Align.CENTER)
@@ -509,16 +499,6 @@ class PreferencesWindow(Gtk.Window):
         edsm_sw.set_valign(Gtk.Align.CENTER)
         edsm_sw.connect("state-set", lambda w, v: self._track_edsm("Enabled", v))
         box.append(self._row("Enable EDSM", edsm_sw, restart_required=True))
-
-        cmdr_entry = Gtk.Entry()
-        cmdr_entry.set_text(edsm_cfg.get("CommanderName", ""))
-        cmdr_entry.set_hexpand(True)
-        cmdr_entry.set_width_chars(24)
-        cmdr_entry.set_placeholder_text("your EDSM commander name")
-        cmdr_entry.connect(
-            "changed", lambda w: self._track_edsm("CommanderName", w.get_text())
-        )
-        box.append(self._row("EDSM Commander Name", cmdr_entry, restart_required=True))
 
         edsm_key_entry = Gtk.Entry()
         edsm_key_entry.set_text(edsm_cfg.get("ApiKey", ""))
@@ -585,16 +565,6 @@ class PreferencesWindow(Gtk.Window):
         inara_sw.set_valign(Gtk.Align.CENTER)
         inara_sw.connect("state-set", lambda w, v: self._track_inara("Enabled", v))
         box.append(self._row("Enable Inara", inara_sw, restart_required=True))
-
-        inara_cmdr_entry = Gtk.Entry()
-        inara_cmdr_entry.set_text(inara_cfg.get("CommanderName", ""))
-        inara_cmdr_entry.set_hexpand(True)
-        inara_cmdr_entry.set_width_chars(24)
-        inara_cmdr_entry.set_placeholder_text("your in-game commander name")
-        inara_cmdr_entry.connect(
-            "changed", lambda w: self._track_inara("CommanderName", w.get_text().strip())
-        )
-        box.append(self._row("Commander Name", inara_cmdr_entry, restart_required=True))
 
         inara_key_entry = Gtk.Entry()
         inara_key_entry.set_text(inara_cfg.get("ApiKey", ""))
