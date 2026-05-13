@@ -12,10 +12,11 @@
 [![Textual](https://img.shields.io/badge/TUI-Textual-1D8348?style=flat-square)](https://github.com/Textualize/textual)
 [![Discord](https://img.shields.io/badge/Discord-Webhook%20Support-5865F2?style=flat-square)]()
 
+[![License](https://img.shields.io/github/license/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/blob/main/LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/releases)
 [![GitHub stars](https://img.shields.io/github/stars/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/network/members)
-[![License](https://img.shields.io/github/license/drworman/EDLD?style=flat-square)](LICENSE)
+
 
 <ins>Career & real-time session tracking</ins></br>
 Combat · Trade · Mining · Exploration · Missions · Exobiology · PowerPlay · Assets, and more
