@@ -12,11 +12,10 @@
 [![Textual](https://img.shields.io/badge/TUI-Textual-1D8348?style=flat-square)](https://github.com/Textualize/textual)
 [![Discord](https://img.shields.io/badge/Discord-Webhook%20Support-5865F2?style=flat-square)]()
 
-[![License](https://img.shields.io/github/license/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/blob/main/LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/releases)
 [![GitHub stars](https://img.shields.io/github/stars/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/network/members)
-
+[![License](https://img.shields.io/github/license/drworman/EDLD?style=flat-square)](LICENSE)
 
 <ins>Career & real-time session tracking</ins></br>
 Combat · Trade · Mining · Exploration · Missions · Exobiology · PowerPlay · Assets, and more
@@ -52,7 +51,7 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | ⛽ **Fuel Monitoring** | Warn and critical thresholds for fuel percentage and estimated time remaining |
 | 🚨 **Security & Cargo Events** | Cargo scans, police scans, security attacks, low-value cargo notices |
 | ⚠️ **Inactivity Warnings** | Alerts on kill rate drop or extended period without kills |
-| 📈 **Statistical Reports** | Eight journal-wide reports: career overview, bounty breakdown, session history, hunting grounds, NPC rogues' gallery, exploration, exobiology, and PowerPlay |
+| 💵 **Lifetime Financial Ledger** | Journal-derived earnings and spending by category, voucher reconciliation (issued vs redeemed), and carrier-bank flow — built from 27 credit-moving event types because in-game Statistics fields like `Trading.Goods_Sold` are unreliable |
 | 📦 **Cargo Block** | Live ship hold display with tonnage gauge, per-item list, stolen-goods flagging, and Spansh target-market price comparison |
 | ⚗️ **Engineering Block** | Engineering materials inventory across Raw, Manufactured, and Encoded categories, plus Odyssey ShipLocker contents |
 | 🚀 **Assets Block** | Full fleet overview — current ship, stored ships with loadouts, stored modules, fleet carrier status, wallet with At-Risk holdings and net worth |
@@ -159,12 +158,12 @@ UserID = 123456789012345678
 
 | Document | Contents |
 |----------|----------|
+| [CHANGELOG.md](CHANGELOG.md) | Version history |
 | [INSTALL.md](INSTALL.md) | Full installation instructions |
 | [Configuration](docs/CONFIGURATION.md) | All config keys, notification levels, CLI flags, profiles, data integrations (EDDN, EDSM, EDAstro, Inara, Raven Colonial) |
 | [Terminal Output](docs/TERMINAL_OUTPUT.md) | Startup banner, event line format, sigil/tag reference, periodic summary |
 | [GUI Theming](docs/THEMING.md) | Built-in themes, custom theme creation |
 | [Mission Bootstrap](docs/MISSION_BOOTSTRAP.md) | How EDLD reconstructs mission state on startup |
-| [Reports](docs/REPORTS.md) | Statistical reports — what each report covers and how data is sourced |
 | [Roadmap](docs/ROADMAP.md) | Active, near-term, and deferred work |
 | [Release Signing](docs/SIGNING.md) | How to verify release artifacts |
 
