@@ -174,11 +174,22 @@ def find_latest_journal(journal_dir: Path) -> Path | None:
 
 
 def trace(message: str, trace_mode: bool = False) -> None:
-    if trace_mode:
-        print(
-            f"{Terminal.WHITE}[Debug]{Terminal.END} {message} "
-            f"[{datetime.strftime(datetime.now(), '%H:%M:%S')}]"
-        )
+    """Emit a trace line.  When ``trace_mode`` is enabled the message goes
+    both to stdout (terminal mode) and to the debug log via core.debug;
+    in UI modes stdout has been silenced so the log is the only sink.
+    """
+    if not trace_mode:
+        return
+    print(
+        f"{Terminal.WHITE}[Debug]{Terminal.END} {message} "
+        f"[{datetime.strftime(datetime.now(), '%H:%M:%S')}]"
+    )
+    try:
+        from core import debug as _debug
+        _debug.trace(message)
+    except Exception:
+        # debug facility errors must never crash callers
+        pass
 
 
 # ── Bootstrap functions ───────────────────────────────────────────────────────
@@ -542,7 +553,8 @@ def bootstrap_missions(
             continue
 
     if not accepted:
-        print(f"{Terminal.YELL}Mission bootstrap:{Terminal.END} No active massacre missions found")
+        from core import debug as _dbg
+        _dbg.info(f"  [Mission bootstrap] No active massacre missions found")
         return
 
     now = datetime.now(timezone.utc)
@@ -565,8 +577,9 @@ def bootstrap_missions(
     state.missions_complete       = len(active_redirected)
     state.missions                = True
 
-    print(
-        f"{Terminal.YELL}Mission bootstrap:{Terminal.END} "
+    from core import debug as _dbg
+    _dbg.info(
+        f"  [Mission bootstrap] "
         f"{len(state.active_missions)} active | "
         f"{state.missions_complete} complete | "
         f"Stack: {fmt_credits(state.stack_value)}"

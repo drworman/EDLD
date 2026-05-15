@@ -5,8 +5,9 @@ core/plugin_loader.py — Discover, import, initialise, and lifecycle-manage
 All components live as single files at the repo root in components/, named
 ``components/<plugin_name>.py``.  The file stem is the plugin identifier;
 it determines:
-  - the on-disk data directory (``<cmdr_data>/plugins/<plugin_name>/``)
-  - the sandboxed open() write scope
+  - the file prefix for persisted state under ``<cmdr_data>/data/`` (e.g.
+    primary ``<plugin>.json``, sidecars ``<plugin>.<purpose>.json``)
+  - the sandboxed open() filename-prefix scope
   - the module name in sys.modules
 
 Integration components (eddn, edsm, edastro, inara) are user-togglable.
@@ -31,152 +32,244 @@ from core.state import EDLD_DATA_DIR, cmdr_data_dir
 # ── PluginStorage ─────────────────────────────────────────────────────────────
 
 class PluginStorage:
-    """Sandboxed, scoped data storage for a single plugin.
+    """Per-plugin persistent storage rooted at the shared data directory.
 
-    Each plugin receives a PluginStorage instance pre-bound to:
-        EDLD_DATA_DIR/plugins/<plugin_name>/
+    Layout
+    ------
+    Every plugin's state lives in a single flat directory at
+    ``<cmdr>/data/`` — there is no per-plugin sub-tree.  Files are
+    plugin-namespaced by filename prefix instead of by directory:
 
-    Read operations are unrestricted.  Write operations are restricted to
-    that directory — any attempt to write outside it raises PermissionError.
-
-    Supported file types: JSON (.json) and TOML (.toml, read-only).
-    TOML writing is not supported because the stdlib ships no TOML writer;
-    use JSON for mutable state.
+        <cmdr>/data/<plugin>.json           ← primary (was <plugin>/data.json)
+        <cmdr>/data/<plugin>.<purpose>.json ← sidecars (e.g. core.tokens.json)
+        <cmdr>/data/<plugin>.<name>.<ext>   ← arbitrary sidecars
+                                              (e.g. inara.queue.jsonl)
 
     API
     ---
-    storage.read_json(filename)          → dict  (empty dict if file absent)
-    storage.write_json(data, filename)   → None
-    storage.read_toml(filename)          → dict  (empty dict if file absent)
-    storage.path                         → Path  (the plugin's data directory)
+        storage.path                   → Path to the primary <plugin>.json
+        storage.file_path("name.ext")  → Path to a non-JSON sidecar
+                                         (returns <cmdr>/data/<plugin>.name.ext)
+        storage.read_json()            → dict from <plugin>.json
+        storage.read_json("purpose")   → dict from <plugin>.<purpose>.json
+        storage.write_json(d)          → write primary
+        storage.write_json(d, "purpose") → write sidecar
+        storage.read_sibling_json(plugin)
+        storage.read_sibling_json(plugin, "purpose")
+        storage.write_sibling_json(plugin, "purpose", d)
+
+    Back-compat
+    -----------
+    Old call sites that passed full filenames (``read_json("data.json")``,
+    ``read_json("capi_tokens.json")``, ``read_sibling_json("core",
+    "capi_profile.json")``) continue to work — ``_resolve_purpose`` strips
+    a trailing ``.json`` and a leading ``capi_`` so they land at the new
+    flattened paths without code changes.  New code should pass clean
+    purpose names without prefix or extension.
     """
 
-    # Allowed bare filenames — no path separators permitted.
-    _ALLOWED_NAMES = frozenset({
-        "data.json", "config.json", "state.json", "tokens.json",
-        "config.toml", "state.toml",
-        # CAPI persisted data — raw endpoint responses for cross-plugin use
-        "capi_profile.json", "capi_market.json", "capi_shipyard.json",
-        "capi_fleetcarrier.json", "capi_communitygoals.json", "fleet.json",
-        "poll_times.json",   # CAPI poll timestamps — survive rapid restarts
-        "capi_tokens.json",  # DataProvider CAPI OAuth tokens
-    })
+    def __init__(self, plugin_name: str) -> None:
+        # The plugin identifier — also the filename prefix on disk.
+        # Must be a bare name (no path separators) since it's interpolated
+        # directly into filenames.
+        if "/" in plugin_name or "\\" in plugin_name or ".." in plugin_name:
+            raise ValueError(f"Plugin name must be bare (got {plugin_name!r})")
+        self._name = plugin_name
 
-    def __init__(self, data_dir: Path) -> None:
-        self._dir = data_dir
+    @property
+    def name(self) -> str:
+        return self._name
 
     @property
     def path(self) -> Path:
-        return self._dir
+        """Path to this plugin's primary data file: ``<cmdr>/data/<name>.json``.
 
-    # ── internal ──────────────────────────────────────────────────────────────
+        Re-derived from ``cmdr_data_dir()`` on every access so it stays
+        correct if the FID changes after the plugin loads (e.g. went from
+        "unknown" → real FID once LoadGame fires).
+        """
+        from core.state import cmdr_data_dir
+        return cmdr_data_dir() / "data" / f"{self._name}.json"
 
-    def _ensure_dir(self) -> None:
-        self._dir.mkdir(parents=True, exist_ok=True)
+    def file_path(self, filename: str) -> Path:
+        """Path for an arbitrary plugin file, prefixed with the plugin name.
 
-    def _validate_filename(self, filename: str) -> Path:
-        """Reject any filename that contains path separators or is not on
-        the allowed list, then return the resolved absolute path."""
+        Used for non-JSON sidecars such as upload-queue persistence:
+
+            storage.file_path("queue.jsonl")
+            → <cmdr>/data/<plugin>.queue.jsonl
+
+        The plugin prefix is added automatically — callers pass just the
+        basename.  Path separators are rejected.
+        """
         if "/" in filename or "\\" in filename or ".." in filename:
-            raise ValueError(
-                f"Plugin storage filename must be a bare name (got {filename!r})"
-            )
-        if filename not in self._ALLOWED_NAMES:
-            raise ValueError(
-                f"Plugin storage filename {filename!r} is not permitted. "
-                f"Allowed: {sorted(self._ALLOWED_NAMES)}"
-            )
-        return self._dir / filename
+            raise ValueError(f"file_path: bare filename only (got {filename!r})")
+        from core.state import cmdr_data_dir
+        return cmdr_data_dir() / "data" / f"{self._name}.{filename}"
 
     # ── public API ────────────────────────────────────────────────────────────
 
-    def read_json(self, filename: str = "data.json") -> dict:
-        """Read a JSON file from the plugin data directory.
-        Returns an empty dict if the file does not exist.
-        Re-derives path from cmdr_data_dir() at read time so it always reads
-        from the correct commander directory even if the FID changed after load.
+    def read_json(self, purpose: str | None = None) -> dict:
+        """Read the primary file (purpose=None) or a ``<plugin>.<purpose>.json``
+        sidecar.  Returns an empty dict if the file is absent or malformed.
+        """
+        p = self._resolve(self._name, purpose)
+        return self._read(p)
+
+    def write_json(self, data: dict, purpose: str | None = None) -> None:
+        """Atomic write of the primary file or a sidecar."""
+        p = self._resolve(self._name, purpose)
+        self._write(p, data)
+
+    def read_sibling_json(self, plugin_name: str,
+                          purpose: str | None = None) -> dict:
+        """Read another plugin's primary or sidecar file.
+
+        Permits cross-plugin data consumption (e.g. assets reading core's
+        capi_profile sidecar) without granting write access.  Returns an
+        empty dict if the target file does not exist.
+        """
+        p = self._resolve(plugin_name, purpose)
+        return self._read(p)
+
+    def write_sibling_json(self, plugin_name: str,
+                           purpose: str | None,
+                           data: dict) -> None:
+        """Write to another plugin's namespace.  Rare — used by assets to
+        update core's cached CAPI profile after a fleet enrichment so the
+        sold ship doesn't reappear on the next restart before a fresh poll.
+        """
+        p = self._resolve(plugin_name, purpose)
+        self._write(p, data)
+
+    # ── internal helpers ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _resolve(plugin_name: str, purpose: str | None) -> Path:
+        """Map (plugin_name, purpose) → absolute path under ``<cmdr>/data/``.
+
+        Back-compat normalisation:
+          - purpose in (None, "", "data", "data.json") → primary file
+          - trailing ``.json`` is stripped
+          - leading ``capi_`` is stripped (legacy core sidecar names)
         """
         from core.state import cmdr_data_dir
-        real_dir = cmdr_data_dir() / "plugins" / self._dir.name
-        p = real_dir / self._validate_filename(filename).name
+        base = cmdr_data_dir() / "data"
+
+        if purpose in (None, "", "data", "data.json"):
+            return base / f"{plugin_name}.json"
+
+        # Reject any traversal/path attempts before normalising
+        if "/" in purpose or "\\" in purpose or ".." in purpose:
+            raise ValueError(f"Purpose must be bare (got {purpose!r})")
+
+        clean = purpose
+        if clean.endswith(".json"):
+            clean = clean[:-5]
+        if clean.startswith("capi_"):
+            clean = clean[5:]
+        if not clean:
+            return base / f"{plugin_name}.json"
+        return base / f"{plugin_name}.{clean}.json"
+
+    @staticmethod
+    def _read(p: Path) -> dict:
         if not p.exists():
             return {}
-        with builtins.open(p, "r", encoding="utf-8") as f:
-            try:
+        try:
+            with builtins.open(p, "r", encoding="utf-8") as f:
                 return json.load(f)
-            except (json.JSONDecodeError, ValueError):
-                return {}
+        except (json.JSONDecodeError, ValueError, OSError):
+            return {}
 
-    def write_json(self, data: dict, filename: str = "data.json") -> None:
-        """Write a JSON file to the plugin data directory (atomic via temp file)."""
-        p = self._validate_filename(filename)
-        # Re-resolve directory at write time — the FID may have changed since
-        # this PluginStorage was created (e.g. "unknown" → real FID at LoadGame).
-        # Re-derive the path from cmdr_data_dir() so we always write to the right place.
-        from core.state import cmdr_data_dir
-        real_dir = cmdr_data_dir() / "plugins" / self._dir.name
-        real_dir.mkdir(parents=True, exist_ok=True)
-        real_p = real_dir / p.name
-        tmp    = real_p.with_suffix(".tmp")
+    @staticmethod
+    def _write(p: Path, data: dict) -> None:
         import os as _os
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(p.suffix + ".tmp")
         content = json.dumps(data, indent=2, default=str)
         with builtins.open(tmp, "w", encoding="utf-8") as f:
             f.write(content)
-        _os.replace(tmp, real_p)
+        _os.replace(tmp, p)
 
-    def read_sibling_json(self, plugin_name: str, filename: str) -> dict:
-        """Read a JSON file from another plugin's data directory (read-only).
 
-        Allows plugins to consume data written by other plugins — e.g. assets
-        reading CAPI's persisted profile data.  Write operations are still
-        restricted to the plugin's own directory.
+def migrate_legacy_storage_layout(cmdr_dir: Path) -> int:
+    """One-shot migration from the old ``<cmdr>/plugins/<X>/<file>`` tree
+    to the flat ``<cmdr>/data/<X>[.<purpose>].<ext>`` layout.
 
-        Returns an empty dict if the file does not exist or cannot be parsed.
-        """
-        if "/" in filename or "\\" in filename or ".." in filename:
-            raise ValueError(f"Filename must be bare (got {filename!r})")
-        if filename not in self._ALLOWED_NAMES:
-            raise ValueError(f"Filename {filename!r} not in allowlist")
-        p = self._dir.parent / plugin_name / filename
-        if not p.exists():
-            return {}
-        with builtins.open(p, "r", encoding="utf-8") as f:
+    Walks every file under ``<cmdr>/plugins/`` and moves it to its
+    flattened name in ``<cmdr>/data/``.  The translation:
+
+        plugins/<X>/data.json     → data/<X>.json
+        plugins/<X>/capi_foo.json → data/<X>.foo.json
+        plugins/<X>/<name>.<ext>  → data/<X>.<name>.<ext>
+
+    Files that already exist at the target are left in place (we never
+    overwrite — a same-name target means a previous migration ran).
+    Empty plugin directories and the plugins/ root are removed when their
+    contents are gone.
+
+    Returns the number of files actually moved.  Errors are swallowed so a
+    migration glitch never blocks startup; callers can re-check on next run.
+    """
+    import os as _os
+    legacy = cmdr_dir / "plugins"
+    target = cmdr_dir / "data"
+    if not legacy.is_dir():
+        return 0
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return 0
+
+    moved = 0
+    for plugin_dir in sorted(legacy.iterdir()):
+        if not plugin_dir.is_dir():
+            continue
+        plugin = plugin_dir.name
+        for old_file in sorted(plugin_dir.iterdir()):
+            if not old_file.is_file():
+                continue
+            new_name = _migrate_filename(plugin, old_file.name)
+            new_path = target / new_name
+            if new_path.exists():
+                # Target already migrated; leave the legacy file alone for
+                # the user to inspect and remove if they want.
+                continue
             try:
-                return json.load(f)
-            except (json.JSONDecodeError, ValueError):
-                return {}
+                _os.replace(str(old_file), str(new_path))
+                moved += 1
+            except OSError:
+                continue
+        try:
+            plugin_dir.rmdir()
+        except OSError:
+            pass
+    try:
+        legacy.rmdir()
+    except OSError:
+        pass
+    return moved
 
-    def write_sibling_json(self, plugin_name: str, filename: str, data: dict) -> None:
-        """Write a JSON file to another plugin's data directory.
 
-        Only permitted for files in _ALLOWED_NAMES.  Used by assets plugin to
-        update CAPI's persisted capi_profile.json when a ship is sold, so that
-        the sold ship does not reappear on the next restart before a fresh poll.
-        """
-        if "/" in filename or "\\" in filename or ".." in filename:
-            raise ValueError(f"Filename must be bare (got {filename!r})")
-        if filename not in self._ALLOWED_NAMES:
-            raise ValueError(f"Filename {filename!r} not in allowlist")
-        p = self._dir.parent / plugin_name / filename
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp")
-        with builtins.open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        tmp.replace(p)
+def _migrate_filename(plugin: str, old: str) -> str:
+    """Compute the new flat filename for a legacy ``plugins/<plugin>/<old>``.
 
-    def read_toml(self, filename: str = "config.toml") -> dict:
-        """Read a TOML file from the plugin data directory.
-        Returns an empty dict if the file does not exist."""
-        if not filename.endswith(".toml"):
-            raise ValueError("read_toml() requires a .toml filename")
-        p = self._validate_filename(filename)
-        if not p.exists():
-            return {}
-        with builtins.open(p, "rb") as f:
-            try:
-                return tomllib.load(f)
-            except tomllib.TOMLDecodeError:
-                return {}
+    The rules:
+      - ``data.json``       → ``<plugin>.json``
+      - ``capi_<x>.<ext>``  → ``<plugin>.<x>.<ext>``
+      - ``<name>.<ext>``    → ``<plugin>.<name>.<ext>``
+      - ``<stem>``  (no ext) → ``<plugin>.<stem>``
+    """
+    if old == "data.json":
+        return f"{plugin}.json"
+    stem, sep, ext = old.rpartition(".")
+    if not sep:
+        # No dot in filename — treat whole thing as a stem.
+        return f"{plugin}.{old}"
+    if stem.startswith("capi_"):
+        stem = stem[5:]
+    return f"{plugin}.{stem}.{ext}"
 
 
 # ── DisabledPluginMeta ────────────────────────────────────────────────────────
@@ -265,23 +358,41 @@ class BasePlugin:
 
 # ── Write sandbox ─────────────────────────────────────────────────────────────
 
-def _make_sandboxed_open(allowed_dir: Path, plugin_name: str):
+def _make_sandboxed_open(plugin_name: str):
     """Return a replacement open() that raises PermissionError on any write
-    attempt whose resolved path is outside allowed_dir."""
+    whose resolved path is not inside the shared data directory AND whose
+    filename is not prefixed with ``<plugin_name>.`` (or exactly
+    ``<plugin_name>.json``).
 
-    resolved_allowed = allowed_dir.resolve()
-
+    Under the flat storage layout every plugin's files live side-by-side
+    in ``<cmdr>/data/``; the sandbox isolation that used to come from a
+    dedicated sub-directory now comes from the filename prefix.
+    """
     def _sandboxed_open(file, mode="r", *args, **kwargs):
         if any(c in str(mode) for c in ("w", "a", "x", "+")):
             try:
                 target = Path(file).resolve()
             except Exception:
                 target = Path(str(file)).resolve()
-            if not str(target).startswith(str(resolved_allowed)):
+            from core.state import cmdr_data_dir
+            data_root = (cmdr_data_dir() / "data").resolve()
+            allowed_prefix_a = f"{plugin_name}."   # sidecars
+            allowed_prefix_b = f"{plugin_name}.json"
+            # Allow files within the shared data dir whose basename starts
+            # with the plugin's prefix.  Anything else — including writes
+            # outside data/ — is blocked.
+            try:
+                if target.parent != data_root:
+                    raise PermissionError
+                base = target.name
+                if not (base == allowed_prefix_b
+                        or base.startswith(allowed_prefix_a)):
+                    raise PermissionError
+            except PermissionError:
                 raise PermissionError(
                     f"[EDLD] Plugin '{plugin_name}' attempted to write to "
                     f"{target} — plugins may only write to "
-                    f"{resolved_allowed}. "
+                    f"{data_root}/{plugin_name}[.*].  "
                     f"Use self.storage.write_json() instead."
                 )
         return builtins.open(file, mode, *args, **kwargs)
@@ -377,10 +488,18 @@ class PluginLoader:
 
         Layout: each plugin is a single ``components/<name>.py`` file.  The
         file stem (``<name>``) is used as the plugin identifier for storage
-        paths (``<cmdr_data>/plugins/<name>/``) and for sandbox isolation,
-        matching the previous directory-name semantics for backward compat
-        with on-disk plugin data.
+        paths and for sandbox isolation.
+
+        Before any plugin loads, runs the one-shot legacy-layout migration
+        so that pre-flatten data in ``<cmdr>/plugins/<X>/`` is moved into
+        the new ``<cmdr>/data/<X>[.<purpose>].<ext>`` layout.
         """
+        # Migration first — must happen before any plugin reads its data.
+        moved = migrate_legacy_storage_layout(cmdr_data_dir())
+        if moved:
+            from core import debug as _dbg
+            _dbg.info(f"  [storage] migrated {moved} file(s) from plugins/ → data/")
+
         components_dir = self._repo_root / "components"
 
         for plugin_file in sorted(components_dir.glob("*.py")):
@@ -418,11 +537,11 @@ class PluginLoader:
             module = importlib.util.module_from_spec(spec)
 
             # ── Write sandbox ───────────────────────────────────────────────
-            # Patch open() in this module's namespace before execution so that
-            # any write attempt outside the plugin's data dir is blocked.
-            storage_dir = cmdr_data_dir() / "plugins" / dir_name
+            # Patch open() in this module's namespace before execution.  The
+            # sandbox allows writes only to files in <cmdr>/data/ whose
+            # basename is prefixed with this plugin's name.
             module.__builtins__ = vars(builtins).copy()
-            module.__builtins__["open"] = _make_sandboxed_open(storage_dir, dir_name)
+            module.__builtins__["open"] = _make_sandboxed_open(dir_name)
 
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
@@ -463,7 +582,8 @@ class PluginLoader:
                             DisabledPluginMeta(name, display, version,
                                                description, is_builtin)
                         )
-                    print(
+                    from core import debug as _dbg
+                    _dbg.info(
                         f"  [skipped]  {display} v{version} (disabled)"
                     )
                     return
@@ -473,7 +593,7 @@ class PluginLoader:
             instance._is_builtin   = is_builtin
             instance._always_on    = always_on
             instance._show_in_menu = show_in_menu
-            instance.storage       = PluginStorage(storage_dir)
+            instance.storage       = PluginStorage(dir_name)
 
             instance.on_load(core_api)
 
@@ -482,13 +602,14 @@ class PluginLoader:
 
             note = getattr(instance, "_load_note", "")
             suffix = f"  ({note})" if note else ""
+            from core import debug as _dbg
             if show_in_menu:
-                print(
+                _dbg.info(
                     f"  [integration]  {instance.PLUGIN_DISPLAY} "
                     f"v{instance.PLUGIN_VERSION}{suffix}"
                 )
             else:
-                print(
+                _dbg.info(
                     f"  [component]  {instance.PLUGIN_DISPLAY} "
                     f"v{instance.PLUGIN_VERSION}{suffix}"
                 )

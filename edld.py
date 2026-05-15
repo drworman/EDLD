@@ -48,8 +48,6 @@ parser.add_argument("-g", "--gui", action="store_true", default=None,
 parser.add_argument("--mode", choices=["terminal", "textual", "gtk4"],
                     default=None, metavar="MODE",
                     help="UI mode: terminal (default) | textual | gtk4")
-parser.add_argument("--log-file", metavar="PATH",
-                    help="Tee all terminal output to PATH (safe with --mode gtk4; avoids pipe buffer deadlock)")
 
 args = parser.parse_args()
 
@@ -98,7 +96,9 @@ def _check_for_update() -> None:
         pass
 
 _update_thread = threading.Thread(target=_check_for_update, daemon=True)
-_update_thread.start()
+# Don't start the thread yet — we need to fork first in UI modes so the
+# update check runs in the child rather than the to-be-discarded parent.
+# Started later, after the fork / silence step.
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -138,53 +138,10 @@ config_dict = load_config_file(config_path)
 notify_test = bool(args.test)  if args.test  is not None else False
 trace_mode  = bool(args.trace) if args.trace is not None else DEBUG_MODE
 
-# ── Log file (--log-file) ─────────────────────────────────────────────────────
-# Opens a log file and tees ALL stdout output to it alongside the terminal.
-# This is intentionally separate from shell redirection (> file) to avoid
-# the pipe-buffer deadlock that occurs when running with --gui and --trace:
-# shell pipes are bounded buffers; a blocked print() in the monitor thread
-# stalls the journal loop, starving the GTK main loop of events.
-# Opening the file directly bypasses the pipe entirely.
-
-_log_fh = None
-
-if args.log_file:
-    import io as _io
-    _log_path = Path(args.log_file).expanduser().resolve()
-    try:
-        _log_fh = open(_log_path, "w", encoding="utf-8", buffering=1)
-
-        class _TeeWriter(_io.TextIOBase):
-            """Write to both the original stdout and a log file simultaneously."""
-            def __init__(self, primary, secondary):
-                self._primary   = primary
-                self._secondary = secondary
-            def write(self, text):
-                self._primary.write(text)
-                self._primary.flush()
-                try:
-                    self._secondary.write(text)
-                    self._secondary.flush()
-                except Exception:
-                    pass
-                return len(text)
-            def flush(self):
-                self._primary.flush()
-                try:
-                    self._secondary.flush()
-                except Exception:
-                    pass
-            @property
-            def encoding(self):
-                return getattr(self._primary, "encoding", "utf-8")
-
-        sys.stdout = _TeeWriter(sys.stdout, _log_fh)
-        print(f"[EDLD] Logging to: {_log_path}")
-    except OSError as _e:
-        print(f"[EDLD] Warning: could not open log file {_log_path!r}: {_e}")
-        _log_fh = None
-
-# Preliminary manager — profile may be updated after commander name is known
+# Preliminary manager — profile may be updated after commander name is known.
+# Debug log facility is initialised LATER (after the commander/profile
+# auto-detection runs), so the per-run log header includes the right
+# profile overrides.
 mgr = ConfigManager(config_dict, config_path, config_profile=args.config_profile)
 
 
@@ -323,6 +280,123 @@ else:
 gui_mode = (ui_mode == "gtk4")   # kept for internal compat (emitter, update notices)
 
 
+# ── Debug log facility ────────────────────────────────────────────────────────
+# A file-only diagnostic channel separate from stdout.  Standard output stays
+# on the terminal (terminal mode) or is closed off after fork (gtk4 mode);
+# trace lines, plugin errors, and unhandled exceptions go here instead.
+# The log file lives at <data_dir>/logs/error[_<profile>]_<YYYYMMDD>.log and
+# is opened lazily — runs that never trip --trace or an error path leave no
+# file behind.  Each run's section starts with a header recording version,
+# timestamp, exact launch command, and a fenced copy of the effective config
+# (defaults from config file, plus any active profile's overrides).
+#
+# Initialised here — after profile auto-detection so the header reflects the
+# *effective* profile, and before the fork/silence step so the file is ready
+# to receive output from the post-fork child.
+
+from core.state import EDLD_DATA_DIR
+from core       import debug as _debug
+
+_profile_overrides: dict | None = None
+if _config_profile and isinstance(config_dict, dict):
+    _po = config_dict.get(_config_profile)
+    if isinstance(_po, dict):
+        _profile_overrides = _po
+
+_debug.init(
+    data_dir=EDLD_DATA_DIR,
+    profile=_config_profile or None,
+    version=VERSION,
+    config_dict=config_dict if isinstance(config_dict, dict) else {},
+    profile_overrides=_profile_overrides,
+    trace_echo=trace_mode,
+)
+_debug.install_exception_hooks()
+
+
+# ── Detach / silence for UI modes ─────────────────────────────────────────────
+# This MUST run before any background thread spawns (update check, plugin
+# senders, CAPI poll, monitor thread, Discord webhook).  Python 3.12+ refuses
+# to fork() safely once threads are alive, and the actual failure mode is a
+# silent child deadlock on inherited locks — so we fork while the process is
+# still single-threaded.
+#
+#   gtk4    — fork; parent prints "Launching gtk4 — logs: <path>" then exits
+#             so the shell prompt returns immediately.  Child becomes its own
+#             session leader (setsid) and closes fd 0/1/2 onto /dev/null since
+#             the GUI runs in X11/Wayland and never needs the terminal again.
+#
+#   textual — no fork (Textual needs the foreground process group for TTY
+#             input).  Parent prints "Launching textual — logs: <path>" then
+#             continues in-place; sys.stdout/sys.stderr are swapped for
+#             /dev/null at the Python level so background-thread print()
+#             calls don't punch through Textual's alt-screen rendering.
+#             Textual writes through fd 1 directly and is unaffected.
+#
+#   terminal — neither.  Scrolling event output to the terminal is the whole
+#             point of this mode.
+
+if ui_mode == "gtk4":
+    log_p = _debug.path()
+    print(
+        f"{Terminal.GOOD}Launching gtk4{Terminal.END}"
+        + (f" — diagnostic logs: {log_p}" if log_p else "")
+    )
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    if hasattr(os, "fork"):
+        try:
+            pid = os.fork()
+        except OSError as exc:
+            print(f"  [WARN] fork failed: {exc}; staying attached to terminal")
+            pid = 0
+        if pid > 0:
+            # Parent: hand the terminal back to the shell.  Use _exit so
+            # we skip atexit hooks (the child owns those now).
+            os._exit(0)
+        # Child: detach from controlling terminal so a Ctrl+C in the parent
+        # shell doesn't propagate down to us.
+        try:
+            os.setsid()
+        except OSError:
+            pass
+
+    # Child (or non-fork environments): close fd 0/1/2 onto /dev/null.
+    try:
+        _devnull = os.open(os.devnull, os.O_RDWR)
+        os.dup2(_devnull, 0)
+        os.dup2(_devnull, 1)
+        os.dup2(_devnull, 2)
+        os.close(_devnull)
+    except OSError:
+        pass
+
+elif ui_mode == "textual":
+    log_p = _debug.path()
+    print(
+        f"{Terminal.GOOD}Launching textual{Terminal.END}"
+        + (f" — diagnostic logs: {log_p}" if log_p else "")
+    )
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # Python-level only — Textual writes to fd 1 directly and needs fd 0
+    # for TTY input, so we don't touch the underlying file descriptors.
+    try:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+    except OSError:
+        pass
+
+
+# ── Now safe to start background threads ──────────────────────────────────────
+# Update check spins off here so its result is available by the time we
+# render the update notice in the post-bootstrap section.  In gtk4 mode
+# this runs in the child; in textual/terminal mode it runs in-process.
+
+_update_thread.start()
+
+
 # ── Emitter ───────────────────────────────────────────────────────────────────
 
 from core.emit import Emitter, emit_summary
@@ -343,13 +417,15 @@ from core.journal       import build_dispatch_map
 from core.data          import DataProvider
 from core.state         import EDLD_DATA_DIR, cmdr_data_dir
 
-# DataProvider — unified source of truth, instantiated before CoreAPI
-_dp_storage = PluginStorage(cmdr_data_dir() / "core")
+# DataProvider — unified source of truth, instantiated before CoreAPI.
+# Uses the "core" plugin namespace for its CAPI persisted snapshots; under
+# the flat storage layout those land at <cmdr>/data/core.<purpose>.json.
+_dp_storage = PluginStorage("core")
 data_provider = DataProvider(
     state=state,
     storage=_dp_storage,
     gui_queue_fn=lambda: gui_queue,
-    print_fn=lambda m: print(m) if trace_mode else None,
+    print_fn=lambda m: _debug.info(m),
 )
 
 core = CoreAPI(
@@ -373,7 +449,7 @@ data_provider.start()   # start CAPI poll thread after plugins loaded
 
 # ── Bootstrap from journal history ────────────────────────────────────────────
 
-print("\nStarting... (Press Ctrl+C to stop)\n")
+_debug.info("Starting EDLD monitor (Press Ctrl+C to stop)")
 
 from core.journal import bootstrap_fighter_bay, bootstrap_slf, bootstrap_crew, bootstrap_missions, bootstrap_burn_rate
 
@@ -447,6 +523,10 @@ if __name__ == "__main__":
 
         _tui_theme = mgr.ui_cfg.get("Theme", "default")
 
+        # Detach already happened up-front (before plugin loading) so by
+        # this point sys.stdout/sys.stderr are already routed to /dev/null
+        # in textual mode.  Just start the monitor + the TUI.
+
         monitor_thread = threading.Thread(target=run_monitor, daemon=True)
         monitor_thread.start()
 
@@ -468,6 +548,10 @@ if __name__ == "__main__":
                 f"Ensure PyGObject (GTK4) is installed: pacman -S python-gobject gtk4"
             )
             sys.exit(1)
+
+        # We're already running in the post-fork child here — the parent
+        # exited up top, immediately after the banner.  Monitor + GTK
+        # main loop spin up below; their stdout is closed onto /dev/null.
 
         monitor_thread = threading.Thread(target=run_monitor, daemon=True)
         monitor_thread.start()
@@ -514,21 +598,26 @@ if __name__ == "__main__":
                                 if not all(p in line for p in _DROP):
                                     _orig_out.write(line)
                                     _orig_out.flush()
-                                    if _log_fh is not None:
-                                        try:
-                                            _log_fh.write(line.decode("utf-8", errors="replace"))
-                                            _log_fh.flush()
-                                        except Exception:
-                                            pass
+                                    # Mirror GTK warnings into the debug log
+                                    # so we still have a paper trail after the
+                                    # fork (when fd 2 → /dev/null in child).
+                                    try:
+                                        _debug.log(
+                                            line.decode("utf-8", errors="replace").rstrip(),
+                                            level="GTK",
+                                        )
+                                    except Exception:
+                                        pass
                     if buf and not all(p in buf for p in _DROP):
                         _orig_out.write(buf)
                         _orig_out.flush()
-                        if _log_fh is not None:
-                            try:
-                                _log_fh.write(buf.decode("utf-8", errors="replace"))
-                                _log_fh.flush()
-                            except Exception:
-                                pass
+                        try:
+                            _debug.log(
+                                buf.decode("utf-8", errors="replace").rstrip(),
+                                level="GTK",
+                            )
+                        except Exception:
+                            pass
 
                 _th.Thread(target=_pump, daemon=True,
                            name="stderr-filter").start()
@@ -540,9 +629,3 @@ if __name__ == "__main__":
 
     else:  # terminal
         run_monitor()
-
-    if _log_fh is not None:
-        try:
-            _log_fh.close()
-        except Exception:
-            pass
