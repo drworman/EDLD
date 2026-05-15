@@ -30,7 +30,7 @@ def _strip_target_type(raw: str) -> str:
 
 
 class MissionsBlock(BlockWidget):
-    BLOCK_TITLE = "Mission Stack"
+    BLOCK_TITLE = "Massacre Mission Stack"
     BLOCK_CSS   = "missions-block"
 
     DEFAULT_COL    = 0

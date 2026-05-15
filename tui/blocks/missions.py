@@ -25,7 +25,7 @@ def _strip_target_type(raw: str) -> str:
 
 
 class MissionsBlock(TuiBlock):
-    BLOCK_TITLE = "MISSION STACK"
+    BLOCK_TITLE = "MASSACRE MISSION STACK"
 
     def _compose_body(self) -> ComposeResult:
         yield VerticalScroll(id="missions-scroll")

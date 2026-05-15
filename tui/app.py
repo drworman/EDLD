@@ -2,15 +2,16 @@
 tui/app.py — Textual TUI application for EDLD.
 
 Three-column layout matching the default dashboard arrangement:
-  Left   : Career  |  Session Stats  |  Colonisation
-  Centre : Commander  |  Alerts  |  Mission Stack  |  Cargo
+  Left   : Career  |  Colonisation  |  Navigation
+  Centre : Commander  |  Alerts  |  Massacre Mission Stack  |  Cargo
   Right  : Crew/SLF  |  Assets  |  Engineering
 
 Hotkeys
-  q       Quit
-  r       Reset session
-  c       Clear alerts
-  ctrl+o  Options (theme picker)
+  ctrl+q  Quit
+  ctrl+r  Reset session counters
+  ctrl+l  Clear alerts
+  ctrl+o  Options / theme picker
+  ctrl+k  Toggle session-management overlay
 """
 from __future__ import annotations
 import queue
@@ -23,9 +24,8 @@ from textual.widgets    import Header, Footer, Label
 from textual.containers import Horizontal, Vertical, VerticalScroll
 
 from tui.preferences   import PreferencesScreen
-from tui.reports       import ReportsScreen
 from tui.blocks.career import CareerBlock
-from tui.blocks.session_stats import SessionStatsBlock
+from tui.blocks.navigation import NavigationBlock
 from tui.blocks.colonisation  import ColonisationBlock
 from tui.blocks.commander     import CommanderBlock
 from tui.blocks.alerts        import AlertsBlock
@@ -43,12 +43,17 @@ if TYPE_CHECKING:
 
 _MSG_DISPATCH: dict[str, list[str]] = {
     "career_update":      ["block-career"],
-    "stats_update":       ["block-stats"],
+    # Session counter / reset events repaint Career (which absorbed the
+    # deprecated Session Stats block's Summary tab).
+    "stats_update":       ["block-career"],
+    # Generic state changes — keep Career's session-scoped Summary live,
+    # plus Navigation's Carrier tab readout.
+    "state_update":       ["block-career", "block-nav"],
     "colonisation_update":["block-colon"],
     "crew_update":        ["block-crew"],
     "slf_update":         ["block-crew"],
     "vessel_update":      ["block-commander"],
-    "location_update":    ["block-commander"],
+    "location_update":    ["block-commander", "block-nav"],
     "mission_update":     ["block-missions"],
     "cargo_update":       ["block-cargo"],
     "assets_update":      ["block-assets"],
@@ -56,13 +61,14 @@ _MSG_DISPATCH: dict[str, list[str]] = {
     "alert_update":       ["block-alerts"],
     "pp_update":          ["block-career", "block-commander"],
     "cmdr_update":        ["block-commander"],
-    "capi_updated":       ["block-commander", "block-crew", "block-assets", "block-cargo"],
+    "capi_updated":       ["block-commander", "block-crew", "block-assets",
+                           "block-cargo", "block-nav"],
     # update_notice has no block target — handled directly in _poll_queue
 }
 
 _PLUGIN_TO_BLOCK: dict[str, str] = {
     "career":        "block-career",
-    "session_stats": "block-stats",
+    "navigation":    "block-nav",
     "colonisation":  "block-colon",
     "crew_slf":      "block-crew",
     "commander":     "block-commander",
@@ -84,7 +90,6 @@ class EdmdTui(App):
         Binding("ctrl+q", "quit",           "Quit"),
         Binding("ctrl+r", "reset_session",  "Reset Session"),
         Binding("ctrl+l", "clear_alerts",   "Clear Alerts"),
-        Binding("r",      "reports",        "Reports"),
         Binding("ctrl+o", "options",        "Options"),
         Binding("ctrl+k", "toggle_ksw",     "Session Mgmt", show=True),
     ]
@@ -104,7 +109,7 @@ class EdmdTui(App):
         with Horizontal(id="dashboard"):
             with Vertical(id="col-left"):
                 yield CareerBlock(self._core,       id="block-career")
-                yield SessionStatsBlock(self._core, id="block-stats")
+                yield NavigationBlock(self._core,   id="block-nav")
                 yield ColonisationBlock(self._core, id="block-colon")
             with Vertical(id="col-centre"):
                 yield CommanderBlock(self._core,    id="block-commander")
@@ -212,7 +217,7 @@ class EdmdTui(App):
 
     def _all_block_ids(self) -> list[str]:
         return [
-            "block-career", "block-stats", "block-colon",
+            "block-career", "block-nav", "block-colon",
             "block-commander", "block-alerts", "block-missions", "block-cargo",
             "block-crew", "block-assets", "block-eng",
         ]
@@ -227,10 +232,6 @@ class EdmdTui(App):
 
     def action_clear_alerts(self) -> None:
         self._core.plugin_call("alerts", "clear_alerts")
-
-    def action_reports(self) -> None:
-        self.push_screen(ReportsScreen(self._core))
-        self.set_timer(0.05, lambda: self.refresh(layout=True))
 
     def action_toggle_ksw(self) -> None:
         """Toggles session management if KSW component is loaded."""

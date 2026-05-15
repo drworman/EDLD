@@ -9,7 +9,7 @@ appended per-theme in apply_theme().
 # ── Structural CSS (layout, spacing — no colours) ─────────────────────────────
 #
 # Block proportions are hardcoded to match the production layout.json:
-#   Left   (11/32 cols): career 40%, session_stats 37%, colonisation 23%
+#   Left   (11/32 cols): career 40%, navigation 37%, colonisation 23%
 #   Centre (11/32 cols): commander 30%, alerts 17%, missions 25%, cargo 28%
 #   Right  (10/32 cols): crew_slf 18%, assets 40%, engineering 42%
 #
@@ -48,9 +48,9 @@ TuiBlock > VerticalScroll { height: 1fr; }
 TuiBlock > TabbedContent  { height: 1fr; }
 
 /* ── Left column block heights ──────────────────────────────────────────────── */
-/* career:41  session_stats:38  colonisation:24  (total 103 rows)               */
+/* career:41  navigation:38  colonisation:24  (total 103 rows)                  */
 #block-career { height: 40%; }
-#block-stats  { height: 37%; }
+#block-nav    { height: 37%; }
 #block-colon  { height: 23%; }
 
 /* ── Centre column block heights ────────────────────────────────────────────── */
@@ -195,7 +195,6 @@ PreferencesScreen Switch { height: 1; }
 PreferencesScreen Button { height: 3; margin-left: 1; }
 
 /* ── Reports screen ──────────────────────────────────────────────────────────── */
-ReportsScreen { align: center middle; }
 
 #reports-outer {
     width: 95%;

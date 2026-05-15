@@ -41,30 +41,34 @@ from gui.blocks   import (
     CommanderBlock,
     CrewSlfBlock,
     MissionsBlock,
-    SessionStatsBlock,
     AlertsBlock,
     CargoBlock,
     EngineeringBlock,
     AssetsBlock,
     ColonisationBlock,
     CareerBlock,
+    NavigationBlock,
 )
 
 GLib.set_prgname("edld")
 GLib.set_application_name("EDLD")
 
 # Built-in block registry — (name, BlockWidget subclass, display title)
+# The former "Session Stats" block has been consolidated into "Career":
+# its Summary tab (with reset button) is now the Career block's first
+# tab, and Career's activity tabs show lifetime data.  Navigation
+# (FSD / Neutron / Carrier) fills the col-0 slot that used to hold it.
 _BUILTIN_REGISTRY = [
     ("commander",     CommanderBlock,     "Commander"),
-    ("session_stats", SessionStatsBlock,  "Session Stats"),
     ("crew_slf",      CrewSlfBlock,       "Crew / SLF"),
-    ("missions",      MissionsBlock,      "Mission Stack"),
+    ("missions",      MissionsBlock,      "Massacre Mission Stack"),
     ("alerts",        AlertsBlock,        "Alerts"),
     ("cargo",         CargoBlock,         "Cargo"),
     ("engineering",   EngineeringBlock,   "Engineering"),
     ("assets",        AssetsBlock,        "Assets"),
     ("colonisation",  ColonisationBlock,  "Colonisation"),
     ("career",        CareerBlock,        "Career"),
+    ("navigation",    NavigationBlock,    "Navigation"),
 ]
 
 
@@ -469,15 +473,31 @@ class EdmdWindow(Gtk.ApplicationWindow):
                 elif msg_type == "mission_update":
                     self._mark_dirty("missions")
                 elif msg_type == "stats_update":
-                    self._mark_dirty("session_stats")
+                    # Session counter / reset events repaint the Career
+                    # block, which absorbed the deprecated Session Stats
+                    # block's Summary content.
+                    self._mark_dirty("career")
+                elif msg_type == "state_update":
+                    # Generic state change — keep Career's session-scoped
+                    # Summary tab, Navigation's source-system pre-fill, and
+                    # the session-management surface (now in Alerts footer)
+                    # live.
+                    self._mark_dirty("career")
+                    self._mark_dirty("navigation")
+                    self._mark_dirty("alerts")
                 elif msg_type == "holdings_update":
                     self._mark_dirty("assets")
                 elif msg_type == "alerts_update":
                     self._mark_dirty("alerts")
                 elif msg_type == "career_update":
                     self._mark_dirty("career")
+                elif msg_type == "ksw_status":
+                    # Status-flush events from the ksw plugin (kill fired,
+                    # manual end, enrollment change) — refresh the Alerts
+                    # block since its footer now owns the session-mgmt UI.
+                    self._mark_dirty("alerts")
                 elif msg_type == "capi_updated":
-                    for _n in ("assets", "commander", "cargo", "crew_slf"):
+                    for _n in ("assets", "commander", "cargo", "crew_slf", "navigation"):
                         self._mark_dirty(_n)
                 elif msg_type == "all_update":
                     for _n in self._blocks:
