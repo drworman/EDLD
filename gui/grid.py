@@ -47,18 +47,25 @@ GAP      = 2
 MIN_W    = 3
 MIN_H    = 1
 
-# Default block layout — three columns at col 0 (w=11), col 11 (w=11), col 22 (w=10).
+# Default block layout — adopted from the user-provided layout.json.
+# Four columns: col 0 (w=11), col 11 (w=10), col 21 (w=11).  The
+# session_stats and ksw blocks from that file are intentionally omitted —
+# the standalone Session Stats block was removed (its content folded into
+# Career's Summary tab) and the kill-switch UI now lives in the Alerts
+# block footer, so neither has a grid cell any more.  If a user's saved
+# layout still references them, the layout engine simply ignores the
+# unknown names.
 DEFAULT_LAYOUT = {
-    "career":       {"col": 0,  "row": 0,   "width": 11, "height": 41},
-    "session_stats":{"col": 0,  "row": 40,  "width": 11, "height": 38},
-    "colonisation": {"col": 0,  "row": 77,  "width": 11, "height": 24},
-    "commander":    {"col": 11, "row": 0,   "width": 11, "height": 31},
-    "alerts":       {"col": 11, "row": 31,  "width": 11, "height": 17},
-    "missions":     {"col": 11, "row": 47,  "width": 11, "height": 26},
-    "cargo":        {"col": 11, "row": 72,  "width": 11, "height": 29},
-    "crew_slf":     {"col": 22, "row": 0,   "width": 10, "height": 19},
-    "assets":       {"col": 22, "row": 18,  "width": 10, "height": 41},
-    "engineering":  {"col": 22, "row": 58,  "width": 10, "height": 43},
+    "assets":       {"col": 0,  "row": 0,   "width": 11, "height": 43},
+    "engineering":  {"col": 0,  "row": 43,  "width": 11, "height": 35},
+    "colonisation": {"col": 0,  "row": 78,  "width": 11, "height": 23},
+    "commander":    {"col": 11, "row": 0,   "width": 10, "height": 32},
+    "crew_slf":     {"col": 11, "row": 32,  "width": 10, "height": 18},
+    "alerts":       {"col": 11, "row": 50,  "width": 10, "height": 16},
+    "cargo":        {"col": 11, "row": 66,  "width": 10, "height": 35},
+    "missions":     {"col": 21, "row": 0,   "width": 11, "height": 28},
+    "navigation":   {"col": 21, "row": 28,  "width": 11, "height": 33},
+    "career":       {"col": 21, "row": 61,  "width": 11, "height": 40},
 }
 
 

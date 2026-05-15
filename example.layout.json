@@ -1,65 +1,65 @@
 {
   "version": 2,
   "blocks": {
-    "career": {
+    "assets": {
       "col": 0,
       "row": 0,
       "width": 11,
-      "height": 41
+      "height": 43
     },
-    "session_stats": {
+    "engineering": {
       "col": 0,
-      "row": 40,
+      "row": 43,
       "width": 11,
-      "height": 38
+      "height": 35
     },
     "colonisation": {
       "col": 0,
-      "row": 77,
+      "row": 78,
       "width": 11,
-      "height": 24
+      "height": 23
     },
     "commander": {
       "col": 11,
       "row": 0,
-      "width": 11,
-      "height": 31
+      "width": 10,
+      "height": 32
+    },
+    "crew_slf": {
+      "col": 11,
+      "row": 32,
+      "width": 10,
+      "height": 18
     },
     "alerts": {
       "col": 11,
-      "row": 31,
-      "width": 11,
-      "height": 17
-    },
-    "missions": {
-      "col": 11,
-      "row": 47,
-      "width": 11,
-      "height": 26
+      "row": 50,
+      "width": 10,
+      "height": 16
     },
     "cargo": {
       "col": 11,
-      "row": 72,
-      "width": 11,
-      "height": 29
+      "row": 66,
+      "width": 10,
+      "height": 35
     },
-    "crew_slf": {
-      "col": 22,
+    "missions": {
+      "col": 21,
       "row": 0,
-      "width": 10,
-      "height": 19
+      "width": 11,
+      "height": 28
     },
-    "assets": {
-      "col": 22,
-      "row": 18,
-      "width": 10,
-      "height": 41
+    "navigation": {
+      "col": 21,
+      "row": 28,
+      "width": 11,
+      "height": 33
     },
-    "engineering": {
-      "col": 22,
-      "row": 58,
-      "width": 10,
-      "height": 43
+    "career": {
+      "col": 21,
+      "row": 61,
+      "width": 11,
+      "height": 40
     }
   }
 }

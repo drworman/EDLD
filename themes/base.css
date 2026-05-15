@@ -285,7 +285,11 @@ progressbar.pp-rank-bar trough {
 
 progressbar.pp-rank-bar progress {
     min-height: 4px;
-    min-width: 0;
+    /* min-width must be >= internal trough padding (2px) to avoid GTK4
+       reporting negative min widths during size negotiation when the
+       bar is near 0% fraction.  See GtkGizmo "progress reported min
+       width -2" warning. */
+    min-width: 2px;
     border-radius: 0;
     background-color: var(--accent);
     background-image: none;
@@ -294,7 +298,7 @@ progressbar.pp-rank-bar progress {
 
 progressbar.pp-rank-bar progress > fill {
     min-height: 4px;
-    min-width: 0;
+    min-width: 2px;
     background-color: var(--accent);
     background-image: none;
     border: none;
@@ -1314,4 +1318,40 @@ link:hover {
     letter-spacing: 0.08em;
     color: var(--accent-dim);
     text-transform: uppercase;
+}
+
+/* ── Navigation block — slim form inputs ───────────────────────────────────── */
+/* The block stacks three input fields plus a button row inside a width=11
+   column block.  GTK4's default Entry padding (3px 6px from the global rule
+   above) leaves the From/To/Range stack too tall, pushing the results list
+   off-screen.  Trim padding + remove the inset shadow so each Entry's
+   intrinsic height drops to roughly one line of text. */
+
+entry.nav-entry {
+    padding: 1px 6px;
+    min-height: 0;
+    box-shadow: none;
+}
+
+.nav-plot-btn {
+    font-size: 0.82em;
+    padding: 1px 8px;
+    min-height: 0;
+}
+
+/* ── Career block — reset button (↺) ───────────────────────────────────────── */
+/* The reset button sits at the right edge of the tab bar.  It uses the same
+   .mat-tab-btn class so its baseline geometry matches the surrounding tabs,
+   but never gets the active-underline indicator. */
+
+.career-reset-btn {
+    padding: 4px 8px 5px 8px;
+    color: var(--accent);
+    font-weight: bold;
+}
+
+.career-reset-btn:hover {
+    background-color: var(--accent-hover);
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent);
 }
