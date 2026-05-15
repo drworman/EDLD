@@ -46,8 +46,6 @@ HTTP_TIMEOUT_S        = 30
 SEND_INTERVAL_S       = 10      # ~6/min, leaves comfortable headroom under 100/15 min
 BATCH_MAX             = 30
 STARTUP_DELAY_S       = 12      # stagger slightly behind EDSM startup
-def _queue_file() -> Path:
-    return cmdr_data_dir() / "edastro_queue.jsonl"
 
 # Carrier events that require explicit opt-in
 _CARRIER_EVENTS = frozenset({
@@ -280,7 +278,7 @@ class EDAstroPlugin(BasePlugin):
             name="edastro-interest",
         ).start()
 
-        self._sender = _Sender(self.storage.path / "queue.jsonl")
+        self._sender = _Sender(self.storage.file_path("queue.jsonl"))
         self._sender.start()
 
         carrier_note = " (carrier events: on)" if self._carrier_opt_in else ""

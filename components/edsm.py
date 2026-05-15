@@ -55,15 +55,13 @@ EDSM_JOURNAL_URL   = "https://www.edsm.net/api-journal-v1"
 EDSM_DISCARD_URL   = "https://www.edsm.net/api-journal-v1/discard"
 # Read endpoints — anonymous for system-v1, authenticated for commander-v1.
 EDSM_SYSTEM_BODIES_URL    = "https://www.edsm.net/api-system-v1/bodies"
-EDSM_CMDR_POSITION_URL    = "https://www.edsm.net/api-commander-v1/get-position"
+EDSM_CMDR_POSITION_URL    = "https://www.edsm.net/api-logs-v1/get-position"
 SOFTWARE_NAME      = "EDLD"
 SOFTWARE_VERSION   = VERSION
 HTTP_TIMEOUT_S     = 15
 SEND_INTERVAL_S    = 12      # minimum gap between POST requests (~5/min, well under 360/hr)
 BATCH_MAX          = 50      # maximum events per POST
 STARTUP_DELAY_S    = 10      # seconds after load before we begin uploading
-def _queue_file() -> Path:
-    return cmdr_data_dir() / "edsm_queue.jsonl"
 
 # Events that are always suppressed regardless of discard list — these
 # are meta-frames or shutdown markers that EDSM cannot meaningfully use.
@@ -632,14 +630,15 @@ class EDSMPlugin(BasePlugin):
 
         self._sender = _Sender(
             self._cmdr_provider, self._key,
-            self.storage.path / "queue.jsonl",
+            self.storage.file_path("queue.jsonl"),
             metadata_provider=self._get_metadata_snapshot,
         )
         self._sender.start()
 
         # Key length only — full key never goes to logs.  Commander name will
         # appear on the first batch's diagnostic line once pilot_name lands.
-        print(
+        from core import debug as _dbg
+        _dbg.info(
             f"  [EDSM] Enabled — ApiKey=<{len(self._key)} chars>; "
             f"commander will be sourced from journal data."
         )

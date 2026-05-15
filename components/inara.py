@@ -47,6 +47,7 @@ import urllib.request
 from pathlib import Path
 
 from core.plugin_loader import BasePlugin
+from core import debug as _dbg
 from core.state import EDLD_DATA_DIR, VERSION
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -59,8 +60,6 @@ HTTP_TIMEOUT_S  = 20
 SEND_INTERVAL_S = 30        # 2 requests/minute hard limit from Inara
 STARTUP_DELAY_S = 8         # wait before first send so preload finishes
 BATCH_MAX       = 100       # events per request (Inara has no documented per-batch limit)
-def _queue_file() -> Path:
-    return cmdr_data_dir() / "inara_queue.jsonl"
 
 # Journal Rank keys → Inara rankName strings
 _RANK_KEYS = {
@@ -117,10 +116,14 @@ class _Sender(threading.Thread):
         self._q.put(None)
 
     def run(self) -> None:
+        _dbg.info(f"  [Inara] sender thread entering main loop "
+                  f"(queue file: {self._queue_file})")
         time.sleep(STARTUP_DELAY_S)
         self._drain_disk()
 
         batch: list[dict] = []
+        push_count = 0   # total events pushed; logged periodically as a heartbeat
+        last_heartbeat = time.monotonic()
 
         while not self._stop_evt.is_set():
             try:
@@ -129,7 +132,15 @@ class _Sender(threading.Thread):
                 if batch and (time.monotonic() - self._last_send >= SEND_INTERVAL_S):
                     self._send_batch(batch)
                     batch = []
+                # Heartbeat once a minute — confirms the sender is alive and
+                # surfaces "queue is empty, no events arriving" cases.
+                if time.monotonic() - last_heartbeat >= 60:
+                    _dbg.log(f"  [Inara] sender heartbeat: "
+                             f"pushed {push_count} events since start, "
+                             f"batch={len(batch)}, last_send={self._last_send:.0f}")
+                    last_heartbeat = time.monotonic()
                 continue
+            push_count += 1
 
             if item is None:
                 if batch:
@@ -167,7 +178,7 @@ class _Sender(threading.Thread):
         except Exception:
             cmdr = ""
         if not cmdr:
-            print(
+            _dbg.info(
                 f"  [Inara] Deferring send — commander name not yet known "
                 f"(journal Commander/LoadGame missing); "
                 f"persisting {len(events)} event(s) to disk."
@@ -197,24 +208,30 @@ class _Sender(threading.Thread):
                 },
                 method="POST",
             )
+            _dbg.log(f"  [Inara] POST {len(events)} event(s) for "
+                     f"commander={cmdr!r}")
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
                 self._last_send = time.monotonic()
                 body = resp.read().decode("utf-8")
                 result = json.loads(body) if body.strip() else {}
                 header_status = result.get("header", {}).get("eventStatus", 200)
-                if header_status not in (200, 204):
+                if header_status in (200, 204):
+                    _dbg.log(f"  [Inara] batch accepted (HTTP {resp.status}, "
+                             f"header_status={header_status}, "
+                             f"{len(events)} event(s))")
+                else:
                     msg = result.get("header", {}).get("eventStatusText", "")
-                    print(f"  [Inara] API header error {header_status}: {msg}")
+                    _dbg.info(f"  [Inara] API header error {header_status}: {msg}")
                     # 400 = bad request — no point retrying
                     if header_status != 400:
                         self._persist(events)
 
         except urllib.error.HTTPError as e:
-            print(f"  [Inara] HTTP {e.code} — queuing {len(events)} event(s) to disk")
+            _dbg.info(f"  [Inara] HTTP {e.code} — queuing {len(events)} event(s) to disk")
             if e.code != 400:
                 self._persist(events)
         except Exception as exc:
-            print(f"  [Inara] Send error ({type(exc).__name__}: {exc}) — queuing to disk")
+            _dbg.info(f"  [Inara] Send error ({type(exc).__name__}: {exc}) — queuing to disk")
             self._persist(events)
 
     # ── Disk queue ────────────────────────────────────────────────────────────
@@ -227,7 +244,7 @@ class _Sender(threading.Thread):
                 for ev in events:
                     f.write(json.dumps({"queued_at": time.time(), "msg": ev}) + "\n")
         except Exception as e:
-            print(f"  [Inara] Failed to persist events to disk: {e}")
+            _dbg.info(f"  [Inara] Failed to persist events to disk: {e}")
 
     def _drain_disk(self) -> None:
         if not self._queue_file.exists():
@@ -251,7 +268,7 @@ class _Sender(threading.Thread):
                 pass
 
         if events:
-            print(f"  [Inara] Replaying {len(events)} queued event(s) from disk...")
+            _dbg.info(f"  [Inara] Replaying {len(events)} queued event(s) from disk...")
             for i in range(0, len(events), BATCH_MAX):
                 self._send_batch(events[i:i + BATCH_MAX])
                 if i + BATCH_MAX < len(events):
@@ -274,7 +291,11 @@ class InaraPlugin(BasePlugin):
     PLUGIN_DISPLAY     = "Inara Uploader"
     PLUGIN_VERSION     = PLUGIN_VERSION
     PLUGIN_DESCRIPTION = "Posts commander activity to inara.cz."
-    PLUGIN_DEFAULT_ENABLED = False
+    # Loads by default, matching the other integration plugins (eddn,
+    # edsm, edastro).  Whether the plugin actually *runs* is decided by
+    # the user's config — see the cfg["Enabled"] check in on_load.  The
+    # plugin_states.json menu toggle is a second-level override on top.
+    PLUGIN_DEFAULT_ENABLED = True
 
     SUBSCRIBED_EVENTS = [
         # Session
@@ -367,12 +388,12 @@ class InaraPlugin(BasePlugin):
         cfg = core.load_setting("Inara", CFG_DEFAULTS, warn=False)
 
         if not bool(core.cfg.app_settings.get("PrimaryInstance", True)):
-            print("  [Inara] Uploads suppressed (PrimaryInstance = false)")
+            _dbg.info("  [Inara] Uploads suppressed (PrimaryInstance = false)")
             return
         if not cfg["Enabled"]:
             return
         if not cfg["ApiKey"]:
-            print(
+            _dbg.info(
                 "  [Inara] Disabled — ApiKey must be set in config.toml "
                 "under [Inara] (commander name is sourced from journal)"
             )
@@ -385,7 +406,7 @@ class InaraPlugin(BasePlugin):
         # is empty (e.g. before journal preload finishes).
         cmdr_provider = lambda: (getattr(core.state, "pilot_name", None) or "")
         self._sender  = _Sender(
-            cmdr_provider, cfg["ApiKey"], self.storage.path / "queue.jsonl",
+            cmdr_provider, cfg["ApiKey"], self.storage.file_path("queue.jsonl"),
         )
         self._sender.start()
 
@@ -447,7 +468,7 @@ class InaraPlugin(BasePlugin):
                 self._reconcile_fleet(state, ts)
             except Exception as e:
                 # Never let reconciliation errors break event processing.
-                print(f"  [Inara] fleet reconcile error: {e}")
+                _dbg.info(f"  [Inara] fleet reconcile error: {e}")
                 self._reconciled = True  # don't retry indefinitely on a broken state
 
         match ev:
@@ -989,7 +1010,7 @@ class InaraPlugin(BasePlugin):
             try:
                 self._fetch_community_goals()
             except Exception as exc:
-                print(f"  [Inara] CG fetch error ({type(exc).__name__}: {exc})")
+                _dbg.info(f"  [Inara] CG fetch error ({type(exc).__name__}: {exc})")
             if self._cg_stop_evt.wait(self._CG_REFRESH_INTERVAL_S):
                 return
 
@@ -1016,7 +1037,7 @@ class InaraPlugin(BasePlugin):
             },
             "events": [
                 {
-                    "eventName":      "getCommunityGoals",
+                    "eventName":      "getCommunityGoalsRecent",
                     "eventTimestamp": ts_iso,
                     "eventData":      {},
                 },
@@ -1036,19 +1057,19 @@ class InaraPlugin(BasePlugin):
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
                 body = resp.read().decode("utf-8")
         except Exception as exc:
-            print(f"  [Inara] CG fetch HTTP error ({type(exc).__name__}: {exc})")
+            _dbg.info(f"  [Inara] CG fetch HTTP error ({type(exc).__name__}: {exc})")
             return
 
         try:
             result = json.loads(body) if body.strip() else {}
         except json.JSONDecodeError as exc:
-            print(f"  [Inara] CG fetch — unparseable response ({exc})")
+            _dbg.info(f"  [Inara] CG fetch — unparseable response ({exc})")
             return
 
         header_status = result.get("header", {}).get("eventStatus", 200)
         if header_status not in (200, 204):
             msg = result.get("header", {}).get("eventStatusText", "")
-            print(f"  [Inara] CG fetch header error {header_status}: {msg}")
+            _dbg.info(f"  [Inara] CG fetch header error {header_status}: {msg}")
             return
 
         # The response events array mirrors the request.  Find the
@@ -1059,7 +1080,7 @@ class InaraPlugin(BasePlugin):
         ev = events[0]
         ev_status = ev.get("eventStatus", 200)
         if ev_status not in (200, 204):
-            print(
+            _dbg.info(
                 f"  [Inara] getCommunityGoals returned status {ev_status}: "
                 f"{ev.get('eventStatusText','')}"
             )
@@ -1071,7 +1092,7 @@ class InaraPlugin(BasePlugin):
         import time as _t
         self.core.state.inara_community_goals    = cgs
         self.core.state.inara_community_goals_ts = _t.time()
-        print(f"  [Inara] Community Goals refreshed: {len(cgs)} active")
+        _dbg.info(f"  [Inara] Community Goals refreshed: {len(cgs)} active")
 
     def get_community_goals(self) -> list:
         """Public accessor — returns the most recent CG list (may be empty

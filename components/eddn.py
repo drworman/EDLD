@@ -61,8 +61,6 @@ SOFTWARE_NAME    = PROGRAM
 SOFTWARE_VERSION = VERSION
 
 # Retry queue on disk
-def _queue_file() -> Path:
-    return cmdr_data_dir() / "eddn_queue.jsonl"
 
 # How often (seconds) the sender thread wakes to process the retry queue
 RETRY_INTERVAL_S = 60
@@ -365,7 +363,7 @@ class EDDNPlugin(BasePlugin):
         self._last_market_id:        int | None = None
 
         if self._enabled:
-            self._sender = _Sender(EDDN_ENDPOINT, self.storage.path / "queue.jsonl")
+            self._sender = _Sender(EDDN_ENDPOINT, self.storage.file_path("queue.jsonl"))
             self._sender.start()
             self._load_note = f"LIVE" if not self._test_mode else "TEST MODE"
         elif not self._primary:
