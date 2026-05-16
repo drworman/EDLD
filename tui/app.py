@@ -1,10 +1,12 @@
 """
 tui/app.py — Textual TUI application for EDLD.
 
-Three-column layout matching the default dashboard arrangement:
-  Left   : Career  |  Colonisation  |  Navigation
-  Centre : Commander  |  Alerts  |  Massacre Mission Stack  |  Cargo
-  Right  : Crew/SLF  |  Assets  |  Engineering
+Three-column layout mirroring the GTK4 default exactly (see
+gui/grid.py DEFAULT_LAYOUT):
+
+  Left   : Assets  |  Engineering  |  Colonisation
+  Centre : Commander  |  Crew/SLF  |  Alerts  |  Cargo
+  Right  : Massacre Mission Stack  |  Navigation  |  Career
 
 Hotkeys
   ctrl+q  Quit
@@ -106,20 +108,23 @@ class EdmdTui(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Label("", id="update-notice-bar")
+        # Column layout mirrors the GTK4 default (see gui/grid.py
+        # DEFAULT_LAYOUT).  Same blocks in the same columns and the
+        # same vertical order, so muscle memory transfers between UIs.
         with Horizontal(id="dashboard"):
             with Vertical(id="col-left"):
-                yield CareerBlock(self._core,       id="block-career")
-                yield NavigationBlock(self._core,   id="block-nav")
+                yield AssetsBlock(self._core,       id="block-assets")
+                yield EngineeringBlock(self._core,  id="block-eng")
                 yield ColonisationBlock(self._core, id="block-colon")
             with Vertical(id="col-centre"):
                 yield CommanderBlock(self._core,    id="block-commander")
+                yield CrewSlfBlock(self._core,      id="block-crew")
                 yield AlertsBlock(self._core,       id="block-alerts")
-                yield MissionsBlock(self._core,     id="block-missions")
                 yield CargoBlock(self._core,        id="block-cargo")
             with Vertical(id="col-right"):
-                yield CrewSlfBlock(self._core,      id="block-crew")
-                yield AssetsBlock(self._core,       id="block-assets")
-                yield EngineeringBlock(self._core,  id="block-eng")
+                yield MissionsBlock(self._core,     id="block-missions")
+                yield NavigationBlock(self._core,   id="block-nav")
+                yield CareerBlock(self._core,       id="block-career")
         yield Footer()
 
     def on_mount(self) -> None:

@@ -8,13 +8,21 @@ appended per-theme in apply_theme().
 
 # ── Structural CSS (layout, spacing — no colours) ─────────────────────────────
 #
-# Block proportions are hardcoded to match the production layout.json:
-#   Left   (11/32 cols): career 40%, navigation 37%, colonisation 23%
-#   Centre (11/32 cols): commander 30%, alerts 17%, missions 25%, cargo 28%
-#   Right  (10/32 cols): crew_slf 18%, assets 40%, engineering 42%
+# Column layout and block heights mirror the GTK4 default
+# (gui/grid.py DEFAULT_LAYOUT) exactly, so the same block sits in
+# the same place across both UIs:
+#   Left   : assets / engineering / colonisation     (rows 43 / 35 / 23)
+#   Centre : commander / crew / alerts / cargo       (rows 32 / 18 / 16 / 35)
+#   Right  : missions / navigation / career          (rows 28 / 33 / 40)
 #
-# The outer frame is NOT scrollable.  Each block's internal content area
-# scrolls independently via its own VerticalScroll / TabbedContent child.
+# Each column's heights below are those row counts normalised to %
+# (with a 1-point rounding shaved off the smallest entry per column
+# so totals don't exceed 100% on terminals that don't round up).
+#
+# Textual is fully terminal-resolution aware — at very narrow widths
+# (< 100 cols) the three columns will compress; below the cargo /
+# career blocks' minimum useful width they'll horizontally scroll
+# rather than break, which is preferable to hard-clipping content.
 
 STRUCTURAL_CSS = """
 /* Screen stacks Header / dashboard / Footer vertically. */
@@ -29,10 +37,10 @@ Screen {
     height: 1fr;
 }
 
-/* Column widths: 11 : 11 : 10 out of 32 grid columns. */
+/* Column widths: 11 : 10 : 11 out of 32 grid columns (matches GTK4). */
 #col-left   { width: 34%; height: 100%; }
-#col-centre { width: 34%; height: 100%; }
-#col-right  { width: 32%; height: 100%; }
+#col-centre { width: 32%; height: 100%; }
+#col-right  { width: 34%; height: 100%; }
 
 /* Blocks: no auto-height, no margin (border provides visual separation). */
 TuiBlock {
@@ -48,23 +56,23 @@ TuiBlock > VerticalScroll { height: 1fr; }
 TuiBlock > TabbedContent  { height: 1fr; }
 
 /* ── Left column block heights ──────────────────────────────────────────────── */
-/* career:41  navigation:38  colonisation:24  (total 103 rows)                  */
-#block-career { height: 40%; }
-#block-nav    { height: 37%; }
-#block-colon  { height: 23%; }
+/* assets:43  engineering:35  colonisation:23  (total 101 rows)                 */
+#block-assets { height: 43%; }
+#block-eng    { height: 35%; }
+#block-colon  { height: 22%; }
 
 /* ── Centre column block heights ────────────────────────────────────────────── */
-/* commander:31  alerts:17  missions:26  cargo:29  (total 103 rows)             */
-#block-commander { height: 30%; }
-#block-alerts    { height: 17%; }
-#block-missions  { height: 25%; }
-#block-cargo     { height: 28%; }
+/* commander:32  crew_slf:18  alerts:16  cargo:35  (total 101 rows)             */
+#block-commander { height: 32%; }
+#block-crew      { height: 18%; }
+#block-alerts    { height: 15%; }
+#block-cargo     { height: 35%; }
 
 /* ── Right column block heights ─────────────────────────────────────────────── */
-/* crew_slf:19  assets:41  engineering:43  (total 103 rows)                     */
-#block-crew   { height: 18%; }
-#block-assets { height: 45%; }
-#block-eng    { height: 37%; }
+/* missions:28  navigation:33  career:40  (total 101 rows)                      */
+#block-missions { height: 28%; }
+#block-nav      { height: 32%; }
+#block-career   { height: 40%; }
 
 .block-title {
     background: $title-bg;
