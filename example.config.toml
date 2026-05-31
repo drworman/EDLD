@@ -1,0 +1,251 @@
+# ==============================================================================
+# ED Monitor Daemon (EDLD) - config.toml
+# ==============================================================================
+#
+# HOT-RELOAD: EDLD monitors this file for changes while running.
+# Settings marked [HOT] take effect within ~1 second of saving.
+# Settings marked [RESTART] require restarting EDLD to take effect.
+# ==============================================================================
+
+[Settings]
+
+# [RESTART] Set to false on remote/secondary instances (e.g. a monitor PC reading
+# journals over NFS) to prevent duplicate uploads to EDDN, EDSM, and EDAstro.
+# The machine running the game should always be PrimaryInstance = true (default).
+# PrimaryInstance = true
+
+# [RESTART] Path to Elite Dangerous journal folder.
+# Required - no default. Change requires restart as the file handle must reopen.
+# JournalFolder = '\\SOMENETWORKSHARE\Users\me\Saved Games\Frontier Developments\Elite Dangerous'
+# JournalFolder = "/home/username/games/ED-Logs/EDP1"
+#
+# JournalFolder = "C:\\Users\\YourName\\Saved Games\\Frontier Developments\\Elite Dangerous"
+# JournalFolder = "C:/Users/YourName/Saved Games/Frontier Developments/Elite Dangerous"
+
+# [HOT] Use UTC timestamps instead of local time (Default: false)
+UseUTC = false
+
+# [HOT] Send a warning if kills/hour drop below this amount (Default: 20)
+WarnKillRate = 20
+
+# [HOT] Minutes since last kill before sending a no-kill warning (Default: 20)
+WarnNoKills = 20
+
+# [HOT] Minutes since session start before the initial no-kill warning (Default: 5)
+# This shorter threshold applies when no kills have occurred yet in the session.
+WarnNoKillsInitial = 5
+
+# [HOT] Minutes between repeated inactivity / kill-rate alerts (Default: 15)
+WarnCooldown = 15
+
+# [HOT] Mission stack size that triggers the "stack full" announcement (Default: 20)
+FullStackSize = 20
+
+# [HOT] Maximum number of characters to show in pilot/ship names (Default: 30)
+TruncateNames = 30
+
+# [HOT] Show faction name on each kill (Default: false)
+BountyFaction = false
+
+# [HOT] Show credits earned on each kill (Default: false)
+BountyValue = false
+
+# [HOT] Show extra stats e.g. kill counts and faction tallies (Default: false)
+ExtendedStats = false
+
+# [HOT] Show pirate pilot names in kill/scan messages (Default: false)
+PirateNames = false
+
+# [HOT] Minimum scan stage required to log an outgoing scan (Default: 1)
+MinScanLevel = 1
+
+[Discord]
+
+# [RESTART] Discord webhook URL.
+# The webhook object is built once at startup and cannot be changed on the fly.
+# WebhookURL = 'https://discord.com/api/webhooks/1234567890/your-webhook-token-here'
+WebhookURL = ''
+
+# [RESTART] Your Discord user ID for pings (numbers only).
+# Used to build ping strings at startup. Change requires restart.
+# UserID = 123456789098765432
+UserID = 0
+
+# [RESTART] Set true if the webhook targets a forum channel (enables thread support)
+ForumChannel = false
+
+# [RESTART] Append a timestamp to Discord messages (Default: true)
+Timestamp = true
+
+# [RESTART] Use EDLD's default webhook name and avatar (Default: true)
+# Set false to use the name/avatar configured in Discord's webhook settings.
+Identity = true
+
+# [HOT] Prepend the commander name to every Discord message (Default: false)
+PrependCmdrName = false
+
+# [RESTART] Use commander names as forum thread names (Default: false)
+ThreadCmdrNames = false
+
+[LogLevels]
+# All notification levels are [HOT] - changes take effect on the next matching event.
+#
+# 0 = None
+# 1 = Terminal / GUI only
+# 2 = Terminal / GUI + Discord
+# 3 = Terminal / GUI + Discord with @mention ping
+
+RewardEvent      = 2   # Each kill — bounty or combat bond
+FighterDamage    = 2   # Fighter hull integrity loss (~20% increments)
+FighterLost      = 3   # Fighter destroyed
+ShieldEvent      = 3   # Ship shield dropped or raised
+HullEvent        = 3   # Ship hull damage
+Died             = 3   # Ship destroyed
+CargoLost        = 3   # Cargo stolen
+CapiAuthRequired = 3   # Notifies on expired CAPI Authorization
+LowCargoValue    = 2   # NPC declined to attack due to low cargo value
+PoliceScan       = 2   # Security vessel scanned your ship
+PoliceAttack     = 3   # Security vessel is attacking you
+FuelStatus       = 1   # Routine fuel level report
+FuelWarning      = 2   # Fuel below warning threshold
+FuelCritical     = 3   # Fuel below critical threshold
+MissionUpdate    = 2   # Mission accepted, completed, redirected, or removed
+AllMissionsReady = 3   # All active massacre missions ready to turn in
+MeritEvent       = 0   # Individual merit gain from a kill (powerplay only)
+InactiveAlert    = 3   # No kills for the configured time period
+RateAlert        = 3   # Kill rate below the configured threshold
+InboundScan      = 1   # Incoming cargo scan from a pirate
+PeriodicKills    = 2   # Kill count in the quarter-hour summary
+PeriodicFaction  = 0   # Faction kill breakdown in the quarter-hour summary
+PeriodicCredits  = 2   # Credits earned in the quarter-hour summary
+PeriodicMerits   = 2   # Merits earned in the quarter-hour summary (powerplay only)
+
+# ── GUI ──────────────────────────────────────────────────────────────────────
+# Launch the GTK4 graphical interface alongside terminal output.
+# Requires PyGObject: pacman -S python-gobject gtk4
+#
+[UI]
+Mode       = "terminal"        # terminal (default) | textual | gtk4
+                               # CLI: --mode terminal|textual|gtk4  or  --gui (alias for gtk4)
+Theme      = "default"         # palette filename in themes/ without .css extension
+                               # built-in: "default", "default-dark",
+                               #           "default-light", "default-blue",
+                               #           "default-green", "default-purple",
+                               #           "default-red", "default-yellow"
+                               # custom:   "custom/mytheme"
+                               #           (copy themes/custom/my-theme.css to start)
+FontFamily = "JetBrains Mono"  # any installed monospace font; leave blank for system default
+FontSize   = 14                # base font size in px (10–24); all em-relative sizes scale with it
+SoftwareRenderer = false       # set true if EDLD causes compositor starvation on Linux
+                               # Switches GTK4 renderer to Cairo (CPU-side).
+# ==============================================================================
+# Data contributions (opt-in)
+# ==============================================================================
+# These sections enable uploading your journal data to community databases.
+# All are opt-in and disabled by default.
+# All require a restart when changed.
+# ==============================================================================
+
+# ── EDDN (Elite Dangerous Data Network) ─────────────────────────────────────
+# Contributes exploration, market, outfitting, and shipyard data to the shared
+# EDDN relay used by EDSM, Inara, and most third-party tools.
+
+[EDDN]
+Enabled    = false
+# TestMode   = false   # send to /test schemas only (development use)
+
+# ── EDSM (Elite Dangerous Star Map) ─────────────────────────────────────────
+# Uploads your flight log and discoveries to edsm.net.
+# Requires an EDSM account.  Generate your API key at:
+#   https://www.edsm.net/en/settings/api
+
+[EDSM]
+Enabled       = false
+# ApiKey        = ""               # from EDSM Settings → API Key
+# Commander name is sourced from your journal — no CommanderName setting.
+
+# ── EDAstro ──────────────────────────────────────────────────────────────────
+# Uploads exploration, Odyssey organic scan, and fleet carrier data to edastro.com.
+# Anonymous — no account or API key required.
+
+[EDAstro]
+Enabled             = false
+UploadCarrierEvents = false   # set true to include CarrierStatus / CarrierJumpRequest
+                              # note: this shares your carrier's location with EDAstro
+
+# ── Inara ────────────────────────────────────────────────────────────────────
+# Uploads commander stats, market visits, and fleet data to inara.cz.
+# Requires an Inara account.  Generate your API key at:
+#   https://inara.cz/elite/settings-api/
+
+[Inara]
+Enabled       = false
+# ApiKey        = ""               # from Inara Settings → API Key
+# Commander name is sourced from your journal — no CommanderName setting.
+
+# ==============================================================================
+# Custom profiles (advanced)
+# ==============================================================================
+# Profiles override any setting above for a specific commander or use case.
+# Load a profile with:  edld.py -p ProfileName
+# Or name the profile after your commander for automatic selection at startup.
+#
+# [RESTART] Profile selection requires a restart.
+# Individual settings within a profile follow the same HOT/RESTART rules above.
+# ==============================================================================
+
+Settings.JournalFolder = "C:/Users/YourName/Saved Games/Frontier Developments/Elite Dangerous"
+Discord.UserID         = 123456789098765432
+Discord.WebhookURL     = 'https://discord.com/api/webhooks/1234567890/your-webhook-token-here'
+
+# Linux example:
+[EDP2]
+Settings.JournalFolder = "/home/username/games/ED-Logs/EDP1"
+Discord.UserID         = 123456789098765432
+Discord.WebhookURL     = 'https://discord.com/api/webhooks/1234567890/your-webhook-token-here'
+
+
+# ==============================================================================
+# [REMOTE] profile — GUI front-end for remote monitoring
+# ==============================================================================
+# Used when running EDLD on a second machine (e.g. a laptop) against a game
+# machine's journal directory, mounted via sshfs.
+#
+# Discord is intentionally disabled — the game machine's EDLD instance handles
+# all webhook output. This instance provides the GUI only.
+#
+# See docs/REMOTE_ACCESS.md for full setup instructions.
+# ==============================================================================
+
+[REMOTE]
+Settings.JournalFolder = "/home/username/mnt/ed-journals"
+UI.Mode                = "gtk4"
+UI.Theme               = "default"
+Discord.WebhookURL     = ""
+Discord.UserID         = 0
+Discord.Identity       = false
+
+[REMOTE.LogLevels]
+RewardEvent      = 1
+FighterDamage    = 1
+FighterLost      = 1
+ShieldEvent      = 1
+HullEvent        = 1
+Died             = 1
+CargoLost        = 1
+LowCargoValue    = 1
+PoliceScan       = 1
+PoliceAttack     = 1
+FuelStatus       = 1
+FuelWarning      = 1
+FuelCritical     = 1
+MissionUpdate    = 1
+AllMissionsReady = 1
+MeritEvent       = 1
+InactiveAlert    = 1
+RateAlert        = 1
+InboundScan      = 1
+PeriodicKills    = 1
+PeriodicFaction  = 0
+PeriodicCredits  = 1
+PeriodicMerits   = 1

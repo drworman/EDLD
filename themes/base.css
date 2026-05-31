@@ -1,0 +1,1366 @@
+/*
+ * EDLD — base.css
+ *
+ * Structural layout for all themes.  Colours are expressed as CSS custom
+ * properties (var(--...)) defined in each theme's palette file.
+ *
+ * DO NOT edit colours here.  To change colours, edit your theme file or
+ * create a custom palette in themes/custom/.
+ *
+ * Loaded automatically by EDLD alongside the active theme palette.
+ */
+
+/* ── Window & layout ─────────────────────────────────────────────────────── */
+
+/* Default font size — overridden by the user's FontSize preference via an
+   injected :root block appended after all other CSS. */
+:root {
+    --font-size: 14px;
+}
+
+.edld-window {
+    background-color: var(--bg-deep);
+    color: var(--fg);
+    font-size: var(--font-size);
+    font-family: "JetBrains Mono", monospace;
+}
+
+.root-box {
+    padding: 0;
+}
+
+/* ── Event log ───────────────────────────────────────────────────────────── */
+
+.log-frame {
+    border-right: 1px solid var(--border);
+    border-radius: 0;
+    padding: 0;
+    background-color: var(--bg-log);
+}
+
+/* ── Header bar ──────────────────────────────────────────────────────────── */
+
+headerbar.edld-header {
+    min-height: 0;
+    padding: 0 4px;
+    background-color: var(--bg-deep);
+    background-image: none;
+    box-shadow: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--fg);
+}
+
+headerbar.edld-header .title {
+    padding: 0;
+    margin: 0;
+}
+/* ── Custom window controls ─────────────────────────────────────────────── */
+/* Adwaita CSD buttons are hidden (set_show_title_buttons False).
+   We use plain Gtk.Button with .wctl-btn / .wctl-close classes instead. */
+
+headerbar.edld-header button.wctl-btn {
+    min-height: 0;
+    min-width: 0;
+    padding: 3px 5px;
+    margin: 0 1px;
+    color: var(--fg-dim);
+    background: transparent none;
+    box-shadow: none;
+    border: none;
+    border-radius: 3px;
+}
+
+headerbar.edld-header button.wctl-btn:hover {
+    color: var(--accent);
+    background: var(--accent-hover) none;
+    box-shadow: none;
+}
+
+headerbar.edld-header button.wctl-btn:active {
+    color: var(--bg-deep);
+    background: var(--accent) none;
+    box-shadow: none;
+}
+
+headerbar.edld-header button.wctl-close:hover {
+    color: #ffffff;
+    background: #c0392b none;
+    box-shadow: none;
+}
+
+headerbar.edld-header button.wctl-close:active {
+    color: #ffffff;
+    background: #922b21 none;
+    box-shadow: none;
+}
+headerbar.edld-header button.flat {
+    min-height: 0;
+    min-width: 0;
+    padding: 3px 5px;
+    color: var(--accent);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: none;
+}
+headerbar.edld-header button.flat:hover {
+    background-color: var(--accent-hover);
+}
+
+headerbar.edld-header .header-title {
+    font-size: 0.80em;
+    font-weight: bold;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+    padding: 0 4px;
+}
+
+.log-header {
+    font-family: monospace;
+    font-size: 0.85em;
+    font-weight: bold;
+    color: var(--accent);
+    background-color: var(--bg-mid);
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.log-scroll {
+    background-color: var(--bg-log);
+}
+
+.log-inner {
+    padding: 6px 8px;
+    background-color: var(--bg-log);
+}
+
+.log-entry {
+    font-family: monospace;
+    font-size: 0.82em;
+    color: var(--fg-log);
+    padding: 1px 0;
+    border-radius: 2px;
+    background-color: transparent;
+}
+
+.log-entry:hover {
+    background-color: var(--accent-log-hover);
+}
+
+/* ── Right panel ─────────────────────────────────────────────────────────── */
+
+.right-panel {
+    min-width: 300px;
+    padding: 6px 8px;
+    background-color: var(--bg-panel);
+}
+
+.panel-scroll {
+    background-color: var(--bg-panel);
+}
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+
+.panel-section {
+    margin-bottom: 4px;
+    padding: 4px 8px 6px 8px;
+    border-radius: 6px;
+    background-color: var(--bg-mid);
+    border: 1px solid var(--border);
+}
+
+.section-header {
+    font-size: 0.78em;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    padding-bottom: 2px;
+}
+
+.section-sep {
+    margin-bottom: 2px;
+    color: var(--border);
+}
+
+.section-body {
+    padding: 0;
+}
+
+/* ── Data rows ───────────────────────────────────────────────────────────── */
+
+.data-row {
+    padding: 1px 0;
+}
+
+.mat-row-hover {
+    background-color: var(--row-hover, alpha(currentColor, 0.07));
+    border-radius: 3px;
+}
+
+.data-key {
+    font-size: 0.80em;
+    color: var(--fg-dim);
+    min-width: 80px;
+}
+
+.data-value {
+    font-size: 0.82em;
+    font-weight: 500;
+    color: var(--fg);
+}
+
+/* ── Exploration / Exobiology emphasis ───────────────────────────────────── */
+
+.exobio-in-progress   { color: var(--fg); }
+.exobio-unsampled     { color: var(--fg-dim); }
+.exobio-current-body  { color: var(--accent); font-weight: bold; }
+.exobio-first-footfall { color: var(--amber); font-weight: bold; }
+.exobio-aid-ok        { color: var(--green); font-size: 0.80em; }
+.exobio-aid-warn      { color: var(--red);   font-size: 0.80em; font-weight: bold; }
+
+/* ── SLF status indicators ───────────────────────────────────────────────── */
+
+.slf-deployed {
+    color: var(--green);
+    font-weight: bold;
+}
+
+.slf-docked {
+    color: var(--fg-dim);
+}
+
+/* ── Mission status indicators ───────────────────────────────────────────── */
+
+.status-ready {
+    color: var(--green);
+    font-weight: bold;
+}
+
+.status-active {
+    color: var(--amber);
+}
+
+/* ── Placeholder ─────────────────────────────────────────────────────────── */
+
+.placeholder {
+    color: var(--fg-dim);
+    font-style: italic;
+}
+
+/* ── Sponsor panel ───────────────────────────────────────────────────────── */
+
+.sponsor-note {
+    font-size: 0.78em;
+    color: var(--fg-dim);
+    line-height: 1.5;
+}
+
+.sponsor-link {
+    font-size: 0.82em;
+    padding: 1px 0;
+    color: var(--accent);
+}
+
+/* ── PP Rank progress bar ────────────────────────────────────────────────── */
+
+.pp-rank-bar-row {
+    padding: 2px 0 4px 0;
+}
+
+progressbar.pp-rank-bar {
+    min-height: 4px;
+    min-width: 40px;
+}
+
+/* ── Commander block vitals separator ────────────────────────────────────── */
+/* Thin visual divider between the ambient info rows and the live vitals
+   strip (Shields | Hull and Fuel).  Uses the same colour as other separators
+   but with a small margin to give the vitals strip breathing room. */
+
+.vitals-sep {
+    margin-top: 4px;
+    margin-bottom: 2px;
+    opacity: 0.5;
+}
+
+progressbar.pp-rank-bar trough {
+    min-height: 4px;
+    min-width: 40px;
+    border-radius: 2px;
+    background-color: var(--border);
+    border: none;
+}
+
+progressbar.pp-rank-bar progress {
+    min-height: 4px;
+    /* min-width must be >= internal trough padding (2px) to avoid GTK4
+       reporting negative min widths during size negotiation when the
+       bar is near 0% fraction.  See GtkGizmo "progress reported min
+       width -2" warning. */
+    min-width: 2px;
+    border-radius: 0;
+    background-color: var(--accent);
+    background-image: none;
+    border: none;
+}
+
+progressbar.pp-rank-bar progress > fill {
+    min-height: 4px;
+    min-width: 2px;
+    background-color: var(--accent);
+    background-image: none;
+    border: none;
+    border-radius: 0;
+}
+
+/* ── Update available notice ─────────────────────────────────────────────── */
+
+.update-badge {
+    font-size: 0.80em;
+    font-weight: bold;
+    color: var(--accent);
+    padding: 2px 7px;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    margin-right: 4px;
+}
+
+.upgrade-btn {
+    background: var(--accent);
+    color: #000;
+    font-weight: bold;
+    border-radius: 4px;
+    padding: 4px 8px;
+    border: none;
+}
+
+.upgrade-btn:hover {
+    background: color-mix(in srgb, var(--accent) 80%, white 20%);
+}
+
+/* ── Hull / shield health colours ───────────────────────────────────────── */
+
+.health-good {
+    color: var(--health-good);
+}
+
+.health-warn {
+    color: var(--health-warn);
+}
+
+.health-crit {
+    color: var(--health-crit);
+    font-weight: bold;
+}
+
+/* ── Condensed stat row separator ───────────────────────────────────────── */
+
+.data-sep {
+    color: var(--fg-sep);
+    font-size: 0.85em;
+}
+
+.data-rate {
+    color: var(--fg-rate);
+    font-size: 0.85em;
+    min-width: 70px;
+}
+
+/* ── Vessel / SLF header type label ─────────────────────────────────────── */
+
+.vessel-type-hdr {
+    font-size: 0.75em;
+    font-weight: normal;
+    color: var(--fg-dim);
+    letter-spacing: 0;
+    text-transform: none;
+    padding-bottom: 4px;
+}
+
+/* ── Stat row total value ─────────────────────────────────────────────── */
+
+.stat-total {
+    font-size: 0.82em;
+    font-weight: 500;
+    color: var(--fg);
+}
+
+/* ── Sponsor link row ────────────────────────────────────────────────────── */
+
+.sponsor-link-row {
+    padding-top: 4px;
+}
+
+.sponsor-sep {
+    font-size: 0.78em;
+    color: var(--fg-dim);
+    padding: 0 2px;
+}
+
+/* ── Monospace stat line (kills / credits / merits with aligned pipes) ─────── */
+
+.stat-line {
+    font-family: monospace;
+    font-size: 0.82em;
+    font-weight: 500;
+    color: var(--fg);
+}
+
+/* ── Dashboard layout ────────────────────────────────────────────────────── */
+
+.edld-titlebar {
+    padding: 2px 4px;
+    background-color: var(--bg-deep);
+    border-bottom: 1px solid var(--border);
+    min-height: 0;
+}
+
+.dashboard-scroll {
+    background: transparent;
+    border: none;
+}
+
+.dashboard-scroll > scrollbar {
+    opacity: 0.4;
+    min-width: 4px;
+}
+
+.dashboard-scroll > scrollbar:hover {
+    opacity: 0.8;
+}
+
+.dashboard-canvas {
+    background-color: var(--bg-deep);
+}
+
+.canvas-scroll {
+    background-color: var(--bg-deep);
+}
+
+/* ── Dashboard blocks ────────────────────────────────────────────────────── */
+
+.dashboard-block {
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background-color: var(--bg-mid);
+    padding: 0;
+    margin: 0.5em;
+}
+
+.dashboard-block > * {
+    padding: 0;
+}
+
+/* ── Menu buttons (now embedded in HeaderBar) ────────────────────────────── */
+
+.edld-menubar {
+    background-color: var(--bg-mid);
+    border-bottom: 1px solid var(--border);
+    padding: 0 2px;
+    min-height: 0;
+}
+
+.menubar-btn {
+    font-size: 0.80em;
+    padding: 0 7px;
+    border-radius: 0;
+    border: none;
+    background: transparent none;
+    box-shadow: none;
+    color: var(--fg);
+    min-height: 0;
+}
+
+.menubar-btn:hover,
+.menubar-btn:active {
+    background: var(--accent-hover) none;
+    color: var(--accent);
+    box-shadow: none;
+    border: none;
+}
+
+/* GTK4 popover overrides — must target the internal nodes directly.
+   Class-only rules are not enough; GTK applies its own Adwaita backdrop. */
+
+popover {
+    background-color: var(--bg-mid);
+    color: var(--fg);
+}
+
+popover > contents {
+    background-color: var(--bg-mid);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 0;
+    color: var(--fg);
+}
+
+popover arrow {
+    background-color: var(--bg-mid);
+    border-color: var(--border);
+}
+
+.edld-menu-popover,
+.edld-menu-popover > contents {
+    background-color: var(--bg-mid);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 0;
+    color: var(--fg);
+}
+
+.menu-box {
+    min-width: 180px;
+    background-color: var(--bg-mid);
+}
+
+.menu-item {
+    font-size: 0.82em;
+    padding: 5px 16px;
+    border-radius: 0;
+    border: none;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    min-height: 0;
+}
+
+.menu-item:hover {
+    background-color: var(--accent-hover);
+    color: var(--accent);
+}
+
+.menu-check {
+    font-size: 0.82em;
+    padding: 4px 16px;
+    color: var(--fg);
+    background: transparent;
+}
+
+.menu-check check {
+    background-color: var(--bg-deep);
+    border-color: var(--border);
+}
+
+.menu-check:checked check {
+    background-color: var(--accent);
+    border-color: var(--accent);
+}
+
+.menu-section-label {
+    font-size: 0.72em;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-dim);
+    padding: 4px 16px 2px 16px;
+}
+
+.menu-sep {
+    margin: 3px 0;
+    color: var(--border);
+}
+
+/* ── About / Plugins dialog ──────────────────────────────────────────────── */
+
+.about-dialog,
+.about-dialog > *,
+.plugins-dialog,
+.plugins-dialog > * {
+    background-color: var(--bg-mid);
+    color: var(--fg);
+}
+
+.about-title {
+    font-size: 1.0em;
+    font-weight: bold;
+    color: var(--fg);
+}
+
+.about-version {
+    font-size: 0.88em;
+    color: var(--accent);
+    font-weight: bold;
+}
+
+.about-author {
+    font-size: 0.82em;
+    color: var(--fg-dim);
+}
+
+.about-link {
+    font-size: 0.82em;
+    color: var(--accent);
+    padding: 2px 4px;
+}
+
+.about-close {
+    margin-top: 4px;
+    padding: 4px 16px;
+    border-radius: 4px;
+    background-color: var(--bg-deep);
+    border: 1px solid var(--border);
+    color: var(--fg);
+}
+
+.about-close:hover {
+    background-color: var(--accent-hover);
+}
+
+/* ── Installed Plugins dialog extras ─────────────────────────────────────── */
+
+.plugin-section-label {
+    font-size: 0.78em;
+    font-weight: bold;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+}
+
+.plugin-desc {
+    font-size: 0.80em;
+    color: var(--fg-dim);
+    padding-left: 2px;
+}
+
+.plugin-restart-notice {
+    font-size: 0.82em;
+    color: var(--accent);
+    padding: 6px 0 2px 0;
+}
+
+/* ── Materials block tab bar ─────────────────────────────────────────────── */
+
+.mat-tab-bar {
+    background-color: var(--bg-deep);
+    border-bottom: 1px solid var(--border);
+}
+
+.mat-tab-btn {
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 4px 6px 5px 6px;
+    color: var(--fg-dim);
+    border-bottom: 2px solid transparent;
+    box-shadow: none;
+    outline: none;
+}
+
+.mat-tab-btn:hover {
+    background-color: var(--accent-hover);
+    color: var(--fg);
+    border-bottom: 2px solid var(--border);
+}
+
+.mat-tab-btn.mat-tab-active {
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent);
+    background: none;
+}
+
+.mat-tab-label {
+    font-size: 0.82em;
+    font-weight: bold;
+}
+
+.mat-tab-count {
+    font-size: 0.76em;
+    color: inherit;
+    opacity: 0.7;
+    padding: 0 2px;
+}
+
+.mat-tab-active .mat-tab-count {
+    opacity: 1.0;
+}
+
+.mat-tab-scroll {
+    padding-top: 2px;
+}
+
+/* ── Materials wide layout (three-column) ────────────────────────────────── */
+
+.mat-col-hdr {
+    background-color: var(--bg-deep);
+    border-bottom: 1px solid var(--border);
+}
+
+.mat-col-title {
+    font-size: 0.78em;
+    font-weight: bold;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+}
+
+/* Count badge in the wide column header — pad away from the separator line */
+.mat-col-count {
+    margin-right: 8px;
+}
+
+/* ── Preferences window ──────────────────────────────────────────────────── */
+
+.prefs-window,
+.prefs-window > *,
+.prefs-notebook,
+.prefs-notebook > * {
+    background-color: var(--bg-mid);
+    color: var(--fg);
+}
+
+notebook > header {
+    background-color: var(--bg-deep);
+    border-bottom: 1px solid var(--border);
+}
+
+notebook > header tab {
+    padding: 4px 12px;
+    color: var(--fg-dim);
+    background-color: transparent;
+    border-radius: 3px 3px 0 0;
+}
+
+notebook > header tab:checked {
+    color: var(--accent);
+    background-color: var(--bg-mid);
+}
+
+notebook stack {
+    background-color: var(--bg-mid);
+}
+
+.prefs-key {
+    font-size: 0.82em;
+    color: var(--fg-dim);
+}
+
+.prefs-note {
+    font-size: 0.78em;
+    color: var(--fg-dim);
+    font-style: italic;
+}
+
+.prefs-restart-warn {
+    font-size: 0.82em;
+    color: var(--amber);
+}
+
+.prefs-btn {
+    padding: 4px 12px;
+    border-radius: 4px;
+    background-color: var(--bg-deep);
+    border: 1px solid var(--border);
+    color: var(--fg);
+}
+
+.prefs-btn:hover {
+    background-color: var(--accent-hover);
+}
+
+.prefs-btn-apply {
+    padding: 4px 12px;
+    border-radius: 4px;
+    background-color: var(--accent);
+    color: #000;
+    font-weight: bold;
+    border: none;
+}
+
+.prefs-btn-apply:hover {
+    background-color: color-mix(in srgb, var(--accent) 80%, white 20%);
+}
+
+/* ── Block drag / resize states ──────────────────────────────────────────── */
+
+.block-dragging {
+    opacity: 0.75;
+    border-color: var(--accent);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.block-drag-ghost {
+    background: transparent;
+    border: 2px dashed var(--accent);
+    border-radius: 4px;
+    opacity: 0.85;
+}
+
+.block-resizing {
+    border-color: var(--accent);
+}
+
+.block-footer {
+    min-height: 10px;
+    padding: 0 2px 0 4px;
+    border-top: 1px solid var(--border);
+    background-color: transparent;
+}
+
+.resize-handle {
+    font-size: 0.85em;
+    font-weight: bold;
+    color: var(--accent);
+    padding: 0 2px;
+    opacity: 0.6;
+}
+
+.resize-handle:hover {
+    color: var(--fg);
+    opacity: 1.0;
+}
+
+/* ── GTK widget overrides — force all interactive widgets to respect theme ─── */
+/* Buttons */
+button {
+    background-color: var(--bg-deep);
+    background-image: none;
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+    padding: 3px 10px;
+}
+
+button:hover {
+    background-color: var(--accent-hover);
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+
+button:active {
+    background-color: var(--accent);
+    color: #000;
+    box-shadow: none;
+}
+
+button.flat,
+button.flat:hover {
+    border: none;
+    box-shadow: none;
+    background-color: transparent;
+    background-image: none;
+}
+
+button.flat:hover {
+    background-color: var(--accent-hover);
+    color: var(--accent);
+}
+
+/* Entries */
+entry {
+    background-color: var(--bg-deep);
+    background-image: none;
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+    padding: 3px 6px;
+}
+
+entry:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+/* SpinButton */
+spinbutton {
+    background-color: var(--bg-deep);
+    background-image: none;
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+}
+
+spinbutton button {
+    border: none;
+    box-shadow: none;
+    background-color: transparent;
+    color: var(--fg-dim);
+    padding: 0 4px;
+    min-width: 0;
+}
+
+spinbutton button:hover {
+    background-color: var(--accent-hover);
+    color: var(--accent);
+    border: none;
+    box-shadow: none;
+}
+
+/* ComboBox */
+combobox,
+combobox button {
+    background-color: var(--bg-deep);
+    background-image: none;
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+combobox button:hover {
+    border-color: var(--accent);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+
+/* Switch */
+switch {
+    background-color: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+
+switch:checked {
+    background-color: var(--accent);
+    border-color: var(--accent);
+}
+
+switch slider {
+    background-color: var(--fg-dim);
+    border-radius: 10px;
+    min-width: 18px;
+    min-height: 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+switch:checked slider {
+    background-color: #fff;
+}
+
+/* ScrolledWindow scrollbars */
+scrollbar {
+    background-color: var(--bg-deep);
+}
+
+scrollbar slider {
+    background-color: var(--border);
+    border-radius: 3px;
+    min-width: 6px;
+    min-height: 6px;
+}
+
+scrollbar slider:hover {
+    background-color: var(--accent);
+}
+
+/* LinkButton */
+link {
+    color: var(--accent);
+}
+
+link:hover {
+    color: var(--accent-dim);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Documentation Viewer
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.docs-viewer, .reports-viewer {
+    background-color: var(--bg-deep);
+}
+
+.docs-toolbar {
+    background-color: var(--bg-mid);
+    border-bottom: 1px solid var(--border);
+    padding: 2px 4px;
+    min-height: 0;
+}
+
+.docs-nav-btn {
+    font-size: 0.80em;
+    padding: 2px 10px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent none;
+    color: var(--fg-dim);
+    box-shadow: none;
+    min-height: 0;
+}
+
+.docs-nav-btn:hover {
+    color: var(--accent);
+    background: var(--accent-hover) none;
+    border-color: var(--accent-dim);
+}
+
+.docs-sidebar-scroll {
+    background-color: var(--bg-mid);
+    border-right: 1px solid var(--border);
+}
+
+.docs-sidebar {
+    background-color: var(--bg-mid);
+}
+
+.docs-sidebar-btn {
+    font-size: 0.82em;
+    padding: 5px 12px;
+    border-radius: 0;
+    border: none;
+    background: transparent none;
+    color: var(--fg-dim);
+    box-shadow: none;
+    min-height: 0;
+}
+
+.docs-sidebar-btn:hover {
+    background: var(--accent-hover) none;
+    color: var(--fg);
+}
+
+.docs-sidebar-btn-active {
+    background: var(--accent-hover) none;
+    color: var(--accent);
+    border-left: 2px solid var(--accent);
+}
+
+.docs-sidebar-section {
+    font-size: 0.72em;
+    color: var(--fg-sep);
+    padding: 2px 8px;
+}
+
+.docs-content-scroll {
+    background-color: var(--bg-deep);
+}
+
+.docs-content {
+    background-color: var(--bg-deep);
+}
+
+.docs-breadcrumb {
+    font-size: 0.82em;
+    color: var(--fg-dim);
+}
+
+/* ── Markdown rendering ─────────────────────────────────────────────────── */
+
+.doc-h1 {
+    font-size: 1.4em;
+    font-weight: bold;
+    color: var(--accent);
+    margin-top: 6px;
+    margin-bottom: 4px;
+}
+
+.doc-h2 {
+    font-size: 1.15em;
+    font-weight: bold;
+    color: var(--fg);
+    margin-top: 8px;
+    margin-bottom: 2px;
+}
+
+.doc-h3 {
+    font-size: 1.0em;
+    font-weight: bold;
+    color: var(--fg);
+    margin-top: 4px;
+}
+
+.doc-h4 {
+    font-size: 0.92em;
+    font-weight: bold;
+    color: var(--fg-dim);
+}
+
+.doc-para {
+    font-size: 0.90em;
+    color: var(--fg);
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+.doc-code-frame {
+    background-color: var(--bg-log);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.doc-code {
+    font-family: monospace;
+    font-size: 0.82em;
+    color: var(--fg-log);
+    background-color: var(--bg-log);
+}
+
+.doc-blockquote {
+    border-left: 3px solid var(--accent-dim);
+    background-color: var(--bg-mid);
+    border-radius: 0 3px 3px 0;
+    margin-left: 8px;
+}
+
+.doc-blockquote-text {
+    font-size: 0.88em;
+    color: var(--fg-dim);
+    font-style: italic;
+}
+
+.doc-bullet {
+    font-size: 0.88em;
+    color: var(--accent);
+    min-width: 12px;
+}
+
+.doc-li {
+    font-size: 0.88em;
+    color: var(--fg);
+}
+
+.doc-hr {
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.doc-table {
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.doc-table-header {
+    font-size: 0.82em;
+    font-weight: bold;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 2px;
+}
+
+.doc-table-cell {
+    font-size: 0.82em;
+    color: var(--fg);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Reports Viewer
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.reports-title {
+    font-size: 0.88em;
+    font-weight: bold;
+    color: var(--fg);
+}
+
+.reports-report-title {
+    font-size: 1.3em;
+    font-weight: bold;
+    color: var(--accent);
+    margin-bottom: 4px;
+}
+
+.reports-subtitle {
+    font-size: 0.85em;
+    color: var(--fg-dim);
+    margin-bottom: 8px;
+}
+
+.reports-section-heading {
+    font-size: 0.95em;
+    font-weight: bold;
+    color: var(--fg);
+    margin-top: 8px;
+    margin-bottom: 4px;
+}
+
+.reports-loading {
+    font-size: 0.90em;
+    color: var(--fg-dim);
+}
+
+.reports-sort-btn {
+    font-size: 0.76em;
+    padding: 1px 8px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent none;
+    color: var(--fg-dim);
+    box-shadow: none;
+    min-height: 0;
+}
+
+.reports-sort-btn:hover {
+    color: var(--accent);
+    background: var(--accent-hover) none;
+    border-color: var(--accent-dim);
+}
+
+
+/* Restart-required banner in Preferences */
+.prefs-restart-banner {
+    color: #f5a623;
+    font-weight: bold;
+    padding: 2px 4px;
+}
+
+/* Alerts block — Clear button */
+.alerts-clear-btn {
+    font-size: 0.76em;
+    padding: 1px 10px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent none;
+    color: var(--fg-dim);
+    box-shadow: none;
+    min-height: 0;
+}
+
+.alerts-clear-btn:hover {
+    color: var(--accent);
+    background: var(--accent-hover) none;
+    border-color: var(--accent-dim);
+}
+
+/* ── Cargo block ─────────────────────────────────────────────────────────── */
+
+.cargo-full {
+    color: var(--health-crit);
+    font-weight: bold;
+}
+
+.cargo-warn {
+    color: var(--health-warn);
+}
+
+.cargo-ok {
+    color: var(--health-good);
+}
+
+.cargo-stolen {
+    color: var(--health-warn);
+}
+
+/* Target market search entry in cargo footer */
+.data-entry {
+    font-size: 0.82em;
+    min-height: 0;
+    padding: 1px 4px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--bg-deep) none;
+    color: var(--fg);
+    box-shadow: none;
+}
+
+.data-entry:focus {
+    border-color: var(--accent);
+    background: var(--bg) none;
+}
+
+/* Cargo footer accept (green ✓) and clear (red ✕) buttons */
+.cargo-accept-btn {
+    font-size: 0.82em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent none;
+    color: #4caf50;
+    box-shadow: none;
+    min-height: 0;
+}
+
+.cargo-accept-btn:hover {
+    background: rgba(76, 175, 80, 0.15) none;
+    border-color: #4caf50;
+}
+
+.cargo-accept-btn:disabled {
+    opacity: 0.3;
+}
+
+.cargo-clear-btn {
+    font-size: 0.82em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent none;
+    color: #e53935;
+    box-shadow: none;
+    min-height: 0;
+}
+
+.cargo-clear-btn:hover {
+    background: rgba(229, 57, 53, 0.15) none;
+    border-color: #e53935;
+}
+
+.cargo-clear-btn:disabled {
+    opacity: 0.3;
+}
+
+/* Commander block footer button — same compact style as cargo buttons but
+   suppresses mat-tab-btn's border-bottom so the footer height stays flush */
+.cmdr-footer-btn {
+    font-size: 0.82em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent none;
+    box-shadow: none;
+    min-height: 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.cmdr-footer-btn:hover {
+    background: var(--accent-hover) none;
+    border-color: var(--fg-dim);
+}
+
+.cmdr-footer-btn:disabled {
+    opacity: 0.3;
+}
+
+/* ── Plugins dialog ──────────────────────────────────────────────────────── */
+.plugin-description {
+    font-size: 0.78em;
+    color: var(--fg-dim);
+    margin-left: 2px;
+}
+
+.plugin-section-label {
+    font-size: 0.72em;
+    font-weight: bold;
+    letter-spacing: 0.08em;
+    color: var(--accent-dim);
+    text-transform: uppercase;
+}
+
+/* ── Navigation block — slim form inputs ───────────────────────────────────── */
+/* The block stacks three input fields plus a button row inside a width=11
+   column block.  GTK4's default Entry padding (3px 6px from the global rule
+   above) leaves the From/To/Range stack too tall, pushing the results list
+   off-screen.  Trim padding + remove the inset shadow so each Entry's
+   intrinsic height drops to roughly one line of text. */
+
+entry.nav-entry {
+    padding: 1px 6px;
+    min-height: 0;
+    box-shadow: none;
+}
+
+.nav-plot-btn {
+    font-size: 0.82em;
+    padding: 1px 8px;
+    min-height: 0;
+}
+
+/* ── Career block — reset button (↺) ───────────────────────────────────────── */
+/* The reset button sits at the right edge of the tab bar.  It uses the same
+   .mat-tab-btn class so its baseline geometry matches the surrounding tabs,
+   but never gets the active-underline indicator. */
+
+.career-reset-btn {
+    padding: 4px 8px 5px 8px;
+    color: var(--accent);
+    font-weight: bold;
+}
+
+.career-reset-btn:hover {
+    background-color: var(--accent-hover);
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent);
+}

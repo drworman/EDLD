@@ -1,0 +1,76 @@
+/*
+ * EDLD — Custom theme template
+ *
+ * Copy this file to themes/custom/ with any name you like, then set:
+ *   Theme = "custom/my-theme"   (no .css extension) in config.toml [GUI]
+ *
+ * Only change the colour values below.  All layout and spacing is handled
+ * by base.css automatically — you don't need to copy any of that here.
+ *
+ * Colour format: standard CSS hex (#rrggbb) or rgba(r, g, b, a).
+ * To find your accent RGB for hover effects, convert your hex accent colour:
+ *   e.g.  #e07b20  →  rgba(224, 123, 32, 0.15)  for --accent-hover
+ *
+ * Font and font size are configured in Settings → Appearance, not here.
+ * EDLD uses JetBrains Mono by default; any installed monospace font can be
+ * selected from the Preferences panel.
+ */
+
+:root {
+     /* ── Font Size ──────────────────────────────────────────────────────
+     *  font-size: Defines the base font size for the entire program.
+     *             Overridden by the FontSize setting in config.toml [GUI].
+     *             See https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/font-size
+     *             for additional options.
+     * ------------------------------------------------------------------ */
+    --font-size:       14px;
+
+    /* ── Backgrounds ──────────────────────────────────────────────────────
+     *  bg-deep:   outermost window background
+     *  bg-mid:    section card background
+     *  bg-panel:  right panel background
+     *  bg-log:    event log background
+     * ------------------------------------------------------------------ */
+    --bg-deep:          #0d0f12;
+    --bg-mid:           #161a1f;
+    --bg-panel:         #1c2128;
+    --bg-log:           #0f1215;
+
+    /* ── Foreground ───────────────────────────────────────────────────────
+     *  fg:        primary text
+     *  fg-dim:    secondary labels (row keys, placeholders)
+     *  fg-log:    event log text
+     *  fg-sep:    stat column separators
+     *  fg-rate:   per-hour rate values in stat rows
+     * ------------------------------------------------------------------ */
+    --fg:               #d8dce5;
+    --fg-dim:           #606878;
+    --fg-log:           #c0c8d4;
+    --fg-sep:           #445566;
+    --fg-rate:          #8899aa;
+
+    /* ── Accent ───────────────────────────────────────────────────────────
+     *  accent:          main highlight colour (section headers, labels)
+     *  accent-dim:      dimmed variant (currently unused, reserved)
+     *  accent-hover:    button hover background — use rgba with ~0.15 alpha
+     *  accent-log-hover: log entry hover       — use rgba with ~0.08 alpha
+     * ------------------------------------------------------------------ */
+    --accent:           #e07b20;          /* ← change this to your colour */
+    --accent-dim:       #9e5614;
+    --accent-hover:     rgba(224, 123, 32, 0.15);   /* ← match accent RGB */
+    --accent-log-hover: rgba(224, 123, 32, 0.08);   /* ← match accent RGB */
+
+    /* ── Border ───────────────────────────────────────────────────────── */
+    --border:           #2a3040;
+
+    /* ── Status colours ───────────────────────────────────────────────────
+     *  These apply to hull health, mission state, and SLF status.
+     *  Change with care — they carry semantic meaning.
+     * ------------------------------------------------------------------ */
+    --green:            #57e389;    /* shields up, mission ready, SLF deployed */
+    --amber:            #f8e45c;    /* mission in progress                     */
+    --red:              #e05c5c;    /* (reserved)                              */
+    --health-good:      #4caf50;    /* hull / shield > 75%                     */
+    --health-warn:      #ff9800;    /* hull / shield 25–75%                    */
+    --health-crit:      #f44336;    /* hull / shield < 25%                     */
+}
