@@ -579,6 +579,22 @@ class ExploDB:
             )
             return int(cur.lastrowid)
 
+    def reset_other_in_progress_flora(self, commander_id: int, keep_flora_id: int) -> int:
+        """A commander can have only one organic sample in progress at a time;
+        starting to sample a different species drops any incomplete progress on
+        the previous one.  Reset every other in-progress row (count 1 or 2, not
+        yet logged) for this commander back to 0 so the dashboard shows it as
+        begun anew.  Returns the number of rows reset.
+        """
+        with self._w() as conn:
+            cur = conn.execute(
+                "UPDATE flora_status SET count = 0 "
+                "WHERE commander_id = ? AND flora_id <> ? "
+                "AND logged = 0 AND count IN (1, 2)",
+                (commander_id, keep_flora_id),
+            )
+            return cur.rowcount
+
     # ── journal import bookmark ───────────────────────────────────────────
 
     def is_journal_imported(self, name: str) -> bool:

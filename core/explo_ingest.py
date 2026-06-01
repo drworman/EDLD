@@ -341,6 +341,9 @@ class Ingestor:
             flora_id, self._cmdr_id, count=stage,
             logged=1 if stage >= 3 else 0, scanned_at=_ts(event),
         )
+        # Only one organic sample can be in progress at a time — sampling this
+        # species drops any incomplete progress on a different one.
+        self._db.reset_other_in_progress_flora(self._cmdr_id, flora_id)
 
     def _disembark(self, event: dict) -> None:
         if not event.get("OnPlanet"):
