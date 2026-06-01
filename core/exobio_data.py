@@ -35,7 +35,7 @@ SPECIES_VALUES: dict[str, tuple[str, int]] = {
     '$Codex_Ent_Bacterial_13_Name;': ('Bacterium Verrata', 3897000),
     '$Codex_Ent_Bacterial_05_Name;': ('Bacterium Vesicula', 1000000),
     '$Codex_Ent_Bacterial_09_Name;': ('Bacterium Volu', 7774700),
-    '$Codex_Ent_Cone_Name;': ('Bark Mound', 1471900),
+    '$Codex_Ent_Cone_Name;': ('Bark Mounds', 1471900),
     '$Codex_Ent_SphereEFGH_Name;': ('Blatteum Bioluminescent Anemone', 1499900),
     '$Codex_Ent_TubeEFGH_Name;': ('Blatteum Sinuous Tubers', 1514500),
     '$Codex_Ent_Cactoid_01_Name;': ('Cactoida Cortexum', 3667600),
