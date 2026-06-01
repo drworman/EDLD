@@ -113,14 +113,18 @@ TuiBlock > TabbedContent  { height: 1fr; }
    Navigation routing tabs we collapse them to a single row each. */
 #nav-tabs Input {
     height: 1;
-    border: none;
+    border-top: none;
+    border-bottom: none;
+    border-left: solid $dim;
+    border-right: solid $dim;
     padding: 0 1;
     margin: 0 0 1 0;
     background: $bg;
 }
 #nav-tabs Input:focus {
-    border: none;
-    background: $border;
+    border-left: solid $accent;
+    border-right: solid $accent;
+    background: $bg;
 }
 #nav-tabs Button {
     height: 1;

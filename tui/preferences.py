@@ -383,10 +383,11 @@ class PreferencesScreen(ModalScreen):
                                 (_LM.block_display(b), b) for b in _info["eligible"]
                             ]
                             _val = _info["block"] if (_info["block"] and _info["block"] in _info["eligible"]) else ""
-                            # Width this select to its own longest option (+chrome
-                            # for the border and the ▼ arrow) so every dropdown
-                            # option stays on a single line.
-                            _selw = max(len(_lbl) for _lbl, _ in _opts) + 6
+                            # Width this select to its own longest option, plus
+                            # chrome for the border, the ▼ arrow, the dropdown's
+                            # own border and per-option padding, so every option
+                            # stays on a single line.
+                            _selw = max(len(_lbl) for _lbl, _ in _opts) + 10
                             with Horizontal(classes="pref-row"):
                                 yield Label(f"{_info['slot']}  ·  {_info['class_label']}", classes="key")
                                 _sel = Select(_opts, value=_val, id=f"disp-{_info['slot']}",
