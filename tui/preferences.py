@@ -383,10 +383,16 @@ class PreferencesScreen(ModalScreen):
                                 (_LM.block_display(b), b) for b in _info["eligible"]
                             ]
                             _val = _info["block"] if (_info["block"] and _info["block"] in _info["eligible"]) else ""
+                            # Width this select to its own longest option (+chrome
+                            # for the border and the ▼ arrow) so every dropdown
+                            # option stays on a single line.
+                            _selw = max(len(_lbl) for _lbl, _ in _opts) + 6
                             with Horizontal(classes="pref-row"):
                                 yield Label(f"{_info['slot']}  ·  {_info['class_label']}", classes="key")
-                                yield Select(_opts, value=_val, id=f"disp-{_info['slot']}",
-                                             classes="pref-bool-sel", allow_blank=False)
+                                _sel = Select(_opts, value=_val, id=f"disp-{_info['slot']}",
+                                              classes="pref-bool-sel", allow_blank=False)
+                                _sel.styles.width = _selw
+                                yield _sel
 
                 # ── Component-injected tabs (e.g. optional private components)
                 for tab_id, tab_label, tab_composer in self._cached_extra_tabs:

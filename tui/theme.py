@@ -108,6 +108,28 @@ TuiBlock > TabbedContent  { height: 1fr; }
 
 .alert-entry { padding: 0 1; height: 1; }
 
+/* ── Navigation block: compact single-row inputs and buttons ───────────────── */
+/* Textual's default Input/Button are height 3 with a border ("chunky").  In the
+   Navigation routing tabs we collapse them to a single row each. */
+#nav-tabs Input {
+    height: 1;
+    border: none;
+    padding: 0 1;
+    margin: 0 0 1 0;
+    background: $bg;
+}
+#nav-tabs Input:focus {
+    border: none;
+    background: $border;
+}
+#nav-tabs Button {
+    height: 1;
+    min-height: 1;
+    border: none;
+    padding: 0 2;
+    margin: 0 0 1 0;
+}
+
 /* ── SepRow colour (resolved here where palette substitution runs) ─────────── */
 SepRow { color: $border; }
 
