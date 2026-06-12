@@ -193,7 +193,7 @@ class _Sender(threading.Thread):
             "header": {
                 "appName":        APP_NAME,
                 "appVersion":     APP_VERSION,
-                "isDeveloped":    False,
+                "isBeingDeveloped": False,
                 "APIkey":         self._key,
                 "commanderName":  cmdr,
             },
@@ -343,7 +343,7 @@ class InaraPlugin(BasePlugin):
         # Combat death
         "Died",
         # Community goals
-        "CommunityGoalJoin", "CommunityGoalReward",
+        "CommunityGoal", "CommunityGoalJoin", "CommunityGoalReward",
         # Multicrew
         "MulticrewJoin", "MulticrewEnd",
     ]
@@ -916,6 +916,70 @@ class InaraPlugin(BasePlugin):
                 if organisms:
                     self._push(ts, "addCommanderExobiology", organisms)
 
+            case "CommunityGoal":
+                # The bulletin-board CommunityGoal event carries the full,
+                # submittable goal state.  A single event may list several
+                # goals; Inara wants them set individually — setCommunityGoal
+                # for the public goal data, setCommanderCommunityGoalProgress
+                # for this commander's contribution.  Dedup on material change
+                # so we don't re-POST identical state on every board scan.
+                if not hasattr(self, "_cg_seen"):
+                    self._cg_seen = {}
+                for g in event.get("CurrentGoals") or []:
+                    cgid = g.get("CGID")
+                    if cgid is None:
+                        continue
+                    cgid         = int(cgid)
+                    contribution = int(g.get("PlayerContribution", 0) or 0)
+                    total        = int(g.get("CurrentTotal", 0) or 0)
+                    completed    = bool(g.get("IsComplete", False))
+                    # "TierReached" is a string ("Tier 5"), absent before T1.
+                    tier_raw = g.get("TierReached")
+                    if isinstance(tier_raw, int):
+                        tier = tier_raw
+                    elif isinstance(tier_raw, str):
+                        digits = "".join(c for c in tier_raw if c.isdigit())
+                        tier   = int(digits) if digits else None
+                    else:
+                        tier = None
+
+                    sig = (contribution, total, tier, completed)
+                    if self._cg_seen.get(cgid) == sig:
+                        continue
+                    self._cg_seen[cgid] = sig
+
+                    cg_data = {
+                        "communitygoalGameID": cgid,
+                        "communitygoalName":   g.get("Title", ""),
+                        "starsystemName":      g.get("SystemName", ""),
+                        "stationName":         g.get("MarketName", ""),
+                        "isCompleted":         completed,
+                        "contributorsNum":     int(g.get("NumContributors", 0) or 0),
+                        "contributionsTotal":  total,
+                    }
+                    if g.get("Expiry"):
+                        cg_data["goalExpiry"] = g["Expiry"]
+                    if tier is not None:
+                        cg_data["tierReached"] = tier
+                    if g.get("TopRankSize") is not None:
+                        cg_data["topRankSize"] = int(g["TopRankSize"])
+                    self._push(ts, "setCommunityGoal", cg_data)
+
+                    progress = {
+                        "communitygoalGameID": cgid,
+                        "contribution":        contribution,
+                        "percentileBand":      int(g.get("PlayerPercentileBand", 0) or 0),
+                    }
+                    bonus = g.get("Bonus")
+                    if bonus is not None:
+                        try:
+                            progress["percentileBandReward"] = int(bonus)
+                        except (TypeError, ValueError):
+                            pass
+                    if g.get("PlayerInTopRank") is not None:
+                        progress["isTopRank"] = bool(g["PlayerInTopRank"])
+                    self._push(ts, "setCommanderCommunityGoalProgress", progress)
+
             case "CommunityGoalJoin":
                 cgid = event.get("CGID")
                 if cgid is not None:
@@ -1048,7 +1112,7 @@ class InaraPlugin(BasePlugin):
             "header": {
                 "appName":        APP_NAME,
                 "appVersion":     APP_VERSION,
-                "isDeveloped":    False,
+                "isBeingDeveloped": False,
                 "APIkey":         self._sender._key if self._sender else "",
                 "commanderName":  cmdr,
             },
