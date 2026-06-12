@@ -925,7 +925,15 @@ class InaraPlugin(BasePlugin):
                 # so we don't re-POST identical state on every board scan.
                 if not hasattr(self, "_cg_seen"):
                     self._cg_seen = {}
-                for g in event.get("CurrentGoals") or []:
+                # Only submit on LIVE events, never during journal preload.
+                # Otherwise the dedup cache gets primed with the current value
+                # without actually sending it, the matching live event is then
+                # skipped, and Inara stays stuck at whatever was last sent
+                # before the restart.  CommunityGoal fires every minute or two
+                # during active CG play, so the first live one re-syncs.
+                goals = ([] if getattr(state, "in_preload", False)
+                         else (event.get("CurrentGoals") or []))
+                for g in goals:
                     cgid = g.get("CGID")
                     if cgid is None:
                         continue
@@ -943,10 +951,18 @@ class InaraPlugin(BasePlugin):
                     else:
                         tier = None
 
-                    sig = (contribution, total, tier, completed)
+                    # Dedup on the commander's standing (contribution / tier /
+                    # completion) — NOT CurrentTotal, which ticks on every
+                    # event and would re-POST constantly.
+                    sig = (contribution, tier, completed)
                     if self._cg_seen.get(cgid) == sig:
                         continue
                     self._cg_seen[cgid] = sig
+                    _dbg.info(
+                        f"  [Inara] CG submit CGID={cgid} "
+                        f"contribution={contribution} tier={tier} "
+                        f"completed={completed}"
+                    )
 
                     cg_data = {
                         "communitygoalGameID": cgid,
