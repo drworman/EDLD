@@ -87,7 +87,6 @@ from __future__ import annotations
 import json
 import queue
 import secrets
-import socket
 import threading
 import re
 import time
@@ -111,8 +110,25 @@ RING_SIZE = 200   # max events stored per event type
 CAPI_BASE    = "https://companion.orerve.net"
 AUTH_BASE    = "https://auth.frontierstore.net"
 CLIENT_ID    = "61b25957-b56c-4a68-b1f0-4c9bf46dd00c"
-REDIRECT_URI = "https://drworman.github.io/EDLD/auth/callback"
 SCOPE        = "auth capi"
+
+# OAuth2 (PKCE) callback is served by a short-lived loopback HTTP server on the
+# user's own machine — there is no hosted/remote callback page.  Frontier
+# requires the redirect URI to be registered verbatim against the client_id, so
+# the port is fixed (not ephemeral).  Register this exact URI in the Frontier
+# developer portal (https://user.frontierstore.net):
+#
+#     http://127.0.0.1:28473/callback
+#
+# 127.0.0.1 (the loopback literal) is the RFC 8252-recommended form for native
+# apps and avoids any DNS/hosts dependency.  The port is deliberately outside
+# the usual Linux ephemeral range (32768+) to minimise clashes; EDLD aborts the
+# flow cleanly and alerts if it is already in use.  Change CALLBACK_PORT here if
+# you re-register a different port with Frontier.
+CALLBACK_HOST = "127.0.0.1"
+CALLBACK_PORT = 28473
+CALLBACK_PATH = "/callback"
+REDIRECT_URI  = f"http://{CALLBACK_HOST}:{CALLBACK_PORT}{CALLBACK_PATH}"
 
 EP_PROFILE       = "profile"
 EP_MARKET        = "market"
@@ -172,33 +188,57 @@ def _http_get(url: str, token: str, timeout: int = 20) -> dict:
     with opener.open(req, timeout=timeout) as r:
         return json.loads(r.read())
 
-class _CallbackHandler(urllib.request.BaseHandler):
-    """Minimal HTTP server to receive OAuth callback."""
-    def __init__(self, result_q: queue.Queue):
-        self._q = result_q
-    def do_GET(self): pass   # implemented in _listen_for_callback
+def _callback_page(ok: bool) -> str:
+    """Static landing page served locally after the Frontier redirect."""
+    title = "Authentication complete" if ok else "Authentication failed"
+    body  = ("EDLD is now connected to Frontier. You can close this tab "
+             "and return to EDLD."
+             if ok else
+             "EDLD could not complete authentication. Close this tab and "
+             "try again from the CAPI panel.")
+    return (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        f"<title>EDLD — {title}</title><style>"
+        "html,body{height:100%}body{margin:0;font-family:system-ui,"
+        "Segoe UI,Roboto,sans-serif;background:#0b0f0d;color:#d6efe6;"
+        "display:flex;align-items:center;justify-content:center}"
+        ".card{max-width:32rem;padding:2rem 2.5rem;text-align:center;"
+        "line-height:1.55}h1{font-size:1.2rem;margin:0 0 .6rem;"
+        "color:#7fe3b0}p{margin:0;opacity:.85}</style></head>"
+        f"<body><div class='card'><h1>{title}</h1><p>{body}</p></div>"
+        "</body></html>"
+    )
 
-def _listen_for_callback(port: int, result_q: queue.Queue, timeout: int) -> None:
+
+def _make_callback_server(port: int, result_q: queue.Queue):
+    """Bind a single-request loopback HTTP server for the OAuth callback.
+
+    Returns the bound ``HTTPServer`` (the caller services exactly one request
+    and then closes it).  Raises ``OSError`` if the port is already in use, so
+    the caller can detect a clash before sending the user to Frontier.
+    """
     import http.server
+
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             parsed = urllib.parse.urlparse(self.path)
             params = dict(urllib.parse.parse_qsl(parsed.query))
             code   = params.get("code")
             err    = params.get("error")
+            state  = params.get("state")
             self.send_response(200)
-            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            msg = "Auth complete — return to EDLD." if code else "Auth failed."
-            self.wfile.write(f"<html><body><p>{msg}</p></body></html>".encode())
-            result_q.put(("code", code) if code else ("error", err))
-        def log_message(self, fmt, *args): pass
-    try:
-        srv = http.server.HTTPServer(("127.0.0.1", port), H)
-        srv.timeout = timeout
-        srv.handle_request()
-    except Exception:
-        result_q.put(("error", None))
+            self.wfile.write(_callback_page(bool(code)).encode("utf-8"))
+            result_q.put(("code", code, state) if code
+                         else ("error", err, state))
+
+        def log_message(self, fmt, *args):
+            pass
+
+    # Binds immediately; OSError (e.g. EADDRINUSE) propagates to the caller.
+    return http.server.HTTPServer((CALLBACK_HOST, port), H)
 
 
 # ── Sub-namespaces ────────────────────────────────────────────────────────────
@@ -573,31 +613,85 @@ class CAPISource:
             # trace so the message at least makes it to the log file.
             self._trace(f"re-auth notify failed: {e}")
 
+    def _notify_callback_port_busy(self) -> None:
+        """Alert that the local OAuth callback port is already in use.
+
+        The loopback redirect server binds a fixed port (CALLBACK_PORT); if
+        another process holds it we abort before sending the user to Frontier.
+        Routed through the alerts plugin like the re-auth notice so it reaches
+        the alerts pane, terminal, GUI log, and Discord.
+        """
+        try:
+            self._dp._plugin_call(
+                "alerts", "push_external",
+                "🔑",
+                "CAPI callback port busy",
+                loglevel="CapiAuthRequired",
+                msg_term=(
+                    f"CAPI auth aborted — local callback port "
+                    f"{CALLBACK_HOST}:{CALLBACK_PORT} is already in use. "
+                    "Close whatever is using it and retry from the CAPI panel."
+                ),
+                msg_discord=(
+                    f"🔑 **CAPI auth aborted** — local callback port "
+                    f"{CALLBACK_PORT} is in use. Free it and retry."
+                ),
+                sigil="^  CAPI",
+            )
+        except Exception as e:
+            self._trace(f"port-busy notify failed: {e}")
+
     def _run_auth_flow(self) -> None:
         try:
             verifier, challenge = _make_pkce()
-            with socket.socket() as s:
-                s.bind(("127.0.0.1", 0))
-                port = s.getsockname()[1]
-            nonce    = secrets.token_hex(8)
-            state_p  = f"{port}:{nonce}"
+            nonce = secrets.token_hex(16)
+            cb_q: queue.Queue = queue.Queue()
+
+            # Bind the loopback callback server up-front so a port clash is
+            # caught *before* the user is sent to Frontier (rather than after
+            # they have already authorised).  The redirect URI is the fixed
+            # 127.0.0.1:<port> registered against our client_id — no hosted
+            # page is involved.
+            try:
+                srv = _make_callback_server(CALLBACK_PORT, cb_q)
+            except OSError as exc:
+                self._trace(
+                    f"callback port {CALLBACK_HOST}:{CALLBACK_PORT} "
+                    f"unavailable: {exc}"
+                )
+                self._notify_callback_port_busy()
+                self._finish_auth("port_busy")
+                return
+            srv.timeout = AUTH_TIMEOUT_S
+
             auth_url = (
                 f"{AUTH_BASE}/auth?response_type=code&client_id={CLIENT_ID}"
                 f"&redirect_uri={urllib.parse.quote(REDIRECT_URI, safe='')}"
                 f"&scope={SCOPE}&code_challenge={challenge}"
-                f"&code_challenge_method=S256&state={state_p}"
+                f"&code_challenge_method=S256&state={nonce}"
             )
-            cb_q: queue.Queue = queue.Queue()
-            threading.Thread(
-                target=_listen_for_callback,
-                args=(port, cb_q, AUTH_TIMEOUT_S), daemon=True
-            ).start()
+
+            def _serve_once() -> None:
+                try:
+                    srv.handle_request()
+                except Exception:
+                    pass
+
+            threading.Thread(target=_serve_once, daemon=True).start()
             webbrowser.open(auth_url)
+
             try:
-                kind, value = cb_q.get(timeout=AUTH_TIMEOUT_S + 5)
+                kind, value, ret_state = cb_q.get(timeout=AUTH_TIMEOUT_S + 5)
             except queue.Empty:
                 self._finish_auth("timeout"); return
+            finally:
+                srv.server_close()
+
             if kind == "error" or not value:
+                self._finish_auth("error"); return
+            # CSRF: the state echoed back must match the nonce we generated.
+            if ret_state != nonce:
+                self._trace("OAuth state mismatch — discarding callback")
                 self._finish_auth("error"); return
 
             resp = _http_post(f"{AUTH_BASE}/token", {
