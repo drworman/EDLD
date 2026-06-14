@@ -62,7 +62,7 @@ The runtime toggle resets to armed on the next start; the config master switch i
 
 ## Manual activation
 
-Session management exposes a `flush_session` action, so a quit can be triggered deliberately as well as by the automatic conditions. The Solo-only gate still applies — a manual flush outside Solo is refused.
+Press **Ctrl+T** (shown as "Quit Game" in the footer) to terminate the session on demand. A confirmation prompt appears first — press `y` or click **Yes** to go ahead, or `n` / Escape to cancel — so a stray keypress can't quit your game by accident. The Solo-only gate still applies: a manual termination requested outside Solo is refused.
 
 Every activation, automatic or manual, emits a Discord notification (if Discord is configured) recording the reason, and posts a line to the dashboard Alerts block.
 

@@ -26,6 +26,7 @@ from textual.widgets    import Header, Footer, Label
 from textual.containers import Horizontal, Vertical, VerticalScroll
 
 from tui.preferences   import PreferencesScreen
+from tui.confirm_modal import ConfirmModal
 from tui.blocks.career import CareerBlock
 from tui.blocks.navigation import NavigationBlock
 from tui.blocks.colonisation  import ColonisationBlock
@@ -119,6 +120,7 @@ class EdmdTui(App):
         Binding("ctrl+l", "clear_alerts",   "Clear Alerts"),
         Binding("ctrl+o", "options",        "Options"),
         Binding("ctrl+k", "toggle_ksw",     "Session Mgmt", show=True),
+        Binding("ctrl+t", "kill_session",   "Quit Game",    show=True),
     ]
 
     def __init__(self, core: "CoreAPI", program: str, version: str,
@@ -265,9 +267,26 @@ class EdmdTui(App):
             if callable(fn):
                 fn(self)
 
+    def action_kill_session(self) -> None:
+        """Manually terminate the game session (Solo only), behind a confirm prompt."""
+        if self._core._plugins.get("ksw") is None:
+            return
+
+        def _on_confirm(ok: bool | None) -> None:
+            if ok:
+                self._core.plugin_call("ksw", "flush_session", "Manual activation (TUI)")
+
+        self.push_screen(
+            ConfirmModal(
+                "Terminate game session?",
+                "Quits Elite Dangerous now. Solo mode only — ignored in Open / Private Group.",
+            ),
+            _on_confirm,
+        )
+
     def check_action(self, action: str, parameters: tuple) -> bool | None:
-        """Hide and disable the toggle_ksw binding when the plugin is not loaded."""
-        if action == "toggle_ksw":
+        """Disable the session-management bindings when the plugin is not loaded."""
+        if action in ("toggle_ksw", "kill_session"):
             return self._core._plugins.get("ksw") is not None
         return True
 
