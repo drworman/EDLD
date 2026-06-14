@@ -12,10 +12,9 @@ Design notes
 ------------
 - **Engine:** standard-library ``sqlite3`` only; no ORM dependency.
 - **Location:** ``<EDLD_DATA_DIR>/explo.db`` (shared across commanders).
-- **Concurrency:** connections are cached per process id.  EDLD forks early in
-  GTK4 mode, so a connection opened before the fork must never be reused in the
-  child — the PID check reopens a fresh connection on first use in any new
-  process.  Within a process, a re-entrant lock serialises writes and WAL mode
+- **Concurrency:** connections are cached per process id as a defensive
+  guard — a connection is never reused across processes; the PID check reopens
+  a fresh connection on first use in any new process.  Within a process, a re-entrant lock serialises writes and WAL mode
   keeps readers non-blocking.
 - **Migrations:** an integer ``schema_version`` in the ``meta`` table gates a
   forward-only migration list.  ``current_version()`` lets callers refuse to

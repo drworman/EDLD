@@ -89,8 +89,6 @@ part of fitting it to the `stack` height.
 ### Tasks
 
 - [ ] Define size classes + per-block class membership in one shared module.
-- [ ] GTK4: drive block construction and placement from the assignment map
-      (persisted in `layout.json`) rather than a static registry order.
 - [ ] TUI: replace the hard-coded `compose()` columns and static per-block CSS
       heights with composition from the same assignment map.
 - [ ] Preferences > Display tab (both UIs): per-position class-filtered
@@ -178,7 +176,6 @@ honk contribution) already exists in the tree and is reused.
 ### Tasks
 
 - [ ] Component write-through + system/body accessor for blocks.
-- [ ] GTK4 block (`gui/blocks/exploration.py`) + registry entry.
 - [ ] TUI block (`tui/blocks/exploration.py`) + composition entry + CSS height.
 - [ ] Default layout: Exploration into the Assets position; Assets view off.
 
@@ -216,7 +213,6 @@ and to the final species as samples are taken.
 
 - [ ] Prediction module + value-range calculator.
 - [ ] Component write-through (signals, samples, waypoints) + accessors.
-- [ ] GTK4 block (`gui/blocks/exobiology.py`) + registry entry.
 - [ ] TUI block (`tui/blocks/exobiology.py`) + composition entry + CSS height.
 - [ ] Default layout: Exobiology into the Engineering position; Engineering off.
 

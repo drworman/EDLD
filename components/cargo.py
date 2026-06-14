@@ -27,7 +27,7 @@ State written to MonitorState:
                                   }
                                 }
 
-GUI block: cargo
+Dashboard block: cargo
 """
 
 import json

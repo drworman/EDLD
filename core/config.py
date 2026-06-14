@@ -64,7 +64,7 @@ def config_to_toml(d: dict) -> str:
         single [ProfileName] table whose sub-section keys use dotted notation:
             [EDP1]
             Settings.JournalFolder = "..."
-            UI.Mode = "gtk4"
+            UI.Mode = "textual"
         The old [EDP1.Settings] / [EDP1.UI] sub-table style is NEVER produced.
 
     This is the single authoritative writer for config.toml.  Both
@@ -91,7 +91,7 @@ def config_to_toml(d: dict) -> str:
         if not isinstance(val, dict) or section in STANDARD_SECTIONS:
             continue
         lines += ["", f"[{section}]"]
-        # Root-level scalars within the profile (QuitOnLowFuel, _adv_session_mgmt …)
+        # Any root-level scalar keys within the profile, written before dotted sub-keys
         for k, v in val.items():
             if not isinstance(v, dict):
                 lines.append(f"{k} = {_scalar(v)}")
@@ -111,16 +111,16 @@ def config_to_toml(d: dict) -> str:
 def _apply_gui_to_ui(gui_dict: dict) -> dict:
     """Convert a [GUI] / profile GUI sub-dict to [UI] representation.
 
-        Enabled = true   →  Mode = "gtk4"
+        Enabled = true   →  Mode = "textual"
         Enabled = false  →  Mode = "terminal"
         (absent)         →  Mode unchanged / not added
-        All other keys   →  kept as-is (Theme, FontFamily, FontSize, …)
+        All other keys   →  kept as-is (Theme, …)
     """
     src = dict(gui_dict)
     enabled = src.pop("Enabled", None)
     result: dict = {}
     if enabled is True:
-        result["Mode"] = "gtk4"
+        result["Mode"] = "textual"
     elif enabled is False:
         result["Mode"] = "terminal"
     result.update(src)
@@ -133,7 +133,7 @@ def migrate_config_if_needed(config_path: Path) -> bool:
     Handles all of:
       • [GUI] global section  →  [UI]  (Enabled= → Mode=)
       • [ProfileName.GUI] sub-table  →  ProfileName.UI.*  (dotted key)
-      • ProfileName.GUI.Enabled = true in a profile block  →  UI.Mode = "gtk4"
+      • ProfileName.GUI.Enabled = true in a profile block  →  UI.Mode = "textual"
       • [ProfileName.Section] sub-table headers  →  [ProfileName] + dotted keys
 
     Detection uses a raw-text regex so clean canonical files are never touched.
@@ -214,11 +214,8 @@ CFG_DEFAULTS_EXTRA = {
 }
 
 CFG_DEFAULTS_UI = {
-    "Mode":             "terminal",  # terminal | textual | gtk4
-    "Theme":            "default",
-    "FontSize":         14,
-    "FontFamily":       "JetBrains Mono",
-    "SoftwareRenderer": False,       # set True if EDLD causes compositor starvation on Linux
+    "Mode":  "textual",  # textual | terminal
+    "Theme": "default",
 }
 
 CFG_DEFAULTS_DISCORD = {
@@ -384,18 +381,6 @@ def load_setting(
     return settings
 
 
-def pcfg(config: dict, config_profile: str | None, key: str, default=False):
-    """Read a key from the active profile only, never from global config.
-
-    These keys are profile-gated by design — they are never read from global config.
-    """
-    if config_profile:
-        v = _safe_section(config, config_profile).get(key)
-        if v is not None:
-            return v
-    return default
-
-
 # ── ConfigManager ─────────────────────────────────────────────────────────────
 
 class ConfigManager:
@@ -482,10 +467,6 @@ class ConfigManager:
             defaults,
             warn_missing,
         )
-
-    def pcfg(self, key: str, default=False):
-        """Profile-gated key lookup."""
-        return pcfg(self.config, self.config_profile, key, default)
 
     def refresh(self, terminal_print: bool = True) -> bool:
         """Re-read config.toml if modified.  Returns True if reloaded."""

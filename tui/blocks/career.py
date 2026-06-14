@@ -1,7 +1,7 @@
 """
 tui/blocks/career.py — Career block (Textual).
 
-Mirrors the GTK4 Career block: nine tabs in fixed order — Summary,
+Career block: nine tabs in fixed order — Summary,
 Combat, Explore, Exobio, Mining, Trade, Credits, Carrier, PPlay.
 
 The Summary tab is session-scoped at the top and shows a live wealth
@@ -386,7 +386,7 @@ class CareerBlock(TuiBlock):
 
     def _refresh_credits(self, finance, carrier_scan, state) -> None:
         """Earnings & spending ledger + carrier-bank flow + voucher
-        reconciliation.  Mirrors gui/blocks/career.py:_refresh_income.
+        reconciliation.
 
         No journaled-vs-actual reconciliation row — earnings and spending
         from journals don't sum to net worth (pre-journal wealth and

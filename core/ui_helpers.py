@@ -1,7 +1,7 @@
 """
-core/ui_helpers.py — Pure-Python display helpers shared between TUI and GUI.
+core/ui_helpers.py — Pure-Python display helpers for the dashboard.
 
-No GTK4, no gi, no textual — safe to import anywhere.
+No UI-framework imports — safe to import anywhere.
 """
 
 from __future__ import annotations

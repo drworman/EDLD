@@ -76,11 +76,11 @@ class CargoBlock(TuiBlock):
         if has_target_name:
             stn  = tgt_info.get("station_name", "") or ""
             sys_ = tgt_info.get("star_system",  "") or ""
-            src_label = f"{stn} | {sys_}" if stn and sys_ else (tgt_name or "Target")
+            src_label = f"{stn} · {sys_}" if stn and sys_ else (tgt_name or "Target")
         else:
             stn  = mkt_info.get("station_name", "") or ""
             sys_ = mkt_info.get("star_system",  "") or ""
-            src_label = (f"{stn} | {sys_}" if stn and sys_ else
+            src_label = (f"{stn} · {sys_}" if stn and sys_ else
                          stn or sys_ or "Gal. Avg")
 
         try:
@@ -147,13 +147,16 @@ class CargoBlock(TuiBlock):
             price  = item["price"]
             total += price * count
             name   = ("⚠ " if item["stolen"] else "") + item["name"]
-            # qty right-padded to 4 so the | aligns across all rows
-            val_str = f"{count:>4} t  [dim]|  {_fmt_cr(price)}[/dim]"
+            # Both columns fixed-width (qty right-justified to 4, price to 9) so
+            # the whole value string is constant width.  KVRow right-aligns the
+            # value, so a constant width puts the | in the same screen column on
+            # every row.
+            val_str = f"{count:>4} t  [dim]|[/dim] {_fmt_cr(price):>9}"
             rows.append(KVRow(name, val_str))
 
-        # Totals row: same fixed-width column format as item rows so qty aligns
+        # Totals row: identical fixed-width format so its | aligns with the rest.
         cr_total = _fmt_cr(total) if total else "—"
         rows.append(KVRow("[dim]Totals[/dim]",
-                          f"{used:>4} t  [dim]|  {cr_total}[/dim]"))
+                          f"{used:>4} t  [dim]|[/dim] {cr_total:>9}"))
 
         scroll.mount(*rows)

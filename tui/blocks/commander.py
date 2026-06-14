@@ -5,7 +5,7 @@ from textual.widgets import Label, TabbedContent, TabPane, Static
 from textual.widget  import Widget
 from textual.containers import VerticalScroll, Horizontal
 from tui.block_base  import TuiBlock, KVRow, SepRow, SecHdr, _health_cls, _fmt_credits
-# ── Inline helpers (no GTK dependency) ───────────────────────────────────────
+# ── Inline helpers (no UI-framework dependency) ───────────────────────────────────────
 
 def fmt_shield(shields_up, recharging: bool) -> str:
     if shields_up is None: return "—"
@@ -102,7 +102,7 @@ class CommanderBlock(TuiBlock):
         else:
             hdr1 = "COMMANDER"
 
-        # Line 2: squadron identity — reads same state fields as GTK4 commander block
+        # Line 2: squadron identity — reads the commander state fields
         sq_rank = getattr(s, "pilot_squadron_rank", "")
         sq_name = getattr(s, "pilot_squadron_name", "")
         sq_tag  = getattr(s, "pilot_squadron_tag",  "")

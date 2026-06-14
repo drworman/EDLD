@@ -673,7 +673,7 @@ class ColonisationPlugin(BasePlugin):
         """Check whether a project completed on Raven Colonial while offline.
 
         Fetches the project record and marks the local site complete if the
-        server reports it is finished.  Fires a GUI refresh if state changes.
+        server reports it is finished.  Fires a dashboard refresh if state changes.
         Only called when the site is still active locally — avoids redundant
         network calls for sites already marked complete.
         """

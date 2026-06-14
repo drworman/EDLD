@@ -223,15 +223,26 @@ class CombatPlugin(BasePlugin, ActivityProviderMixin):
                 )
                 self._last_rate_alert_mono = now
 
-        # ── No-kill timeout (session flush) ──────────────────────────────
-        limit_minutes = core.cfg.pcfg("QuitOnNoKillsMinutes", 0)
-        if limit_minutes and last_kill > 0.0:
+        # ── Idle-in-RES auto-quit ────────────────────────────────────────
+        # Quit the session when no NPC kill has occurred for the configured
+        # interval *while dropped in a Resource Extraction Site* (any tier).
+        # AFK kill-farming only happens inside a RES, so the timeout is gated
+        # to RES presence — it never fires during ordinary idle elsewhere.
+        # Delegated to the ksw component, which hard-gates to Solo at the kill
+        # point, so this never fires in Open or Private Group.
+        sm = core.load_setting(
+            "SessionMgmt", {"Enabled": False, "QuitOnNoKillsMinutes": 0}, warn=False
+        )
+        limit_minutes = sm.get("QuitOnNoKillsMinutes", 0)
+        in_res = "Resource Extraction Site" in (getattr(state, "pilot_body", None) or "")
+        if sm.get("Enabled") and limit_minutes and last_kill > 0.0 and in_res:
             elapsed = (now - last_kill) / 60
             if elapsed >= limit_minutes:
                 try:
                     core.plugin_call(
-                        "session_manager", "flush_session",
-                        f"No kills for {elapsed:.0f} min (threshold {limit_minutes} min)"
+                        "ksw", "flush_session",
+                        f"Idle in RES: no kills for {elapsed:.0f} min "
+                        f"(threshold {limit_minutes} min)"
                     )
                 except Exception:
                     pass

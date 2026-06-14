@@ -70,13 +70,12 @@ class NavigationBlock(TuiBlock):
                     yield VerticalScroll(id="nav-neutron-results")
 
             # ── Carrier tab ──────────────────────────────────────────────────
-            # Carrier ROUTING is unfinished and won't ship in this release —
-            # the Spansh fleet-carrier API integration doesn't return
-            # results from its accepted POSTs (see release notes for
-            # 20260515).  This tab continues to surface the live carrier
-            # *status* (balance / fuel / cargo) which is genuinely useful;
-            # the route-plotting form will be added once the API issue
-            # is resolved.
+            # Carrier ROUTING is deferred with no target release — the
+            # Spansh fleet-carrier API integration doesn't reliably return
+            # results from its accepted POSTs.  This tab continues to surface
+            # the live carrier *status* (balance / fuel / cargo) which is
+            # genuinely useful; the route-plotting form will be added if and
+            # when the API issue is resolved.
             with TabPane("Carrier⚠", id="nav-tab-carrier"):
                 yield VerticalScroll(id="nav-carrier-scroll")
 
@@ -234,7 +233,7 @@ class NavigationBlock(TuiBlock):
         scroll.remove_children()
         rows: list = []
 
-        # Carrier routing is unfinished for 20260515 — keep this notice
+        # Carrier routing is deferred (no target release) — keep this notice
         # visible at the top of the tab so it's obvious why no plot form.
         rows.append(Label(
             "[yellow]⚠ Carrier routing is UNFINISHED — disabled for this "

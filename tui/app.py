@@ -1,8 +1,8 @@
 """
 tui/app.py — Textual TUI application for EDLD.
 
-Three-column layout mirroring the GTK4 default exactly (see
-gui/grid.py DEFAULT_LAYOUT):
+Three-column layout built from the shared layout model (see
+core/layout_model.py):
 
   Left   : Assets  |  Engineering  |  Colonisation
   Centre : Commander  |  Crew/SLF  |  Alerts  |  Cargo
@@ -134,7 +134,7 @@ class EdmdTui(App):
         yield Header()
         yield Label("", id="update-notice-bar")
         # Columns, block selection, and vertical order all come from the shared
-        # layout model (the same source the GTK4 dashboard and the Display tab
+        # layout model (the same source the Display tab
         # use), so the two UIs stay in lockstep and windows can be reassigned.
         cols = tui_columns(load_assignment())
         with Horizontal(id="dashboard"):

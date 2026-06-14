@@ -74,7 +74,7 @@ class AssetsBlock(TuiBlock):
         mods_val  = sum(m.get("value", 0)
                         for m in getattr(s, "assets_stored_modules", []))
 
-        # Carrier rows — mirror GTK4 logic exactly
+        # Carrier rows — mirror the shared asset logic exactly
         carrier  = getattr(s, "assets_carrier", None)
         fc_mats  = getattr(s, "assets_fc_materials", None) or []
         carrier_cargo_val = sum(m.get("price", 0) * m.get("stock", 0) for m in fc_mats)

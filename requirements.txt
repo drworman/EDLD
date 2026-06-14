@@ -5,31 +5,23 @@
 #
 # ── System package manager (NOT pip) ─────────────────────────────────────────
 #
-#   psutil and PyGObject have C extensions that require system libraries.
-#   Install via your distro package manager:
+#   psutil has C extensions that require system libraries.  Install it via your
+#   distro package manager:
 #
 #   psutil (required for session management):
 #     Arch:          sudo pacman -S python-psutil
 #     Debian/Ubuntu: sudo apt install python3-psutil
 #     Fedora:        sudo dnf install python3-psutil
 #
-#   PyGObject / GTK4 (required for --mode gtk4):
-#     Arch:          sudo pacman -S python-gobject gtk4
-#     Debian/Ubuntu: sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0
-#     Fedora:        sudo dnf install python3-gobject gtk4
-#
 # ── pip ──────────────────────────────────────────────────────────────────────
 #
 discord-webhook>=1.3.0
 cryptography>=41.0.0
 #
-# ── UI frontends (install the one(s) you use) ─────────────────────────────────
+# ── UI frontend ──────────────────────────────────────────────────────────────
 #
-# Textual TUI (--mode textual):
+# Textual TUI (the EDLD dashboard, --mode textual — the default):
 #   pip install "textual>=0.47.0"
-#
-# GTK4 GUI (--mode gtk4):
-#   See system package manager section above.
 #
 # ── stdlib (no install needed) ────────────────────────────────────────────────
 #   tomllib, argparse, json, pathlib, re, queue, threading, datetime

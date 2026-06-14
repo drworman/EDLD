@@ -3,7 +3,7 @@
 For the current system, shows each body's biological signal count and sampling
 progress, sampled species (stage, value, clonal distance), and value-range hints
 for revealed-but-unsampled genera.  Location from explo_sync; data from
-core.exobio_view.  Mirrors the GTK4 Exobiology block.
+core.exobio_view.  Renders the Exobiology view.
 """
 from __future__ import annotations
 

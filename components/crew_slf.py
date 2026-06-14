@@ -2,7 +2,7 @@
 components/crew_slf.py — NPC Crew and SLF (Support Landing Fighter) state.
 
 Owns: crew_*, slf_*, has_fighter_bay, cmdr_in_slf, fighter_integrity.
-GUI block: col=16, row=0, width=8, height=5 (default).
+Dashboard block: crew / SLF.
 """
 
 import re

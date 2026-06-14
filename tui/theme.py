@@ -8,16 +8,10 @@ appended per-theme in apply_theme().
 
 # ── Structural CSS (layout, spacing — no colours) ─────────────────────────────
 #
-# Column layout and block heights mirror the GTK4 default
-# (gui/grid.py DEFAULT_LAYOUT) exactly, so the same block sits in
-# the same place across both UIs:
-#   Left   : assets / engineering / colonisation     (rows 43 / 35 / 23)
-#   Centre : commander / crew / alerts / cargo       (rows 32 / 18 / 16 / 35)
-#   Right  : missions / navigation / career          (rows 28 / 33 / 40)
-#
-# Each column's heights below are those row counts normalised to %
-# (with a 1-point rounding shaved off the smallest entry per column
-# so totals don't exceed 100% on terminals that don't round up).
+# Column layout and block heights come from the shared layout model
+# (core/layout_model.py), so every block's size follows its size class and the
+# Display tab can reassign windows.  Each block's height percentage is generated
+# at build time by _height_css() from the model's per-column apportionment.
 #
 # Textual is fully terminal-resolution aware — at very narrow widths
 # (< 100 cols) the three columns will compress; below the cargo /
@@ -37,7 +31,7 @@ Screen {
     height: 1fr;
 }
 
-/* Column widths: 11 : 10 : 11 out of 32 grid columns (matches GTK4). */
+/* Column widths: left 34% : centre 32% : right 34%. */
 #col-left   { width: 34%; height: 100%; }
 #col-centre { width: 32%; height: 100%; }
 #col-right  { width: 34%; height: 100%; }
@@ -56,8 +50,8 @@ TuiBlock > VerticalScroll { height: 1fr; }
 TuiBlock > TabbedContent  { height: 1fr; }
 
 /* Per-block heights are generated from the shared layout model and appended to
-   the CSS at build time (see build_css / _height_css), so the TUI and the GTK4
-   dashboard stay in lockstep and the Display tab can reassign windows. */
+   the CSS at build time (see build_css / _height_css), so block heights
+   follow the size classes and the Display tab can reassign windows. */
 
 .block-title {
     background: $title-bg;
@@ -339,7 +333,7 @@ Tab.-active { color: $accent; text-style: bold; }
 _PALETTES = {
     # ── Default (Elite orange) ────────────────────────────────────────────────
     # Backgrounds carry a warm orange-amber tint matching the accent.
-    # Accent #e07b20 matches themes/default.css exactly.
+    # Accent #e07b20 — Elite Dangerous orange.
     "default": {
         "$bg":       "#120f0b",   # warm near-black, slight orange tint
         "$block-bg": "#1c1810",   # warm dark block fill
@@ -354,7 +348,7 @@ _PALETTES = {
     },
     # ── Default Green ─────────────────────────────────────────────────────────
     # Backgrounds carry a cool forest-green tint.
-    # Accent #00aa44 matches themes/default-green.css exactly.
+    # Accent #00aa44 — green.
     "default-green": {
         "$bg":       "#0b0f0d",   # very dark, subtle green tint
         "$block-bg": "#141c18",   # dark green-tinted block fill
@@ -368,56 +362,56 @@ _PALETTES = {
         "$red":      "#e05c5c",
     },
     # ── Default Blue ──────────────────────────────────────────────────────────
-    # Accent #3d8fd4 matches themes/default-blue.css exactly.
+    # Accent #3d8fd4 — blue.
     "default-blue": {
         "$bg":       "#0c0e14",
         "$block-bg": "#141820",
         "$title-bg": "#1a2030",
         "$fg":       "#d0d8e8",
         "$dim":      "#556070",
-        "$accent":   "#3d8fd4",   # matches GTK4 default-blue.css
+        "$accent":   "#3d8fd4",
         "$border":   "#253050",
         "$green":    "#57e389",
         "$amber":    "#f8e45c",
         "$red":      "#e05c5c",
     },
     # ── Default Purple ────────────────────────────────────────────────────────
-    # Accent #9b59b6 matches themes/default-purple.css exactly.
+    # Accent #9b59b6 — purple.
     "default-purple": {
         "$bg":       "#0e0d14",
         "$block-bg": "#17151f",
         "$title-bg": "#201c28",
         "$fg":       "#dcd8e8",
         "$dim":      "#60587a",
-        "$accent":   "#9b59b6",   # matches GTK4 default-purple.css
+        "$accent":   "#9b59b6",
         "$border":   "#302845",
         "$green":    "#57e389",
         "$amber":    "#f8e45c",
         "$red":      "#e05c5c",
     },
     # ── Default Red ───────────────────────────────────────────────────────────
-    # Accent #cc3333 matches themes/default-red.css exactly.
+    # Accent #cc3333 — red.
     "default-red": {
         "$bg":       "#130e0e",
         "$block-bg": "#1e1414",
         "$title-bg": "#261818",
         "$fg":       "#e8d8d8",
         "$dim":      "#7a5858",
-        "$accent":   "#cc3333",   # matches GTK4 default-red.css
+        "$accent":   "#cc3333",
         "$border":   "#3d2020",
         "$green":    "#57e389",
         "$amber":    "#f8e45c",
         "$red":      "#e05c5c",
     },
     # ── Default Yellow ────────────────────────────────────────────────────────
-    # Accent #d4a017 matches themes/default-yellow.css exactly.
+    # Accent #d4a017 — yellow.
     "default-yellow": {
         "$bg":       "#110f08",
         "$block-bg": "#1a1810",
         "$title-bg": "#231f14",
         "$fg":       "#ede8d4",
         "$dim":      "#7a7050",
-        "$accent":   "#d4a017",   # matches GTK4 default-yellow.css
+        "$accent":   "#d4a017",
         "$border":   "#3a3018",
         "$green":    "#57e389",
         "$amber":    "#f8e45c",
@@ -440,7 +434,7 @@ _PALETTES["default-dark"] = _PALETTES["default"]
 
 
 def _load_custom_palette(css_path) -> dict | None:
-    """Parse a GTK4 theme CSS file and extract a TUI-compatible palette dict."""
+    """Parse a custom theme CSS file and extract a TUI palette dict."""
     import re as _re
     try:
         block_m = _re.search(r":root\s*\{([^}]+)\}", css_path.read_text(encoding="utf-8"), _re.DOTALL)

@@ -5,7 +5,6 @@ Depends on: core.state, core.config
 """
 
 import re
-import queue
 from datetime import datetime, timezone
 
 try:
@@ -93,15 +92,11 @@ class Emitter:
         self,
         cfg_mgr,           # ConfigManager
         state,             # MonitorState (read-only use)
-        gui_queue: queue.Queue | None = None,
         notify_test: bool = False,
-        gui_mode: bool = False,
     ):
         self._cfg          = cfg_mgr
         self._state        = state
-        self._gui_queue    = gui_queue
         self.notify_test   = notify_test
-        self.gui_mode      = gui_mode
         self._discord_hook = None
         self._discord_up   = False  # enabled after _init_webhook() succeeds
 
@@ -178,7 +173,6 @@ class Emitter:
         timestamp=None,
         loglevel: int = 2,
         event=None,
-        force_terminal: bool = False,
     ) -> None:
         state    = self._state
         cfg      = self._cfg
@@ -204,14 +198,8 @@ class Emitter:
         state.logged += 1
 
         # ── Terminal ──────────────────────────────────────────────────────
-        if loglevel > 0 and not self.notify_test and (not self.gui_mode or force_terminal):
+        if loglevel > 0 and not self.notify_test:
             print(f"[{logtime_str}] {term_prefix}{msg_term}")
-
-        # ── GUI event log ─────────────────────────────────────────────────
-        if self.gui_mode and loglevel > 0 and self._gui_queue:
-            ansi_esc = re.compile(r"\x1b\[[0-9;]*m")
-            clean    = ansi_esc.sub("", msg_term)
-            self._gui_queue.put(("log", f"[{logtime_str}] {emoji_fmt}{clean}"))
 
         # ── Deferred Discord update notice ────────────────────────────────
         if self._discord_update_pending and self._discord_up and not self.notify_test:
@@ -384,6 +372,5 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
         sigil="~  SUMM",
         timestamp=logtime,
         loglevel=2,
-        force_terminal=True,
     )
 

@@ -2,10 +2,10 @@
 components/journal_history.py — Background full-journal scanner.
 
 Scans all journal files once at startup in a daemon thread, then exposes
-aggregated career and historical data to other components and GUI blocks.
+aggregated career and historical data to other components and dashboard blocks.
 
 Results available via self.results dict after scan completes.  The
-scan_done threading.Event is set when data is ready; GUI blocks should
+scan_done threading.Event is set when data is ready; dashboard blocks should
 call wait() or check is_set() before reading results.
 
 Data produced:
@@ -646,7 +646,7 @@ class JournalHistoryPlugin(BasePlugin):
 
         self.scan_done.set()
 
-        # Notify GUI that career data is available
+        # Notify the dashboard that career data is available
         gq = self.core.gui_queue
         if gq:
             gq.put(("career_update", None))

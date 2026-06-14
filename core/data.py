@@ -583,7 +583,7 @@ class CAPISource:
         """Surface a one-shot alert that the user must re-run the OAuth flow.
 
         Routes through the alerts plugin's push_external so the message
-        lands in the alerts pane (GUI/TUI), the terminal, the GUI log, and
+        lands in the alerts pane, the terminal, the event log, and
         Discord (with @-ping at loglevel 3 — the configured default).
         Cleared by a successful authenticate() or an explicit disconnect()
         so the next refresh failure alerts again.
@@ -619,7 +619,7 @@ class CAPISource:
         The loopback redirect server binds a fixed port (CALLBACK_PORT); if
         another process holds it we abort before sending the user to Frontier.
         Routed through the alerts plugin like the re-auth notice so it reaches
-        the alerts pane, terminal, GUI log, and Discord.
+        the alerts pane, terminal, event log, and Discord.
         """
         try:
             self._dp._plugin_call(

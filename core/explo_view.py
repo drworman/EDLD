@@ -2,11 +2,11 @@
 core/explo_view.py — Exploration window view builder.
 
 Turns the stored facts for one system (from :mod:`core.explo_db`) plus a
-commander's scan/map status into a structured view the GTK and TUI Exploration
+commander's scan/map status into a structured view the TUI Exploration
 blocks render.  All cartographic values come from :mod:`core.explo_value`.
 
 The view is deliberately presentation-agnostic: a dict of plain values and
-flags, no widget or formatting concerns, so both UIs render the same data.
+flags, no widget or formatting concerns — the dashboard renders this data.
 """
 
 from __future__ import annotations

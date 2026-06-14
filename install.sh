@@ -82,49 +82,39 @@ fi
 # ── Install system packages ────────────────────────────────────────────────────
 section "Installing system packages"
 
-GUI_AVAILABLE=false
-
 case "$DISTRO" in
     arch)
         info "Installing via pacman..."
-        sudo pacman -S --needed --noconfirm python-psutil python-gobject gtk4
-        GUI_AVAILABLE=true
-        ok "python-psutil, python-gobject, gtk4 installed"
+        sudo pacman -S --needed --noconfirm python-psutil
+        ok "python-psutil installed"
         ;;
     debian)
         info "Installing via apt..."
         sudo apt-get update -qq
-        sudo apt-get install -y python3-psutil python3-gi python3-gi-cairo \
-            gir1.2-gtk-4.0 libgtk-4-dev
-        GUI_AVAILABLE=true
-        ok "python3-psutil, python3-gi (GTK4 bindings) installed"
+        sudo apt-get install -y python3-psutil
+        ok "python3-psutil installed"
         ;;
     fedora-ostree)
         info "Installing via rpm-ostree (immutable base layer)..."
         info "This will stage packages for install — a reboot may be required."
-        # rpm-ostree install exits 0 if all packages are already layered,
-        # so no special already-installed handling is needed.
-        rpm-ostree install --idempotent -y python3-psutil python3-gobject gtk4 ||
+        rpm-ostree install --idempotent -y python3-psutil ||
             warn "rpm-ostree install encountered an issue — check the output above"
-        GUI_AVAILABLE=true
-        ok "python3-psutil, python3-gobject, gtk4 staged via rpm-ostree"
+        ok "python3-psutil staged via rpm-ostree"
         warn "You may need to reboot for the layered packages to take effect."
         ;;
     fedora)
         info "Installing via dnf..."
-        sudo dnf install -y python3-psutil python3-gobject gtk4
-        GUI_AVAILABLE=true
-        ok "python3-psutil, python3-gobject, gtk4 installed"
+        sudo dnf install -y python3-psutil
+        ok "python3-psutil installed"
         ;;
     suse)
         info "Installing via zypper..."
-        sudo zypper install -y python3-psutil python3-gobject typelib-1_0-Gtk-4_0
-        GUI_AVAILABLE=true
-        ok "python3-psutil, python3-gobject installed"
+        sudo zypper install -y python3-psutil
+        ok "python3-psutil installed"
         ;;
     *)
         warn "Could not install system packages automatically."
-        warn "Install psutil and PyGObject via your package manager, then re-run."
+        warn "Install psutil via your package manager, then re-run."
         warn "See INSTALL.md for distro-specific instructions."
         ;;
 esac
@@ -196,19 +186,12 @@ section "Installation complete"
 echo
 echo -e "  ${GRN}EDLD is ready to run.${NC}"
 echo
-echo -e "  ${WHT}Terminal mode:${NC}"
+echo -e "  ${WHT}Dashboard (Textual TUI — default):${NC}"
 echo -e "    ./edld.py"
 echo
-
-if [ "$GUI_AVAILABLE" = true ]; then
-    echo -e "  ${WHT}GUI mode:${NC}"
-    echo -e "    ./edld.py --gui"
-    echo
-else
-    warn "GUI mode unavailable — PyGObject was not installed."
-    warn "See INSTALL.md for manual GTK4 setup instructions."
-    echo
-fi
+echo -e "  ${WHT}Plain terminal output:${NC}"
+echo -e "    ./edld.py --mode terminal"
+echo
 
 echo -e "  ${WHT}With a config profile:${NC}"
 echo -e "    ./edld.py -p YourProfileName"

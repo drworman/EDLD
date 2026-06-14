@@ -9,10 +9,6 @@ config.toml
 # These files contain sensitive cryptographic material — never commit them.
 *.key
 *.pub
-*.ksw
-ksw*
-ksw_admin/
-components/ksw/
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/

@@ -103,7 +103,7 @@ class MissionsPlugin(BasePlugin):
     def _session_kills_against(self, victim_faction: str) -> None:
         """Attribute a kill to all active missions targeting victim_faction.
 
-        Increments a per-mission kill counter so the GUI can show live
+        Increments a per-mission kill counter so the dashboard can show live
         progress within a session.  Not persisted — resets on restart;
         MissionRedirected is the authoritative completion signal.
         """

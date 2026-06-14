@@ -1,6 +1,79 @@
 # EDLD CHANGELOG
 
-Last updated: 20260531
+Last updated: 20260614
+
+---
+
+## Released in 20260614
+
+### Session Management: New
+EDLD can now automatically quit Elite Dangerous when a condition you
+configure is met — an optional safeguard that is off by default.  It is
+hard-gated to Solo mode and will never act in Open or Private Group:
+force-quitting in a shared mode is combat-logging under Frontier's rules,
+so the gate is enforced at the moment of termination and even a manual
+activation is refused outside Solo.
+
+Triggers cover a destroyed ship-launched fighter, low hull, and low
+main-tank fuel — a percentage threshold, optionally combined with
+estimated burn-time remaining, and suppressed while in supercruise and
+for a short grace period after exiting it.  A separate idle trigger quits
+after a configurable number of minutes without an NPC kill while dropped
+in a Resource Extraction Site of any tier; the RES requirement keeps it
+from firing during ordinary idle time, since AFK kill-farming happens
+nowhere else.
+
+Termination runs locally by default, or on another machine over SSH for a
+remote monitoring setup.  Press Ctrl+K to arm or disarm it at runtime —
+the header shows ✕ when armed and □ when idle.  Settings live in a new
+`[SessionMgmt]` section: a master `Enabled` switch plus per-trigger keys,
+all scopable per profile like any other setting.  A new Session Management
+guide and a configuration-reference section document every key.
+
+### Configuration
+Configuration now resolves through a single profile → global → default
+path for every section.  The older profile-only lookup that some advanced
+keys relied on has been retired, so any setting — including the new
+Session Management keys — can be defined globally and overridden per
+profile in the usual way.
+
+---
+
+## Released in 20260613
+
+### GTK4 UI Discontinued
+The GTK4 graphical interface has been removed.  EDLD now ships a single
+interface — the Textual TUI dashboard — with a plain scrolling terminal
+mode (`--mode terminal`) still available.  `--mode textual` is the default,
+and any existing config carrying `Mode = "gtk4"` is treated as `textual`
+automatically.  All GTK4 code, bundled fonts, theme stylesheets, and the
+PyGObject / GTK4 dependencies are gone; `requirements.txt`, `install.sh`,
+and the documentation no longer reference them.
+
+### Dashboard Layout
+The default arrangement is now Career / Cargo / Missions on the left,
+Commander / Crew / Alerts / Exploration in the centre, and Navigation /
+Colonisation / Exobiology on the right.  Every interchangeable window is a
+single Panel size class — the former Tall class is gone — so any window can
+occupy any non-fixed position.  Commander, Crew, and Alerts remain fixed:
+Commander spans one Panel and Crew + Alerts together span one Panel, so the
+rows line up across all three columns.
+
+### Cargo
+The manifest's quantity and credit columns are fixed-width, so the `|`
+separator lands in the same column on every row.  The station · system
+label in the title bar now uses a middle dot instead of a pipe so it no
+longer collides with the body columns.
+
+### cAPI OAuth
+Frontier cAPI authentication now uses a fixed-port loopback redirect
+(`http://127.0.0.1:28473/callback`, per RFC 8252) with CSRF state
+validation, replacing the previous hosted callback page.
+
+### Inara
+Community-goal contributions are now submitted to Inara — the bare
+`CommunityGoal` journal event is handled and the event field names were
+corrected — so goal progress is reflected on your Inara profile.
 
 ---
 

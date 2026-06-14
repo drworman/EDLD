@@ -92,7 +92,7 @@ class ExploSyncPlugin(BasePlugin):
             except Exception:
                 pass
 
-        # Nudge the windows to repaint after view-relevant events.  The GUI
+        # Nudge the windows to repaint after view-relevant events.  The dashboard
         # coalesces these into a single refresh per poll cycle.
         gq = getattr(self.core, "gui_queue", None)
         if gq is not None:

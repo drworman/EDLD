@@ -1,7 +1,7 @@
 """
 tui/preferences.py — TUI preferences screen for EDLD.
 
-Mirrors the five tabs of gui/preferences.py:
+The five preferences tabs:
   General       — journal folder, UTC, display toggles, inactivity alerts
   Notifications — per-event log levels (0–3)
   Discord       — webhook, user ID, display options
@@ -62,12 +62,12 @@ _LEVEL_SELECT: list[tuple[str, str]] = [
     ("3  Terminal + Discord + Ping", "3"),
 ]
 
-# Restart-required keys per config section — mirrors gui/preferences.py
+# Restart-required keys per config section.
 _RESTART_KEYS: dict[str, set[str]] = {
     "Settings": {"JournalFolder"},
     "Discord":  {"WebhookURL", "UserID", "Identity",
                  "ForumChannel", "ThreadCmdrNames", "Timestamp"},
-    "UI":       {"Theme", "FontSize"},
+    "UI":       {"Theme"},
     "EDDN":     {"Enabled", "TestMode"},
     "EDSM":     {"Enabled", "ApiKey"},
     "EDAstro":  {"Enabled", "UploadCarrierEvents"},
@@ -469,6 +469,10 @@ class PreferencesScreen(ModalScreen):
             "edastro-enabled":("EDAstro",   "Enabled"),
             "edastro-carrier":("EDAstro",   "UploadCarrierEvents"),
             "inara-enabled":  ("Inara",     "Enabled"),
+            "ksw-master":     ("SessionMgmt", "Enabled"),
+            "ksw-slf":        ("SessionMgmt", "QuitOnSLFDead"),
+            "ksw-fuel":       ("SessionMgmt", "QuitOnLowFuel"),
+            "ksw-hull":       ("SessionMgmt", "QuitOnLowHull"),
         }
         if wid in _BOOL_MAP:
             section, key = _BOOL_MAP[wid]
@@ -496,6 +500,8 @@ class PreferencesScreen(ModalScreen):
             "edsm-key":     ("EDSM",      "ApiKey",         str),
             "inara-key":    ("Inara",        "ApiKey",         str),
             "raven-key":    ("Colonisation", "ApiKey",         str),
+            "ksw-fuel-pct": ("SessionMgmt",  "QuitOnLowFuelPercent",  int),
+            "ksw-hull-thr": ("SessionMgmt",  "QuitOnLowHullThreshold", int),
         }
         if wid in mapping:
             section, key, typ = mapping[wid]
@@ -678,4 +684,4 @@ class PreferencesScreen(ModalScreen):
             pass
 
 
-# ── TOML writer (standalone — no gui/ dependency) ────────────────────────────
+# ── TOML writer (standalone — no UI-framework dependency) ────────────────────

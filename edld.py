@@ -6,7 +6,6 @@ All business logic lives in the packages below:
   core/       — state, config, emit, journal loop, plugin loader, shared API
   components/ — all application components
   plugins/    — user plugin directory
-  gui/        — GTK4 interface (helpers, block widgets, EdmdApp)
   tui/        — Textual TUI interface
 """
 
@@ -43,11 +42,9 @@ parser.add_argument("-t", "--test", action="store_true", default=None,
                     help="Re-route Discord output to terminal instead of webhook")
 parser.add_argument("-d", "--trace", action="store_true", default=None,
                     help="Print verbose debug/trace output")
-parser.add_argument("-g", "--gui", action="store_true", default=None,
-                    help="Alias for --mode gtk4 (launch GTK4 GUI)")
-parser.add_argument("--mode", choices=["terminal", "textual", "gtk4"],
+parser.add_argument("--mode", choices=["terminal", "textual"],
                     default=None, metavar="MODE",
-                    help="UI mode: terminal (default) | textual | gtk4")
+                    help="UI mode: textual (default) | terminal")
 
 args = parser.parse_args()
 
@@ -263,26 +260,26 @@ print(
 
 
 # ── UI mode ───────────────────────────────────────────────────────────────────
-# Priority: --mode CLI flag > --gui alias > config [UI] Mode value > default
-# --gui is kept as a backwards-compatible alias for --mode gtk4.
+# Priority: --mode CLI flag > config [UI] Mode value > default (textual).
+# The legacy GTK4 UI has been removed; any "gtk4" left in an old config is
+# treated as "textual" so existing configs keep working.
 
-_cfg_mode = mgr.ui_cfg.get("Mode", "terminal").lower().strip()
+_cfg_mode = mgr.ui_cfg.get("Mode", "textual").lower().strip()
+if _cfg_mode == "gtk4":
+    _cfg_mode = "textual"
 
 if args.mode:
     ui_mode = args.mode
-elif args.gui:
-    ui_mode = "gtk4"
-elif _cfg_mode in ("terminal", "textual", "gtk4"):
+elif _cfg_mode in ("terminal", "textual"):
     ui_mode = _cfg_mode
 else:
-    ui_mode = "terminal"
+    ui_mode = "textual"
 
-gui_mode = (ui_mode == "gtk4")   # kept for internal compat (emitter, update notices)
 
 
 # ── Debug log facility ────────────────────────────────────────────────────────
 # A file-only diagnostic channel separate from stdout.  Standard output stays
-# on the terminal (terminal mode) or is closed off after fork (gtk4 mode);
+# on the terminal (terminal mode) or routed to /dev/null (textual mode);
 # trace lines, plugin errors, and unhandled exceptions go here instead.
 # The log file lives at <data_dir>/logs/error[_<profile>]_<YYYYMMDD>.log and
 # is opened lazily — runs that never trip --trace or an error path leave no
@@ -316,15 +313,7 @@ _debug.install_exception_hooks()
 
 # ── Detach / silence for UI modes ─────────────────────────────────────────────
 # This MUST run before any background thread spawns (update check, plugin
-# senders, CAPI poll, monitor thread, Discord webhook).  Python 3.12+ refuses
-# to fork() safely once threads are alive, and the actual failure mode is a
-# silent child deadlock on inherited locks — so we fork while the process is
-# still single-threaded.
-#
-#   gtk4    — fork; parent prints "Launching gtk4 — logs: <path>" then exits
-#             so the shell prompt returns immediately.  Child becomes its own
-#             session leader (setsid) and closes fd 0/1/2 onto /dev/null since
-#             the GUI runs in X11/Wayland and never needs the terminal again.
+# senders, CAPI poll, monitor thread, Discord webhook).
 #
 #   textual — no fork (Textual needs the foreground process group for TTY
 #             input).  Parent prints "Launching textual — logs: <path>" then
@@ -336,43 +325,7 @@ _debug.install_exception_hooks()
 #   terminal — neither.  Scrolling event output to the terminal is the whole
 #             point of this mode.
 
-if ui_mode == "gtk4":
-    log_p = _debug.path()
-    print(
-        f"{Terminal.GOOD}Launching gtk4{Terminal.END}"
-        + (f" — diagnostic logs: {log_p}" if log_p else "")
-    )
-    sys.stdout.flush()
-    sys.stderr.flush()
-
-    if hasattr(os, "fork"):
-        try:
-            pid = os.fork()
-        except OSError as exc:
-            print(f"  [WARN] fork failed: {exc}; staying attached to terminal")
-            pid = 0
-        if pid > 0:
-            # Parent: hand the terminal back to the shell.  Use _exit so
-            # we skip atexit hooks (the child owns those now).
-            os._exit(0)
-        # Child: detach from controlling terminal so a Ctrl+C in the parent
-        # shell doesn't propagate down to us.
-        try:
-            os.setsid()
-        except OSError:
-            pass
-
-    # Child (or non-fork environments): close fd 0/1/2 onto /dev/null.
-    try:
-        _devnull = os.open(os.devnull, os.O_RDWR)
-        os.dup2(_devnull, 0)
-        os.dup2(_devnull, 1)
-        os.dup2(_devnull, 2)
-        os.close(_devnull)
-    except OSError:
-        pass
-
-elif ui_mode == "textual":
+if ui_mode == "textual":
     log_p = _debug.path()
     print(
         f"{Terminal.GOOD}Launching textual{Terminal.END}"
@@ -391,7 +344,7 @@ elif ui_mode == "textual":
 
 # ── Now safe to start background threads ──────────────────────────────────────
 # Update check spins off here so its result is available by the time we
-# render the update notice in the post-bootstrap section.  In gtk4 mode
+# render the update notice in the post-bootstrap section.  In textual mode
 # this runs in the child; in textual/terminal mode it runs in-process.
 
 _update_thread.start()
@@ -403,9 +356,7 @@ from core.emit import Emitter, emit_summary
 
 emitter = Emitter(
     mgr, state,
-    gui_queue=gui_queue,
     notify_test=notify_test,
-    gui_mode=gui_mode,
 )
 
 
@@ -469,9 +420,9 @@ if _update_notice:
         f"{Terminal.YELL}\u26a0 Update available: v{_value}{Terminal.END}"
         f"  {Terminal.WHITE}{_repo_url}/releases{Terminal.END}\n"
     )
-    if not gui_mode:
+    if ui_mode == "terminal":
         print(_term_msg)
-    if gui_mode:
+    else:  # textual — surface it in the TUI's update-notice bar
         gui_queue.put(("update_notice", ("release", _value)))
     emitter.set_update_notice(_value)
 
@@ -538,94 +489,6 @@ if __name__ == "__main__":
         status_thread.start()
 
         run_tui(core, PROGRAM, VERSION, theme=_tui_theme)
-
-    elif ui_mode == "gtk4":
-        try:
-            from gui.app import EdmdApp
-        except ImportError as e:
-            print(
-                f"{Terminal.WARN}ERROR:{Terminal.END} GTK4 mode requested but gui/ could not be loaded: {e}\n"
-                f"Ensure PyGObject (GTK4) is installed: pacman -S python-gobject gtk4"
-            )
-            sys.exit(1)
-
-        # We're already running in the post-fork child here — the parent
-        # exited up top, immediately after the banner.  Monitor + GTK
-        # main loop spin up below; their stdout is closed onto /dev/null.
-
-        monitor_thread = threading.Thread(target=run_monitor, daemon=True)
-        monitor_thread.start()
-
-        status_thread = threading.Thread(
-            target=_poll_status_json,
-            args=(journal_dir, state, gui_queue),
-            daemon=True,
-        )
-        status_thread.start()
-
-        # ── Suppress known-unfixable GTK progress bar sizing warning ─────────
-        # "GtkGizmo (progress) reported min width -2" fires on every window
-        # close when a ProgressBar widget is present.  This is a GTK internal
-        # bug with no application-level fix.
-        #
-        # GTK emits this via g_log() directly to fd 2 (C-level stderr) so
-        # GLib.log_set_handler from Python does NOT intercept it.  We redirect
-        # fd 2 through a pipe whose pump thread pattern-matches and drops the
-        # offending line before writing everything else to the original stderr.
-        # In trace mode the filter is never installed so the line still shows.
-        if not trace_mode:
-            try:
-                import os as _os, threading as _th
-
-                _orig_fd   = _os.dup(2)                     # save real stderr
-                _r, _w     = _os.pipe()
-                _os.dup2(_w, 2)                             # stderr → pipe write end
-                _os.close(_w)
-                _orig_out  = _os.fdopen(_orig_fd, "wb", buffering=0)
-                _DROP      = (b"GtkGizmo", b"progress", b"min width")
-
-                def _pump():
-                    buf = b""
-                    with _os.fdopen(_r, "rb", buffering=0) as pipe:
-                        while True:
-                            chunk = pipe.read(256)
-                            if not chunk:
-                                break
-                            buf += chunk
-                            while b"\n" in buf:
-                                line, buf = buf.split(b"\n", 1)
-                                line += b"\n"
-                                if not all(p in line for p in _DROP):
-                                    _orig_out.write(line)
-                                    _orig_out.flush()
-                                    # Mirror GTK warnings into the debug log
-                                    # so we still have a paper trail after the
-                                    # fork (when fd 2 → /dev/null in child).
-                                    try:
-                                        _debug.log(
-                                            line.decode("utf-8", errors="replace").rstrip(),
-                                            level="GTK",
-                                        )
-                                    except Exception:
-                                        pass
-                    if buf and not all(p in buf for p in _DROP):
-                        _orig_out.write(buf)
-                        _orig_out.flush()
-                        try:
-                            _debug.log(
-                                buf.decode("utf-8", errors="replace").rstrip(),
-                                level="GTK",
-                            )
-                        except Exception:
-                            pass
-
-                _th.Thread(target=_pump, daemon=True,
-                           name="stderr-filter").start()
-            except Exception:
-                pass  # non-fatal
-
-        app = EdmdApp(core, PROGRAM, VERSION)
-        app.run(None)
 
     else:  # terminal
         run_monitor()

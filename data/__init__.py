@@ -2,7 +2,7 @@
 data/ — Static reference data for Elite Dangerous in-game definitions.
 
 Kept separate from functional code so these tables can be updated without
-touching any plugin or GUI logic.
+touching any plugin or UI logic.
 
 Modules
 -------

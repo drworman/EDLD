@@ -2,10 +2,9 @@
 core/layout_model.py — UI-agnostic dashboard layout model.
 
 The single source of truth for what windows exist, what size class each is, and
-where they sit.  Both the GTK4 dashboard and the Textual TUI derive their
-composition from this module, and the Preferences > Display tab edits the
-assignment it persists — so the two UIs always agree and a window can be moved,
-hidden, or swapped without either UI hard-coding its own layout.
+where they sit.  The Textual TUI derives its composition from this module, and
+the Preferences > Display tab edits the assignment it persists — so a window can
+be moved, hidden, or swapped without the UI hard-coding its own layout.
 
 Size classes
 ------------
@@ -13,10 +12,10 @@ Windows are grouped into interchangeable classes.  A *position* (slot) accepts
 only windows of its own class, which is what keeps the layout from breaking when
 the user reassigns one.
 
-    panel    Assets · Engineering · Career · Cargo · Exploration · Exobiology
-    tall     Massacre Mission Stack · Navigation · Colonisation
-    compact  Alerts · Crew/SLF
-    anchor   Commander
+    panel    Every interchangeable window (Career, Cargo, Missions, Navigation,
+             Colonisation, Exploration, Exobiology, Assets, Engineering)
+    compact  Alerts · Crew/SLF   (two halves of one Panel height)
+    anchor   Commander           (one Panel height)
 
 Positions
 ---------
@@ -27,8 +26,8 @@ position carries a size class and a default window.
 Heights
 -------
 Each class has a relative *weight*.  Within a column the occupied positions'
-weights are normalised to the column total (GTK rows, or 100% for the TUI), so a
-column always fills cleanly and empty positions simply reflow — and every window
+weights are normalised to 100% within each column, so a column always fills
+cleanly and empty positions simply reflow — and every window
 of a class renders at a consistent proportion.  The weights are the single knob
 for tuning standardised box sizes.
 """
@@ -42,20 +41,18 @@ from typing import Optional
 # ── Size classes ──────────────────────────────────────────────────────────────
 
 PANEL   = "panel"
-STACK   = "tall"
 COMPACT = "compact"
 ANCHOR  = "anchor"
 
-SIZE_CLASSES = (PANEL, STACK, COMPACT, ANCHOR)
+SIZE_CLASSES = (PANEL, COMPACT, ANCHOR)
 
-# Relative height weight per class.  Derived from the columns each class has to
-# fill: anchor = Commander's no-scroll height; compact = Crew's no-scroll height
-# (Alerts grows to match); panel = the centre column's remainder below
-# Commander + Crew + Alerts; tall = the left column's remainder below two
-# panels.  Tuning a class's standardised size is a one-number change here.
-CLASS_WEIGHT = {PANEL: 33, STACK: 35, COMPACT: 18, ANCHOR: 32}
+# Relative height weight per class.  Every interchangeable window is PANEL.
+# The three fixed centre blocks are sized so Commander spans one Panel and
+# Crew + Alerts together span one Panel (two equal COMPACT halves), keeping all
+# three columns three Panel-heights tall so rows line up across columns.
+CLASS_WEIGHT = {PANEL: 30, COMPACT: 15, ANCHOR: 30}
 
-CLASS_LABEL = {PANEL: "Panel", STACK: "Tall", COMPACT: "Compact", ANCHOR: "Anchor"}
+CLASS_LABEL = {PANEL: "Panel", COMPACT: "Compact", ANCHOR: "Anchor"}
 
 # ── Window registry ─────────────────────────────────────────────────────────
 # Every dashboard window, its size class, and its display title.  Exploration
@@ -69,9 +66,9 @@ BLOCK_CLASS = {
     "cargo":        PANEL,
     "exploration":  PANEL,
     "exobiology":   PANEL,
-    "missions":     STACK,
-    "navigation":   STACK,
-    "colonisation": STACK,
+    "missions":     PANEL,
+    "navigation":   PANEL,
+    "colonisation": PANEL,
     "alerts":       COMPACT,
     "crew_slf":     COMPACT,
     "commander":    ANCHOR,
@@ -97,21 +94,15 @@ BLOCK_DISPLAY = {
 COLUMNS = ("A", "B", "C")
 COLUMN_TITLE = {"A": "Left", "B": "Centre", "C": "Right"}
 
-# Column widths in 32-unit GTK grid columns (left 11 / centre 10 / right 11).
-COLUMN_WIDTH = {"A": 11, "B": 10, "C": 11}
-
-# Target total height units per column for the GTK grid.  The TUI uses 100 (%).
-COLUMN_ROWS = 101
-
 # ── Default arrangement ─────────────────────────────────────────────────────
 # Each column is an ordered list of (size_class, default_window | None).  This
 # reproduces the current on-screen layout; Workstreams C/D change A1/A2 to the
 # new windows.
 
 DEFAULT_SLOTS: dict[str, list[tuple[str, Optional[str]]]] = {
-    "A": [(PANEL, "exploration"), (PANEL, "exobiology"), (STACK, "colonisation")],
-    "B": [(ANCHOR, "commander"), (COMPACT, "crew_slf"), (COMPACT, "alerts"), (PANEL, "cargo")],
-    "C": [(STACK, "missions"), (STACK, "navigation"), (PANEL, "career")],
+    "A": [(PANEL, "career"), (PANEL, "cargo"), (PANEL, "missions")],
+    "B": [(ANCHOR, "commander"), (COMPACT, "crew_slf"), (COMPACT, "alerts"), (PANEL, "exploration")],
+    "C": [(PANEL, "navigation"), (PANEL, "colonisation"), (PANEL, "exobiology")],
 }
 
 ASSIGNMENT_VERSION = 1
@@ -201,7 +192,7 @@ def normalize_assignment(raw: dict) -> dict[str, Optional[str]]:
     return result
 
 
-# ── Geometry derivation ─────────────────────────────────────────────────────
+# ── Layout derivation ───────────────────────────────────────────────────────
 
 def _apportion(weights: list[int], total: int) -> list[int]:
     """Split ``total`` across ``weights`` as integers summing exactly to total
@@ -229,27 +220,6 @@ def occupied_slots(assignment: dict) -> dict[str, list[tuple[str, str]]]:
                 col_slots.append((sid, blk))
         out[col] = col_slots
     return out
-
-
-def geometry(assignment: dict, total_rows: int = COLUMN_ROWS) -> dict[str, dict]:
-    """GTK geometry per placed window: ``{block: {col, row, width, height}}``.
-
-    Empty positions contribute nothing; the remaining positions in a column
-    reflow to fill it, so there are never gaps or overlaps.
-    """
-    occ = occupied_slots(assignment)
-    geo: dict[str, dict] = {}
-    col_x = 0
-    for col in COLUMNS:
-        width = COLUMN_WIDTH[col]
-        slots = occ[col]
-        heights = _apportion([CLASS_WEIGHT[slot_class(sid)] for sid, _ in slots], total_rows)
-        row = 0
-        for (sid, blk), h in zip(slots, heights):
-            geo[blk] = {"col": col_x, "row": row, "width": width, "height": h}
-            row += h
-        col_x += width
-    return geo
 
 
 def tui_columns(assignment: dict) -> dict[str, list[tuple[str, int]]]:

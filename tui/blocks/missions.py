@@ -95,7 +95,7 @@ class MissionsBlock(TuiBlock):
             rows.append(KVRow(faction, _val(str(kc), rew_f)))
 
         rows.append(Label("─" * 40, classes="sep"))
-        # Stack height: kills | total credit value — matches GTK4 layout.
+        # Stack height: kills | total credit value — matches the dashboard layout.
         rows.append(KVRow("[dim]Stack height[/dim]", _val(str(stack_height), total_reward)))
 
         if len(target_factions) > 1:

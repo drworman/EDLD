@@ -1,7 +1,7 @@
 """
 core — EDLD core package.
 
-Public surface for edld.py and the GUI entry point.  Import from here
+Public surface for edld.py and the dashboard.  Import from here
 rather than from individual submodules to keep call-site coupling minimal.
 
 Usage:
@@ -38,7 +38,6 @@ from core.config import (
     resolve_config_path,
     load_config_file,
     load_setting,
-    pcfg,
     CFG_DEFAULTS_SETTINGS,
     CFG_DEFAULTS_EXTRA,
     CFG_DEFAULTS_UI,
@@ -82,7 +81,7 @@ __all__ = [
     "save_session_state", "load_session_state",
     # config
     "ConfigManager", "resolve_config_path", "load_config_file",
-    "load_setting", "pcfg",
+    "load_setting",
     "CFG_DEFAULTS_SETTINGS", "CFG_DEFAULTS_EXTRA", "CFG_DEFAULTS_UI",
     "CFG_DEFAULTS_DISCORD", "CFG_DEFAULTS_NOTIFY",
     # emit

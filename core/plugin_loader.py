@@ -342,7 +342,7 @@ class BasePlugin:
         physical cargo hold as {commodity_name_lower: total_qty}.
         Override to act on fresh authoritative carrier cargo data."""
 
-    # ── GUI integration ───────────────────────────────────────────────────────
+    # ── Dashboard integration ──────────────────────────────────────────────────
     BLOCK_WIDGET_CLASS: type | None = None
 
     # ── Summary / alerts ─────────────────────────────────────────────────────

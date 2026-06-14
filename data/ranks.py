@@ -5,7 +5,7 @@ Each list maps rank integer index to the display string shown in-game.
 Indices 0–8 are the standard progression; indices 9–13 are Elite tiers I–V.
 
 CAPI_RANK_SKILLS ties each rank domain to its CAPI /profile key, display
-label, and name table for use across the bridge, TUI, and GTK4 layers.
+label, and name table for use across the bridge and TUI layers.
 """
 from __future__ import annotations
 

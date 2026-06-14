@@ -91,9 +91,9 @@ ThreadCmdrNames = false
 # All notification levels are [HOT] - changes take effect on the next matching event.
 #
 # 0 = None
-# 1 = Terminal / GUI only
-# 2 = Terminal / GUI + Discord
-# 3 = Terminal / GUI + Discord with @mention ping
+# 1 = Local only (no Discord)
+# 2 = Local + Discord
+# 3 = Local + Discord with @mention ping
 
 RewardEvent      = 2   # Each kill — bounty or combat bond
 FighterDamage    = 2   # Fighter hull integrity loss (~20% increments)
@@ -120,24 +120,19 @@ PeriodicFaction  = 0   # Faction kill breakdown in the quarter-hour summary
 PeriodicCredits  = 2   # Credits earned in the quarter-hour summary
 PeriodicMerits   = 2   # Merits earned in the quarter-hour summary (powerplay only)
 
-# ── GUI ──────────────────────────────────────────────────────────────────────
-# Launch the GTK4 graphical interface alongside terminal output.
-# Requires PyGObject: pacman -S python-gobject gtk4
+# ── UI ───────────────────────────────────────────────────────────────────────
+# The EDLD dashboard (Textual TUI).
 #
 [UI]
-Mode       = "terminal"        # terminal (default) | textual | gtk4
-                               # CLI: --mode terminal|textual|gtk4  or  --gui (alias for gtk4)
-Theme      = "default"         # palette filename in themes/ without .css extension
-                               # built-in: "default", "default-dark",
+Mode       = "textual"         # textual (default) | terminal
+                               # CLI: --mode textual | terminal
+Theme      = "default"         # built-in: "default", "default-dark",
                                #           "default-light", "default-blue",
                                #           "default-green", "default-purple",
                                #           "default-red", "default-yellow"
                                # custom:   "custom/mytheme"
-                               #           (copy themes/custom/my-theme.css to start)
-FontFamily = "JetBrains Mono"  # any installed monospace font; leave blank for system default
-FontSize   = 14                # base font size in px (10–24); all em-relative sizes scale with it
-SoftwareRenderer = false       # set true if EDLD causes compositor starvation on Linux
-                               # Switches GTK4 renderer to Cairo (CPU-side).
+                               #           (copy themes/custom-template.css into
+                               #            themes/custom/ to start)
 # ==============================================================================
 # Data contributions (opt-in)
 # ==============================================================================
@@ -184,6 +179,39 @@ Enabled       = false
 # Commander name is sourced from your journal — no CommanderName setting.
 
 # ==============================================================================
+# Session Management  [SessionMgmt]      ⚠  SOLO MODE ONLY
+# ==============================================================================
+# Optional and opt-in. Terminates the Elite Dangerous process when a trigger
+# below fires. HARD-GATED to Solo play — it never acts in Open or Private Group
+# (force-quitting in multiplayer is combat-logging). Off by default; set the
+# master switch to enable. Toggle at runtime with Ctrl+K.
+# See docs/guides/SESSION_MANAGEMENT.md   [HOT] all keys re-read live.
+# ==============================================================================
+[SessionMgmt]
+# Master enable — leave false to keep every trigger inert.
+Enabled                  = false
+
+# Triggers (uncomment to use):
+# QuitOnSLFDead          = false   # quit when your ship-launched fighter dies
+# QuitOnLowFuel          = false   # quit on low main-tank fuel
+# QuitOnLowFuelPercent   = 20      # fire at/below this fuel %
+# QuitOnLowFuelMinutes   = 0       # also require <= this burn-time (min); 0 = % only
+# QuitFuelSCGraceSeconds = 60      # no fuel quit in supercruise / this long after exit
+# QuitOnLowHull          = false   # quit on low hull
+# QuitOnLowHullThreshold = 10      # fire at/below this hull %
+
+# Remote termination — for a [REMOTE]-style monitor instance that kills the game
+# on another machine over SSH. Blank host terminates locally.
+# RemoteKillHost         = ""
+# RemoteKillUser         = ""
+
+# Enable for a single commander only via a profile override:
+# [EDP1.SessionMgmt]
+# Enabled              = true
+# QuitOnLowFuel        = true
+# QuitOnLowFuelPercent = 15
+
+# ==============================================================================
 # Custom profiles (advanced)
 # ==============================================================================
 # Profiles override any setting above for a specific commander or use case.
@@ -206,20 +234,20 @@ Discord.WebhookURL     = 'https://discord.com/api/webhooks/1234567890/your-webho
 
 
 # ==============================================================================
-# [REMOTE] profile — GUI front-end for remote monitoring
+# [REMOTE] profile — dashboard front-end for remote monitoring
 # ==============================================================================
 # Used when running EDLD on a second machine (e.g. a laptop) against a game
 # machine's journal directory, mounted via sshfs.
 #
 # Discord is intentionally disabled — the game machine's EDLD instance handles
-# all webhook output. This instance provides the GUI only.
+# all webhook output. This instance provides the dashboard only.
 #
 # See docs/REMOTE_ACCESS.md for full setup instructions.
 # ==============================================================================
 
 [REMOTE]
 Settings.JournalFolder = "/home/username/mnt/ed-journals"
-UI.Mode                = "gtk4"
+UI.Mode                = "textual"
 UI.Theme               = "default"
 Discord.WebhookURL     = ""
 Discord.UserID         = 0

@@ -2,7 +2,7 @@
 components/commander.py — Commander, ship, location, and powerplay state.
 
 Owns: pilot_*, pp_*, ship_*, in_game, pilot_mode, location tracking.
-GUI block: col=0, row=0, width=8, height=5 (default).
+Dashboard block: commander.
 """
 
 from core.plugin_loader import BasePlugin
@@ -58,7 +58,7 @@ class CommanderPlugin(BasePlugin):
         "SuitLoadout",            # suit and loadout name when on foot
     ]
 
-    # GUI grid defaults
+    # Default grid placement (legacy)
     DEFAULT_COL    = 0
     DEFAULT_ROW    = 0
     DEFAULT_WIDTH  = 8

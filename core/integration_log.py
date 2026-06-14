@@ -8,9 +8,9 @@ fundamental shape:
     2. POST a batch to an HTTP endpoint.
     3. Parse the response for a top-level status, then per-event statuses
        inside an ``events[]`` array.
-    4. Log everything to the file-based debug log so it survives the
-       GTK4 fork-early restructure (which silently sends bare ``print()``
-       to ``/dev/null`` on the child process).
+    4. Log everything to the file-based debug log so it survives in textual
+       mode, where stdout/stderr are routed to ``/dev/null`` and a bare
+       ``print()`` would otherwise vanish.
 
 This module standardises the log format across all four integrations so
 the file is consistent and per-event errors get surfaced automatically.

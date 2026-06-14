@@ -5,7 +5,7 @@ from textual.app       import ComposeResult
 from textual.widgets   import Label
 from textual.containers import VerticalScroll, Horizontal
 from tui.block_base    import TuiBlock, KVRow, _health_cls, _fmt_credits
-# ── Inline helpers (no GTK dependency) ───────────────────────────────────────
+# ── Inline helpers (no UI-framework dependency) ───────────────────────────────────────
 
 def hull_css(pct: int) -> str:
     if pct > 75:  return "health-good"

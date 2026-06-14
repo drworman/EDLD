@@ -5,7 +5,7 @@ Maintains a deque of the last 5 alert events with monotonic timestamps.
 Feeds both the Alerts dashboard block and the existing emit() pipeline
 (terminal + Discord alerts are handled here for these event types).
 
-GUI block: col=0, row=9, width=24, height=3 (default — full width).
+Dashboard block: alerts (full width).
 """
 
 import time
@@ -82,7 +82,7 @@ class AlertsPlugin(BasePlugin):
     # Lets background subsystems (CAPI auth, network workers, etc.) surface
     # alerts that don't originate from a journal event.  Routes through the
     # standard emit pipeline AND the alerts deque so a single call lands in
-    # the terminal, the GUI/TUI alerts pane, the GUI event log, and Discord
+    # the terminal, the dashboard alerts pane, the event log, and Discord
     # (with @-ping when loglevel > 2).  Safe to call from any thread:
     # deque.appendleft and queue.Queue.put are atomic; emit's state mutations
     # are not strictly thread-safe but the worst case is a transient
@@ -419,11 +419,11 @@ class AlertsPlugin(BasePlugin):
                         core.gui_queue.put(("vessel_update", None))
 
     def get_alerts(self) -> list[dict]:
-        """Return current alerts list for the GUI block renderer."""
+        """Return current alerts list for the dashboard block renderer."""
         return list(self.alert_queue)
 
     def clear_alerts(self) -> None:
-        """Clear all alerts (called by the GUI Clear button)."""
+        """Clear all alerts (called by the dashboard Clear button)."""
         self.alert_queue.clear()
         if self.core.gui_queue:
             self.core.gui_queue.put(("alerts_update", None))

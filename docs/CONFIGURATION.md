@@ -18,7 +18,7 @@
 | `PirateNames` | `false` | ✅ | Show pirate pilot names in kill and scan messages |
 | `ExtendedStats` | `false` | ✅ | Show running kill counts and per-faction tallies |
 | `MinScanLevel` | `1` | ✅ | Minimum scan stage required to log an outbound scan (0 = all) |
-| `PrimaryInstance` | `true` | ❌ | Set to `false` on secondary/remote instances to suppress uploads to EDDN, EDSM, and EDAstro — monitoring, alerts, and GUI remain fully active |
+| `PrimaryInstance` | `true` | ❌ | Set to `false` on secondary/remote instances to suppress uploads to EDDN, EDSM, and EDAstro — monitoring, alerts, and the dashboard remain fully active |
 | `FullStackSize` | `20` | ✅ | Mission stack size that triggers the "stack full" announcement |
 | `WarnCooldown` | `15` | ✅ | Minutes between repeated inactivity / kill-rate alerts |
 | `TruncateNames` | `30` | ✅ | Maximum character length for pilot/faction names in output |
@@ -43,21 +43,21 @@
 
 | Key | Default | Hot | Description |
 |-----|---------|:---:|-------------|
-| `Mode` | `"terminal"` | ❌ | UI mode: `terminal` (plain output), `textual` (TUI dashboard), or `gtk4` (GTK4 GUI) |
+| `Mode` | `"textual"` | ❌ | UI mode: `textual` (TUI dashboard, default) or `terminal` (plain output) |
 | `Theme` | `"default"` | ❌ | Theme name — changing this in Preferences triggers an automatic restart |
 
 ---
 
 ## `[LogLevels]`
 
-All entries are hot-reloadable. Controls terminal, Discord, and GUI event log output independently per event type.
+All entries are hot-reloadable. Controls terminal, Discord, and dashboard output independently per event type.
 
 | Level | Behaviour |
 |-------|-----------|
 | `0` | Disabled entirely |
-| `1` | Terminal/GUI only |
-| `2` | Terminal/GUI + Discord |
-| `3` | Terminal/GUI + Discord + `@mention` ping |
+| `1` | Local only (no Discord) |
+| `2` | Local + Discord |
+| `3` | Local + Discord + `@mention` ping |
 
 | Key | Default | Event |
 |-----|---------|-------|
@@ -94,11 +94,10 @@ python edld.py [-p PROFILE] [-g] [-t] [-d] [--mode MODE] [--log-file PATH]
 | `-p`, `--config_profile` | Load a named config profile |
 | `-t`, `--test` | Re-route Discord output to terminal instead of sending to webhook |
 | `-d`, `--trace` | Print verbose debug and trace output to terminal |
-| `-g`, `--gui` | Alias for `--mode gtk4` |
-| `--mode MODE` | UI mode: `terminal` (default), `textual`, or `gtk4` |
-| `--log-file PATH` | Tee all terminal output to PATH (safe with `--mode gtk4`; avoids pipe-buffer deadlock) |
+| `--mode MODE` | UI mode: `textual` (default) or `terminal` |
+| `--log-file PATH` | Tee all terminal output to PATH |
 
-When a new release is available on GitHub, EDLD displays a notification at startup (terminal) or in the title bar (TUI / GTK4). Updating is performed manually — pull the new source from the [releases page](https://github.com/drworman/EDLD/releases) and re-run `install.sh`.
+When a new release is available on GitHub, EDLD displays a notification at startup (terminal) or in the title bar (TUI). Updating is performed manually — pull the new source from the [releases page](https://github.com/drworman/EDLD/releases) and re-run `install.sh`.
 
 ---
 
@@ -275,4 +274,38 @@ ApiKey        = "your-api-key-here"
 
 [EDP1.EDAstro]
 Enabled = true
+```
+
+---
+
+## Session Management — `[SessionMgmt]`
+
+> ⚠️ **Solo mode only.** Session management terminates the Elite Dangerous game process when a trigger fires. It is **hard-gated to Solo play** — it will never act in Open or Private Group, because force-quitting in multiplayer is combat-logging under Frontier's rules. The gate is enforced at the point of termination, so even a manual activation is refused outside Solo.
+
+Disabled by default and entirely opt-in. When enabled, EDLD watches the configured triggers and quits the game — locally via process termination, or on a remote host via SSH — when one is met. See the [Session Management guide](guides/SESSION_MANAGEMENT.md) for usage, the Ctrl+K runtime toggle, and the armed/idle indicator.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `Enabled` | `false` | ❌ Master enable. With this off, every trigger is inert |
+| `QuitOnSLFDead` | `false` | ❌ Quit when your ship-launched fighter is destroyed |
+| `QuitOnLowFuel` | `false` | ❌ Quit when main-tank fuel drops to or below the percentage threshold |
+| `QuitOnLowFuelPercent` | `20` | Fuel percentage at or below which the fuel trigger fires |
+| `QuitOnLowFuelMinutes` | `0` | If non-zero, also require estimated burn-time remaining to be at or below this many minutes before the fuel trigger fires (more conservative). `0` disables the time condition |
+| `QuitFuelSCGraceSeconds` | `60` | Suppress fuel quits while in supercruise and for this many seconds after exiting it |
+| `QuitOnLowHull` | `false` | ❌ Quit when your ship hull drops to or below the hull threshold |
+| `QuitOnLowHullThreshold` | `10` | Hull percentage at or below which the hull trigger fires |
+| `RemoteKillHost` | `""` | SSH host on which to terminate the game (for a remote/secondary monitor instance). Blank terminates locally |
+| `RemoteKillUser` | `""` | SSH user for `RemoteKillHost`. Blank uses the current user |
+| `QuitOnNoKillsMinutes` | `0` | Minutes without an NPC kill **while dropped in a Resource Extraction Site** before the session is quit. `0` disables. Solo-only and RES-only — see the guide |
+
+Like any section, these can be scoped to a profile — handy for enabling termination on one commander only, or for keeping a remote monitor inert:
+
+```toml
+[SessionMgmt]
+Enabled = false
+
+[EDP1.SessionMgmt]
+Enabled              = true
+QuitOnLowFuel        = true
+QuitOnLowFuelPercent = 15
 ```

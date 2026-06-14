@@ -159,7 +159,7 @@ class CatalogPlugin(BasePlugin):
                     except Exception as exc:
                         print(f"[catalog] Update failed: {exc}")
 
-    # ── Query helpers (callable from GUI or other plugins) ─────────────────────
+    # ── Query helpers (callable from the dashboard or other plugins) ───────────
 
     def query(self, sql: str, params: tuple = ()) -> list[tuple]:
         """Execute a read-only query and return rows. Returns [] on error."""

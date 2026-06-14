@@ -5,11 +5,11 @@ Owns the session clock and on_new_session boundary logic.
 Collects summary rows from registered ActivityProviderMixin plugins.
 No longer owns kill/merit/credit counters — those live in activity plugins.
 
-GUI block: col=8, row=0, width=8, height=10 (expanded for tabs).
+Dashboard block: session stats.
 
 Session reset behaviour
 -----------------------
-Manual reset (gap=0, triggered by GUI button):
+Manual reset (gap=0, triggered by dashboard reset):
   - _session_start_time is set to the current event time immediately, so
     session_duration_seconds() starts counting from zero straight away.
   - A _reset_after sentinel (ISO timestamp string) is persisted to data.json.
@@ -96,12 +96,12 @@ class SessionStatsPlugin(BasePlugin):
         except Exception:
             pass
 
-    # ── Public API called by commander plugin and GUI button ──────────────────
+    # ── Public API called by commander plugin and dashboard reset ─────────────
 
     def on_new_session(self, gap_minutes: float = 0) -> None:
         """Called when a session boundary is detected.
 
-        gap_minutes == 0  →  manual GUI reset: restart clock from right now.
+        gap_minutes == 0  →  manual dashboard reset: restart clock from right now.
         gap_minutes >  0  →  automatic boundary: clear clock so next LoadGame
                              re-arms it (normal session boundary behaviour).
         """

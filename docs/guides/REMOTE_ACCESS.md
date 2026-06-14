@@ -1,9 +1,9 @@
-# Remote Access — EDLD GUI on a Second Machine
+# Remote Access — EDLD on a Second Machine
 
-This guide explains how to run EDLD's graphical interface on a secondary machine
+This guide explains how to run EDLD's dashboard on a secondary machine
 (e.g. a laptop) while the game runs on your main machine. The game machine handles
 all monitoring, Discord notifications, and session control logic. The secondary machine
-connects as a read-only GUI front-end.
+connects as a read-only dashboard front-end.
 
 ---
 
@@ -12,7 +12,7 @@ connects as a read-only GUI front-end.
 - **Game machine** — runs EDLD in terminal mode with your normal profile. Discord
   webhooks, kill tracking, and all alerts operate as usual.
 - **Secondary machine** — mounts the game machine's journal directory over SSH,
-  then runs a local EDLD instance in GUI-only mode using the `[REMOTE]` profile.
+  then runs a local EDLD instance (the dashboard) using the `[REMOTE]` profile.
   Discord is disabled on this instance to avoid duplicate notifications.
 
 Both instances read the same journal files simultaneously. EDLD never writes to
@@ -145,7 +145,7 @@ Settings.JournalFolder = "/home/username/mnt/ed-journals"
 ```
 
 Replace `username` with your actual username. Leave everything else as-is — the
-profile disables Discord and sets all log levels to GUI-only automatically.
+profile disables Discord and sets all log levels to local-only automatically.
 
 `config.toml` lives in the EDLD user data directory:
 
@@ -203,12 +203,12 @@ mkdir -p ~/mnt/ed-journals
 The script will:
 
 1. Detect which machine it is on by hostname
-2. **Game machine** — launch EDLD with GUI using your normal profile
+2. **Game machine** — launch EDLD using your normal profile
 3. **Secondary machine**:
    - Probe LAN first, fall back to WAN if unreachable
    - Mount the journal directory via sshfs if not already mounted
    - Start EDLD on the game machine in terminal mode if it is not already running
-   - Launch the local GUI using the `[REMOTE]` profile
+   - Launch the local dashboard using the `[REMOTE]` profile
 
 ---
 
@@ -286,5 +286,5 @@ secondary machine is using `-p REMOTE` and not your normal profile.
 - The `~/mnt/ed-journals` directory is outside your home sync scope by default.
   If your home directory is synced between machines, ensure the mount point path
   is excluded from your sync configuration.
-- The `[REMOTE]` profile's log levels are all set to `1` (GUI only). You can set
-  any to `0` to suppress specific event types from the GUI event log entirely.
+- The `[REMOTE]` profile's log levels are all set to `1` (local only). You can set
+  any to `0` to suppress specific event types from the dashboard entirely.

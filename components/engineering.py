@@ -30,7 +30,7 @@ State stored on MonitorState (all added via hasattr guard in on_load):
                                      "data":        { … },
                                    }
 
-GUI block: engineering  (replaces the former 'materials' block)
+Dashboard block: engineering  (replaces the former 'materials' block)
 """
 
 import json
@@ -80,7 +80,7 @@ class EngineeringPlugin(BasePlugin):
         # Read ShipLocker.json for immediate locker display on startup
         self._read_shiplocker_json(core)
 
-        # Deferred startup refresh — fires after the GTK main loop is running
+        # Deferred startup refresh — fires after the app event loop is running
         import threading
         threading.Timer(3.0, self._startup_refresh).start()
 

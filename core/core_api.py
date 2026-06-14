@@ -38,7 +38,7 @@ class CoreAPI:
         clip_name(name, max_len)
 
     Plugin registration:
-        register_block(component) — register a dashboard block (GUI only)
+        register_block(component) — register a dashboard block
         register_alert(component) — register as an alert source
         plugin_call(name, method, *args, **kwargs)
                                   — call a method on another component by name
@@ -76,7 +76,7 @@ class CoreAPI:
         self.clip_name    = clip_name
 
         # Component registry — populated by PluginLoader after all components load
-        self._blocks:  list = []   # plugins with GUI blocks, in priority order
+        self._blocks:  list = []   # plugins with dashboard blocks, in priority order
         self._alerts:  list = []   # plugins that feed the Alerts block
         self._session_providers: list = []   # ActivityProviderMixin instances
         self._plugins: dict = {}   # name -> plugin instance

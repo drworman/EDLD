@@ -35,7 +35,7 @@ Conditional lines appear only when the relevant data is available:
 
 ## Event Lines
 
-EDLD prints timestamped event lines to the terminal. Each line carries a fixed-width sigil indicating event category and urgency. When running in GUI mode, terminal output is suppressed and the event log panel receives the same messages with emoji prefixes instead of sigils.
+EDLD prints timestamped event lines to the terminal. Each line carries a fixed-width sigil indicating event category and urgency. When running the Textual dashboard, terminal output is suppressed and the dashboard's blocks receive the same events.
 
 ```
 [14:23:07] *  KILL  Anaconda [Bhutatani Partnership] +4 [30.25M cr]
@@ -82,7 +82,7 @@ EDLD prints timestamped event lines to the terminal. Each line carries a fixed-w
 
 ## Periodic Summary
 
-Posted at :00, :15, :30, and :45 of every hour while at least one activity provider reports data — to the terminal/GUI event log and optionally to Discord:
+Posted at :00, :15, :30, and :45 of every hour while at least one activity provider reports data — to the terminal / dashboard and optionally to Discord:
 
 ```
 Session Summary

@@ -2,7 +2,7 @@
 core/exobio_view.py — Exobiology window view builder.
 
 Turns the stored biology facts for one system (from :mod:`core.explo_db`) plus a
-commander's sample progress into a structured view the GTK and TUI Exobiology
+commander's sample progress into a structured view the TUI Exobiology
 blocks render.  Values and clonal distances come from :mod:`core.exobio_data`.
 
 Only accurate, journal-derived information is reported: the bio-signal count per
