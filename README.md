@@ -176,6 +176,6 @@ UserID = 123456789012345678
 
 <img src="images/edld_avatar_512.png" width="56" alt="EDLD"/>
 
-**ED Linux Dash** · by CMDR CALURSUS
+**ED Linux Dash** · by CMDR HUGH JASSOLE
 
 </div>

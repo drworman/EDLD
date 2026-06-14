@@ -9,7 +9,7 @@ On launch, EDLD preloads the current journal, bootstraps mission state, then pri
 ```
 ==========================================
   ▶  MONITORING ACTIVE
-  CMDR CALURSUS
+  CMDR HUGH JASSOLE
   Type-10 Defender  |  Solo
   Expert +56%
   A. Lavigny-Duval  Rank 22  (152,198 merits)
