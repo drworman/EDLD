@@ -84,7 +84,7 @@ TuiBlock > TabbedContent  { height: 1fr; }
 
 .status-ready  { color: $green; }
 .status-active { color: $amber; }
-.dim           { color: $dim;   }
+.dim           { color: $fg;    }
 .highlight     { color: $amber; }
 
 .section-hdr {
@@ -264,7 +264,7 @@ PreferencesScreen Button { height: 3; margin-left: 1; }
 
 /* Cargo header: title left, price-source label right — both get block-title bg */
 #cargo-hdr-row {
-    height: 1;
+    height: auto;
     layout: horizontal;
 }
 #cargo-title     { width: 1fr; }
@@ -308,10 +308,11 @@ SearchModal { align: center middle; }
 
 /* Crew name row: Horizontal with two Labels acting as block title */
 #crew-name-row {
-    height: 1;
+    height: auto;
     background: $title-bg;
     padding: 0 1;
     layout: horizontal;
+    border-bottom: solid $border;
 }
 #crew-name-lbl { color: $accent; text-style: bold; width: 1fr; }
 #crew-type-lbl { color: $accent; text-align: right; }

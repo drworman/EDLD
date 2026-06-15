@@ -41,7 +41,7 @@ class MissionsBlock(TuiBlock):
         scroll.remove_children()
 
         if not detail:
-            scroll.mount(Label("[dim]No active massacre missions[/dim]", classes="dim"))
+            scroll.mount(Label("No active massacre missions", classes="dim"))
             return
 
         factions:        dict[str, dict] = {}
@@ -77,9 +77,9 @@ class MissionsBlock(TuiBlock):
         def _val(count_str: str, reward: int | None = None) -> str:
             c = f"{count_str:>5}"
             if reward is not None:
-                return f"{c}  [dim]|  {_fmt_rew(reward):>8}[/dim]"
+                return f"{c}  |  {_fmt_rew(reward):>8}"
             # Pad to same visible width (18) so count column aligns with credit rows
-            return f"{c}[dim]             [/dim]"
+            return f"{c}             "
 
         rows: list = []
         active_str = f"{n_missions}/{full_stack}"
@@ -96,7 +96,7 @@ class MissionsBlock(TuiBlock):
 
         rows.append(Label("─" * 40, classes="sep"))
         # Stack height: kills | total credit value — matches the dashboard layout.
-        rows.append(KVRow("[dim]Stack height[/dim]", _val(str(stack_height), total_reward)))
+        rows.append(KVRow("Stack height", _val(str(stack_height), total_reward)))
 
         if len(target_factions) > 1:
             rows.append(Label(f"[yellow]⚠ Mixed targets: {', '.join(sorted(target_factions))}[/yellow]"))

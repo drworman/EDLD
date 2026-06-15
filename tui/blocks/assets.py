@@ -34,11 +34,11 @@ class AssetsBlock(TuiBlock):
 
             with TabPane("Ships", id="assets-tab-ships"):
                 with VerticalScroll():
-                    yield Label("[dim]—[/dim]", id="assets-ships")
+                    yield Label("—", id="assets-ships")
 
             with TabPane("Modules", id="assets-tab-modules"):
                 with VerticalScroll():
-                    yield Label("[dim]No stored modules[/dim]", id="assets-modules")
+                    yield Label("No stored modules", id="assets-modules")
 
             with TabPane("Fleet Carrier", id="assets-tab-carrier"):
                 with VerticalScroll():
@@ -126,7 +126,7 @@ class AssetsBlock(TuiBlock):
         all_ships = ([current] if current else []) + stored
 
         if not all_ships:
-            self._lbl("assets-ships", "[dim]No ship data[/dim]")
+            self._lbl("assets-ships", "No ship data")
             return
 
         rows: list = []
@@ -138,14 +138,14 @@ class AssetsBlock(TuiBlock):
             station = ship.get("station") or ""
             system  = ship.get("system")  or ""
             tag     = "[green]▶[/green] " if i == 0 else "  "
-            label   = f"{tag}[bold]{name}[/bold]" + (f"  [dim]{ident}[/dim]" if ident else "")
+            label   = f"{tag}[bold]{name}[/bold]" + (f"  {ident}" if ident else "")
             if station and system and station != system:
                 loc = f"{station}  ({system})"
             elif system:
                 loc = system
             else:
                 loc = "—"
-            rows.append(KVRow(label, f"[dim]{loc}[/dim]"))
+            rows.append(KVRow(label, f"{loc}"))
         if rows:
             try:
                 scroll = self.query_one("#assets-tab-ships > VerticalScroll")
@@ -154,12 +154,12 @@ class AssetsBlock(TuiBlock):
                 return
             except Exception:
                 pass
-        self._lbl("assets-ships", "[dim]No ships[/dim]")
+        self._lbl("assets-ships", "No ships")
 
     def _refresh_modules(self) -> None:
         modules = getattr(self.state, "assets_stored_modules", [])
         if not modules:
-            self._lbl("assets-modules", "[dim]No stored modules[/dim]")
+            self._lbl("assets-modules", "No stored modules")
             return
 
         by_system: dict[str, list] = {}
@@ -183,14 +183,14 @@ class AssetsBlock(TuiBlock):
                 lv   = eng.get("Level")
                 hot  = m.get("hot", False)
                 hot_tag = "[red]⚠[/red] " if hot else ""
-                eng_tag = f"  [dim]G{lv}[/dim]" if (bp and lv) else ""
-                key_str = f"{hot_tag}[dim]{name}[/dim]{eng_tag}"
+                eng_tag = f"  G{lv}" if (bp and lv) else ""
+                key_str = f"{hot_tag}{name}{eng_tag}"
                 mod_rows.append(KVRow(key_str, _fmt_credits(val)))
         if scroll is not None:
             scroll.remove_children()
             scroll.mount(*mod_rows)
         else:
-            self._lbl("assets-modules", "[dim]No stored modules[/dim]")
+            self._lbl("assets-modules", "No stored modules")
 
     def _refresh_carrier(self) -> None:
         carrier = getattr(self.state, "assets_carrier", None)

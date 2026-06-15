@@ -55,14 +55,14 @@ class SearchModal(ModalScreen):
         with Vertical(id="search-outer"):
             yield Label(f" {self._title} ", id="search-title", classes="block-title")
             yield Label(
-                "[dim]Type at least 3 characters then wait for results.[/dim]",
+                "Type at least 3 characters then wait for results.",
                 id="search-hint",
                 classes="dim",
             )
             yield Input(placeholder=self._placeholder, id="search-input")
             yield Label("", id="search-status", classes="dim")
             with VerticalScroll(id="search-results"):
-                yield Label("[dim]No results yet.[/dim]", id="search-placeholder")
+                yield Label("No results yet.", id="search-placeholder")
 
     def on_input_changed(self, event: Input.Changed) -> None:
         query = event.value.strip()
@@ -70,9 +70,9 @@ class SearchModal(ModalScreen):
             self._timer.cancel()
         if len(query) < 3:
             self._set_status("")
-            self._clear_results("[dim]Type at least 3 characters.[/dim]")
+            self._clear_results("Type at least 3 characters.")
             return
-        self._set_status("[dim]Searching…[/dim]")
+        self._set_status("Searching…")
         self._timer = threading.Timer(0.4, self._do_search, args=(query,))
         self._timer.daemon = True
         self._timer.start()
@@ -95,10 +95,10 @@ class SearchModal(ModalScreen):
         except Exception:
             return
         if not results:
-            self._set_status("[dim]No results.[/dim]")
-            scroll.mount(Label("[dim]No results found.[/dim]", classes="dim"))
+            self._set_status("No results.")
+            scroll.mount(Label("No results found.", classes="dim"))
             return
-        self._set_status(f"[dim]{len(results)} result(s) — click to select[/dim]")
+        self._set_status(f"{len(results)} result(s) — click to select")
         for i, r in enumerate(results):
             lbl = self._result_label(r)
             scroll.mount(Button(lbl, id=f"result-{i}", classes="search-result-btn"))

@@ -48,7 +48,7 @@ class EngineeringBlock(TuiBlock):
             scroll.remove_children()
 
             if not items:
-                scroll.mount(Label("[dim]— none —[/dim]", classes="dim"))
+                scroll.mount(Label("— none —", classes="dim"))
                 continue
 
             sorted_items = sorted(
@@ -57,7 +57,7 @@ class EngineeringBlock(TuiBlock):
             )
             total = sum(v.get("count", 0) for v in items.values())
 
-            rows: list = [Label(f"[dim]Total: {total}[/dim]")]
+            rows: list = [Label(f"Total: {total}")]
             for _, data in sorted_items:
                 name  = data.get("name_local", "")
                 count = data.get("count", 0)

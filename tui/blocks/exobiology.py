@@ -80,7 +80,7 @@ class ExobiologyBlock(TuiBlock):
 
         if not view or not view["bodies"]:
             sys_lbl.update(view["system"]["name"] if view else "—")
-            sum_lbl.update("[dim]No biology here yet — surface-scan a body with signals.[/dim]")
+            sum_lbl.update("No biology here yet — surface-scan a body with signals.")
             return
 
         tot = view["totals"]
@@ -103,7 +103,7 @@ class ExobiologyBlock(TuiBlock):
                 if b.get("value_max_possible", 0) > b["value_max"]:
                     vtxt += f" (↑{_fmt(b['value_max_possible'])})"
                 ff = f"  [b]✦ first footfall ×{b['first_footfall_mult']}[/b]" if b["first_footfall"] else ""
-                rows.append(Label(f"  [dim]{vtxt}[/dim]{ff}"))
+                rows.append(Label(f"  {vtxt}{ff}"))
             sampled_genera = {f["genus"] for f in b["flora"]}
             for f in b["flora"]:
                 stage = "✓" if f["logged"] else f"{f['stage']}/3"

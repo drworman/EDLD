@@ -194,7 +194,7 @@ class CommanderBlock(TuiBlock):
                 self._kv("kv-home", display)
                 try:
                     self.query_one("#cmdr-home-lbl", Label).update(
-                        f"[dim]→ {home['name']}[/dim]"
+                        f"→ {home['name']}"
                     )
                 except Exception:
                     pass
@@ -270,7 +270,7 @@ class CommanderBlock(TuiBlock):
             name = result.get("name", "")
             try:
                 self.query_one("#cmdr-home-lbl", Label).update(
-                    f"[dim]→ {name}[/dim]" if name else ""
+                    f"→ {name}" if name else ""
                 )
             except Exception:
                 pass
@@ -282,7 +282,7 @@ class CommanderBlock(TuiBlock):
             search_fn    = spansh.search_home,
             result_label = lambda r: (
                 f"{'🚉' if r.get('is_station') else '⭐'} {r['name']}"
-                + (f"  [dim]{r.get('system', '')}[/dim]" if r.get("is_station") else "")
+                + (f"  {r.get('system', '')}" if r.get("is_station") else "")
             ),
             callback     = _on_select,
         ))

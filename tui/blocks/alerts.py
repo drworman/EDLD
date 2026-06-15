@@ -27,6 +27,6 @@ class AlertsBlock(TuiBlock):
                 a       = alerts[i]
                 opacity = self.core.plugin_call("alerts", "opacity_for", a) or 1.0
                 text    = f"{a.get('emoji', '')}  {a.get('text', '')}"
-                lbl.update(f"[dim]{text}[/dim]" if opacity < 0.7 else text)
+                lbl.update(f"{text}" if opacity < 0.7 else text)
             else:
                 lbl.update("")

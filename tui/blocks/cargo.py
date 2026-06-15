@@ -24,7 +24,7 @@ class CargoBlock(TuiBlock):
             yield Label("CARGO", id="cargo-title", classes="block-title")
             yield Label("", id="cargo-price-src", classes="block-title")
         with VerticalScroll(id="cargo-scroll"):
-            yield Label("[dim]No cargo[/dim]", id="cargo-empty")
+            yield Label("No cargo", id="cargo-empty")
         with Horizontal(id="cargo-footer"):
             yield Static(">> Set Target", id="cargo-target-btn",
                          classes="footer-lbl")
@@ -51,7 +51,7 @@ class CargoBlock(TuiBlock):
             placeholder  = "Station name…",
             search_fn    = spansh.search,
             result_label = lambda r: (
-                f"{r['name']}  [dim]{r.get('system', '')}[/dim]"
+                f"{r['name']}  {r.get('system', '')}"
             ),
             callback     = _on_select,
         ))
@@ -85,7 +85,7 @@ class CargoBlock(TuiBlock):
 
         try:
             self.query_one("#cargo-price-src", Label).update(
-                f" [dim]{src_label}[/dim] "
+                f" {src_label} "
             )
         except Exception:
             pass
@@ -93,7 +93,7 @@ class CargoBlock(TuiBlock):
         # ── Target label in footer ────────────────────────────────────────────
         try:
             self.query_one("#cargo-target-lbl", Label).update(
-                f"[dim]→ {tgt_name}[/dim]" if tgt_name else "[dim]No target set[/dim]"
+                f"→ {tgt_name}" if tgt_name else "No target set"
             )
         except Exception:
             pass
@@ -106,9 +106,9 @@ class CargoBlock(TuiBlock):
 
         cap_str = f"{used}/{cap} t" if cap else (f"{used} t" if used else "—")
 
-        if used == 0:
-            scroll.mount(Label(f"[dim]{cap_str}  No cargo[/dim]", classes="dim"))
-            return
+        # An empty hold renders the same layout as a loaded one — no items, then
+        # the separator and Totals line, where "0 / capacity" reads as empty on
+        # its own.  No special-case notice.
 
         # ── Build enriched item list ──────────────────────────────────────────
         enriched = []
@@ -151,12 +151,17 @@ class CargoBlock(TuiBlock):
             # the whole value string is constant width.  KVRow right-aligns the
             # value, so a constant width puts the | in the same screen column on
             # every row.
-            val_str = f"{count:>4} t  [dim]|[/dim] {_fmt_cr(price):>9}"
+            val_str = f"{count:>4} t  | {_fmt_cr(price):>9}"
             rows.append(KVRow(name, val_str))
 
-        # Totals row: identical fixed-width format so its | aligns with the rest.
+        # ── Totals, lifted away from the manifest ────────────────────────────
+        # A blank row and a separator line (the app's own .sep styling) set the
+        # totals apart from the manifest.  The tonnage reads used / capacity, so
+        # the vessel's maximum hold is always shown — an empty hold simply reads
+        # "0 / capacity" here rather than needing a separate notice.
         cr_total = _fmt_cr(total) if total else "—"
-        rows.append(KVRow("[dim]Totals[/dim]",
-                          f"{used:>4} t  [dim]|[/dim] {cr_total:>9}"))
+        rows.append(KVRow("", ""))                       # blank spacer row
+        rows.append(Static("─" * 40, classes="sep"))     # visible separator line
+        rows.append(KVRow("Totals", f"{cap_str}  | {cr_total:>9}"))
 
         scroll.mount(*rows)

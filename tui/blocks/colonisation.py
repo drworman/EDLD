@@ -33,7 +33,7 @@ class ColonisationBlock(TuiBlock):
 
         if not sites:
             scroll.mount(Label(
-                "[dim]No construction sites tracked.\nDock at a depot to begin.[/dim]",
+                "No construction sites tracked.\nDock at a depot to begin.",
                 classes="dim"
             ))
             return
@@ -60,7 +60,7 @@ class ColonisationBlock(TuiBlock):
             sys_exp = self._expanded_sys[sys_name]
 
             sys_arrow = "▼" if sys_exp else "▶"
-            sys_hdr   = SecHdr(f"{sys_arrow} [dim]{sys_name}[/dim]")
+            sys_hdr   = SecHdr(f"{sys_arrow} {sys_name}")
             sys_hdr.system_name = sys_name   # type: ignore[attr-defined]
             rows.append(sys_hdr)
 
@@ -79,7 +79,7 @@ class ColonisationBlock(TuiBlock):
 
                 arrow   = "▼" if expanded else "▶"
                 cur_pfx = "[bold cyan]▶ [/bold cyan]" if is_current else ""
-                hdr_txt = f"  {arrow} {cur_pfx}[bold cyan]{name}[/bold cyan]  [dim]{pct}%[/dim]"
+                hdr_txt = f"  {arrow} {cur_pfx}[bold cyan]{name}[/bold cyan]  {pct}%"
                 hdr     = SecHdr(hdr_txt)
                 hdr.market_id = mid  # type: ignore[attr-defined]
                 rows.append(hdr)
@@ -90,7 +90,7 @@ class ColonisationBlock(TuiBlock):
                 resources  = site.get("resources", {})
                 site_cargo = cargo if is_current else {}
                 if not resources:
-                    rows.append(Label("     [dim](dock to load requirements)[/dim]"))
+                    rows.append(Label("     (dock to load requirements)"))
                     continue
 
                 remaining = [
@@ -120,7 +120,7 @@ class ColonisationBlock(TuiBlock):
                     else:
                         kv = KVRow(f"   {display}", need_str)
                     rows.append(kv)
-                rows.append(KVRow("   [dim]Total remaining[/dim]", f"{total_rem:,} t"))
+                rows.append(KVRow("   Total remaining", f"{total_rem:,} t"))
 
         for site in done:
             name = site.get("station") or site.get("system", "Unknown")

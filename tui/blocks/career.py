@@ -96,13 +96,13 @@ class CareerBlock(TuiBlock):
             summary.extend(sess_rows)
 
         if not summary:
-            summary.append(Label("[dim]No data yet[/dim]", classes="dim"))
+            summary.append(Label("No data yet", classes="dim"))
         self._repopulate("car-tab-summary", summary)
 
         # ── Lifetime activity tabs ────────────────────────────────────────────
         hist = self.core._plugins.get("journal_history")
         if hist is None or not hist.scan_done.is_set():
-            placeholder = Label("[dim]Lifetime scan in progress…[/dim]",
+            placeholder = Label("Lifetime scan in progress…",
                                 classes="dim")
             for _title, pane_id in _ALL_TABS:
                 if pane_id == "car-tab-summary":
@@ -250,7 +250,7 @@ class CareerBlock(TuiBlock):
                                       _fmt_credits(pending)))
 
         if not rows:
-            rows.append(Label("[dim]No combat activity logged[/dim]",
+            rows.append(Label("No combat activity logged",
                               classes="dim"))
         self._repopulate("car-tab-combat", rows)
 
@@ -333,7 +333,7 @@ class CareerBlock(TuiBlock):
             if qty:
                 rows.append(KVRow("Per tonne", _fmt_credits(profit / qty)))
         if not rows:
-            rows.append(Label("[dim]No mining activity logged[/dim]",
+            rows.append(Label("No mining activity logged",
                               classes="dim"))
         self._repopulate("car-tab-mining", rows)
 
@@ -378,7 +378,7 @@ class CareerBlock(TuiBlock):
                 rows.append(KVRow("Smuggling profit", _fmt_credits(smg_profit)))
 
         if not rows:
-            rows.append(Label("[dim]No trade activity logged[/dim]",
+            rows.append(Label("No trade activity logged",
                               classes="dim"))
         self._repopulate("car-tab-trade", rows)
 
@@ -399,7 +399,7 @@ class CareerBlock(TuiBlock):
 
         rows: list = []
         if not f_in and not f_out:
-            rows.append(Label("[dim]No financial events logged yet[/dim]",
+            rows.append(Label("No financial events logged yet",
                               classes="dim"))
             self._repopulate("car-tab-credits", rows)
             return
@@ -408,7 +408,7 @@ class CareerBlock(TuiBlock):
         if f_in:
             rows.append(SecHdr("Lifetime earnings"))
             for k, v in f_in.items():
-                pct = (f"  [dim]{v / total_in * 100:.1f}%[/dim]"
+                pct = (f"  {v / total_in * 100:.1f}%"
                        if total_in else "")
                 rows.append(KVRow(k, f"{_fmt_credits(v)}{pct}"))
             rows.append(KVRow("[b]Total earnings[/b]",
@@ -418,7 +418,7 @@ class CareerBlock(TuiBlock):
         if f_out:
             rows.append(SecHdr("Lifetime spending"))
             for k, v in f_out.items():
-                pct = (f"  [dim]{v / total_out * 100:.1f}%[/dim]"
+                pct = (f"  {v / total_out * 100:.1f}%"
                        if total_out else "")
                 rows.append(KVRow(k, f"{_fmt_credits(v)}{pct}"))
             rows.append(KVRow("[b]Total spending[/b]",
@@ -470,7 +470,7 @@ class CareerBlock(TuiBlock):
     def _refresh_carrier(self, carrier, fc_stat, state) -> None:
         if not carrier.get("stats") and not fc_stat:
             self._repopulate("car-tab-carrier",
-                             [Label("[dim]No fleet carrier data[/dim]",
+                             [Label("No fleet carrier data",
                                     classes="dim")])
             return
 
@@ -563,12 +563,12 @@ class CareerBlock(TuiBlock):
             rows.append(SecHdr("Merits by system (top 20)"))
             sys_total = sum(by_sys.values())
             for sys_name, merits in list(by_sys.items())[:20]:
-                pct = (f"  [dim]{merits / sys_total * 100:.0f}%[/dim]"
+                pct = (f"  {merits / sys_total * 100:.0f}%"
                        if sys_total else "")
                 rows.append(KVRow(sys_name, f"{_fmt(merits)}{pct}"))
 
         if not rows:
-            rows.append(Label("[dim]No PowerPlay activity[/dim]",
+            rows.append(Label("No PowerPlay activity",
                               classes="dim"))
         self._repopulate("car-tab-powerplay", rows)
 
@@ -580,7 +580,7 @@ class CareerBlock(TuiBlock):
         except Exception:
             return
         scroll.remove_children()
-        scroll.mount(*(rows or [Label("[dim]—[/dim]", classes="dim")]))
+        scroll.mount(*(rows or [Label("—", classes="dim")]))
 
     def _build_kv_rows(self, raw_rows: list) -> list:
         """Convert provider summary rows (label/value/rate dicts) into KVRow
@@ -593,5 +593,5 @@ class CareerBlock(TuiBlock):
             rate = row.get("rate")
             if lbl.startswith("─"):
                 continue
-            out.append(KVRow(lbl, f"{val}  [dim]{rate}[/dim]" if rate else val))
+            out.append(KVRow(lbl, f"{val}  {rate}" if rate else val))
         return out

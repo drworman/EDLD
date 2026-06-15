@@ -78,7 +78,7 @@ class ExplorationBlock(TuiBlock):
 
         if not view:
             sys_lbl.update("—")
-            sum_lbl.update("[dim]No system data yet — honk to populate.[/dim]")
+            sum_lbl.update("No system data yet — honk to populate.")
             return
 
         sysd, tot = view["system"], view["totals"]

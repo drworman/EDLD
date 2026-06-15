@@ -575,7 +575,7 @@ class PreferencesScreen(ModalScreen):
     def _get_capi_status(self) -> str:
         capi = self._capi_provider()
         if capi is None:
-            return "[dim]CAPI provider not available[/dim]"
+            return "CAPI provider not available"
         try:
             status    = capi.auth_status()
             connected = status.get("connected", False)
@@ -586,9 +586,9 @@ class PreferencesScreen(ModalScreen):
             if connected:
                 suffix = f" — {cmdr}" if cmdr else ""
                 return f"[green]Connected[/green]{suffix}"
-            return "[dim]Not connected[/dim]"
+            return "Not connected"
         except Exception:
-            return "[dim]Status unavailable[/dim]"
+            return "Status unavailable"
 
     def _capi_connect(self) -> None:
         capi = self._capi_provider()
@@ -609,7 +609,7 @@ class PreferencesScreen(ModalScreen):
             return
         try:
             capi.disconnect()
-            self.query_one("#capi-status", Label).update("[dim]Not connected[/dim]")
+            self.query_one("#capi-status", Label).update("Not connected")
         except Exception:
             pass
 

@@ -138,7 +138,7 @@ class NavigationBlock(TuiBlock):
             results.remove_children()
         except Exception:
             results = None
-        status.update("[dim]Plotting…[/dim]")
+        status.update("Plotting…")
 
         # Worker thread — Spansh's route APIs poll for completion 1–60 s.
         def _worker():
@@ -243,7 +243,7 @@ class NavigationBlock(TuiBlock):
         rows.append(SecHdr("Fleet carrier"))
         carrier = getattr(self.core.state, "assets_carrier", None)
         if not carrier:
-            rows.append(Label("[dim]No carrier on file.[/dim]", classes="dim"))
+            rows.append(Label("No carrier on file.", classes="dim"))
         else:
             rows.append(KVRow("Name",       str(carrier.get("name", "—"))))
             rows.append(KVRow("Callsign",   str(carrier.get("callsign", "—"))))
@@ -261,12 +261,12 @@ class NavigationBlock(TuiBlock):
         if sq_name:
             rows.append(KVRow("Squadron", sq_name))
             rows.append(Label(
-                "[dim]Squadron carrier jump-status data is not available "
+                "Squadron carrier jump-status data is not available "
                 "from the journal or any anonymous API.  This section will "
-                "populate once a squadron-data integration ships.[/dim]",
+                "populate once a squadron-data integration ships.",
                 classes="dim",
             ))
         else:
-            rows.append(Label("[dim]No squadron on file.[/dim]", classes="dim"))
+            rows.append(Label("No squadron on file.", classes="dim"))
 
         scroll.mount(*rows)
