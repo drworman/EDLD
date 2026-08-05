@@ -18,11 +18,12 @@ import re as _re
 
 FIGHTER_TYPE_NAMES: dict[str, str] = {
     "independent_fighter":   "Taipan",        # Faulcon DeLacy — Independent/Alliance
-    "empire_fighter":        "GU-97",          # Gutamaya — Imperial
-    "federation_fighter":    "F63 Condor",     # Core Dynamics — Federal
+    "empire_fighter":        "GU-97",         # Gutamaya — Imperial
+    "federation_fighter":    "F63 Condor",    # Core Dynamics — Federal
     "gdn_hybrid_fighter_v1": "XG7 Trident",   # Guardian hybrid
     "gdn_hybrid_fighter_v2": "XG8 Javelin",   # Guardian hybrid
     "gdn_hybrid_fighter_v3": "XG9 Lance",     # Guardian hybrid
+    "lander01":              "Nomad",         # Nomad
 }
 
 # ── SLF loadout names ─────────────────────────────────────────────────────────
@@ -35,6 +36,7 @@ FIGHTER_LOADOUT_NAMES: dict[tuple, str] = {
     ("gdn_hybrid_fighter_v1", "zero"):  "XG7 Trident",
     ("gdn_hybrid_fighter_v2", "zero"):  "XG8 Javelin",
     ("gdn_hybrid_fighter_v3", "zero"):  "XG9 Lance",
+    ("lander01",          "advanced"):  "Nomad",
 
     # ── GU-97  (empire_fighter — Gutamaya, Imperial) ──────────────────────────
     ("empire_fighter", "one"):       "GU-97 (Gelid F)",
@@ -312,6 +314,7 @@ SHIP_NAME_MAP: dict[str, str] = {
     "gdn_hybrid_fighter_v3":    "XG9 Lance",
     "testbuggy":                "SRV",
     "scarab":                   "SRV",
+    "lander01":                 "Nomad",
 }
 
 # Matches Roman numeral tokens after "Mk " that were mangled by .title()
