@@ -501,6 +501,8 @@ BLOCK_DOM_ID = {
     "missions":     "block-missions",
     "navigation":   "block-nav",
     "career":       "block-career",
+    "session":      "block-session",
+    "ship_health":  "block-ship-health",
     "exploration":  "block-exploration",
     "exobiology":   "block-exobiology",
 }

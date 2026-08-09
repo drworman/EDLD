@@ -118,10 +118,18 @@ class JournalHistoryPlugin(BasePlugin):
         exobio_value_by_genus: dict[str, int] = {}   # genus → credits sold
         exobio_first_bonus     = 0                   # Σ first-discovery bonuses
 
-        # PowerPlay — scan all journals, sum all merits by system
-        # Reset counters on PowerplayLeave/Defect so we only count current pledge
+        # PowerPlay — every counter below is scoped to the CURRENT pledge.
+        # Merits earned under a previous allegiance are deliberately dropped:
+        # they bought standing with a power the commander has left and say
+        # nothing about where they stand now.  _pp_reset_pledge() clears the
+        # lot at each boundary (Join, Defect, Leave, or an observed change of
+        # power), so what survives the scan belongs to one allegiance.
         pp_system_merits: dict[str, int] = {}
         pp_total_merits   = 0
+        pp_pledge_merits  = 0       # Σ MeritsGained since the current pledge
+        pp_power          = ""      # power currently pledged to ("" = none)
+        pp_pledged_since  = None    # ISO timestamp the current pledge began
+        pp_pledge_count   = 0       # how many pledges seen across the scan
         pp_active         = False   # True once we see a Powerplay/Join event
         pp_current_system = ""      # system at time of PowerplayMerits event
         # Merits-by-activity: the journal's PowerplayMerits event records
@@ -133,6 +141,22 @@ class JournalHistoryPlugin(BasePlugin):
             "Combat": 0, "Trade": 0, "Exploration": 0,
             "Missions": 0, "Other": 0,
         }
+
+        def _pp_reset_pledge(power: str, when=None) -> None:
+            """Start tracking a fresh pledge, discarding the previous one."""
+            nonlocal pp_total_merits, pp_pledge_merits, pp_power
+            nonlocal pp_pledged_since, pp_active, pp_pledge_count
+            pp_system_merits.clear()
+            for _k in pp_merits_by_activity:
+                pp_merits_by_activity[_k] = 0
+            pp_total_merits  = 0
+            pp_pledge_merits = 0
+            pp_power         = power or ""
+            pp_pledged_since = when if power else None
+            pp_active        = bool(power)
+            if power:
+                pp_pledge_count += 1
+
         # Sliding window of recent activity classifications (most recent last).
         pp_recent_activity: list[str] = []
 
@@ -337,19 +361,56 @@ class JournalHistoryPlugin(BasePlugin):
                         )
 
                 # ── PowerPlay ─────────────────────────────────────────────
-                elif name in ("Powerplay", "PowerplayJoin"):
-                    pp_active = True
+                # Every merit counter here is scoped to the *current* pledge.
+                # Merits earned for a power the commander has since left do
+                # not carry over — they bought standing with that power and
+                # mean nothing to the present one — so any pledge boundary
+                # clears the accumulators.  A commander who has swapped
+                # allegiance several times would otherwise see a merit total
+                # that belongs to nobody in particular.
+                elif name in ("PowerplayJoin", "PowerplayDefect"):
+                    _pp_reset_pledge(ev.get("Power")
+                                     or ev.get("ToPower") or "",
+                                     ev.get("timestamp", ""))
+
+                elif name == "PowerplayLeave":
+                    _pp_reset_pledge("", ev.get("timestamp", ""))
+
+                elif name == "Powerplay":
+                    # Login snapshot.  It also reveals a pledge that began
+                    # before the scanned range, and TimePledged lets us date
+                    # it without a Join event.
+                    snap_power = ev.get("Power") or ""
+                    if snap_power != pp_power:
+                        _pp_reset_pledge(snap_power, ev.get("timestamp", ""))
+                        # TimePledged dates a pledge that began before the
+                        # scanned range, where no Join event is available.
+                        secs = ev.get("TimePledged")
+                        ts   = ev.get("timestamp", "")
+                        if secs and ts:
+                            try:
+                                from datetime import datetime as _dt, timedelta as _td
+                                started = (_dt.fromisoformat(ts.replace("Z", "+00:00"))
+                                           - _td(seconds=int(secs)))
+                                pp_pledged_since = started.strftime("%Y-%m-%dT%H:%M:%SZ")
+                            except Exception:
+                                pass
+                    pp_active = bool(snap_power)
                     snap = ev.get("Merits", 0)
                     if snap and snap > pp_total_merits:
                         pp_total_merits = snap   # use login snapshot as floor
 
-                elif name in ("PowerplayLeave", "PowerplayDefect"):
-                    if name == "PowerplayLeave":
-                        pp_active = False
-                        pp_system_merits.clear()
-                        pp_total_merits = 0
-
                 elif name == "PowerplayMerits" and pp_active:
+                    # A grant for a different power than the one we are
+                    # tracking means a pledge boundary was missed (the Join
+                    # fell outside the scanned range).  Treat it as one.
+                    ev_power = ev.get("Power") or ""
+                    if ev_power and pp_power and ev_power != pp_power:
+                        _pp_reset_pledge(ev_power, ev.get("timestamp", ""))
+                        pp_active = True
+                    elif ev_power and not pp_power:
+                        pp_power = ev_power
+
                     gained = ev.get("MeritsGained", 0)
                     total  = ev.get("TotalMerits")
                     if total is not None:
@@ -357,6 +418,7 @@ class JournalHistoryPlugin(BasePlugin):
                     if gained > 0:
                         sys = current_system or "Unknown"
                         pp_system_merits[sys] = pp_system_merits.get(sys, 0) + gained
+                        pp_pledge_merits += gained
                         # Attribute to the activity that dominated the recent
                         # window.  Ties and empty windows fall to "Other".
                         if pp_recent_activity:
@@ -575,7 +637,14 @@ class JournalHistoryPlugin(BasePlugin):
                 "by_species":   dict(sorted(exobio_by_species.items(),
                                             key=lambda x: -x[1])),
             },
+            # Every figure here is scoped to the CURRENT pledge — see the
+            # accumulator comments above.  A commander who has changed
+            # allegiance will not see merits earned for a former power.
             "powerplay": {
+                "power":          pp_power,
+                "pledged_since":  pp_pledged_since,
+                "pledge_count":   pp_pledge_count,
+                "pledge_merits":  pp_pledge_merits,
                 "total_merits":   pp_total_merits,
                 "system_merits":  dict(sorted(pp_system_merits.items(),
                                               key=lambda x: -x[1])),

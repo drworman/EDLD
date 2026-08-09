@@ -4,6 +4,106 @@ Last updated: 20260614
 
 ---
 
+## Unreleased
+
+### Session Summary: New window
+Current-session activity has moved out of the Career block's Summary tab
+into a Panel-classed window of its own.  Sharing one tab meant the session
+view and the career view were each squeezed into half the height; both now
+get a full window.
+
+The new window also shows considerably more.  Where the Career tab inlined
+each activity component's condensed summary rows, the Session window
+renders their full detail: notable bodies and habitable zones from
+Exploration, the in-progress scan with clonal distance from Exobiology,
+per-commodity profit from Trade, limpet efficiency and per-commodity yield
+from Mining, and per-system merits from PowerPlay.  Ctrl+R resets it as
+before, and the window now repaints immediately on reset rather than
+waiting for the next journal event.
+
+### Career: Summary tab rebuilt
+The Summary tab showed three wealth rows and little else — not much of a
+career summary.  It now pulls the headline figures from every other tab
+into one place: wealth and career scale, combat, exploration, exobiology,
+mining, trade, missions, on-foot, PowerPlay, fleet carrier, and the top
+earning and spending categories from the lifetime ledger.
+
+Both windows are built from one shared model
+(`core/summary_model.py`), which emits the same sections in the same order
+for both scopes.  They are meant to show the same things — one scoped to
+the current session, the other to the whole career — so they are generated
+from a single source rather than two renderers that would drift apart as
+either side is maintained.
+
+Two smaller reporting errors surfaced while building it.  Zero-valued
+entries no longer occupy a row rendering as an em dash.  And ship NPC crew
+wages from Statistics are now labelled distinctly from the fleet carrier's
+own crew upkeep, which appears separately in the spending ledger under a
+near-identical name.
+
+### PowerPlay: merits are now scoped to the current pledge
+The lifetime scan accumulated merits across every allegiance the commander
+had ever held.  A commander who has swapped powers a few times saw a merit
+total belonging to nobody in particular — merits earned for a power they
+had long since left, summed together with the current one.  Those merits
+bought standing with a power that no longer counts them; carrying them
+forward tells you nothing about where you stand now.
+
+Every PowerPlay counter — merit total, merits by activity, and merits by
+system — is now cleared at each pledge boundary, so what the Career block
+reports belongs to the current allegiance alone.  The intended behaviour
+was described in a comment on the old code but only partly implemented:
+`PowerplayLeave` cleared the system tally and total while leaving the
+by-activity breakdown intact, and `PowerplayDefect` — the very case that
+matters most — was matched but then did nothing at all.
+
+Boundaries are now taken from `PowerplayJoin`, `PowerplayDefect` and
+`PowerplayLeave`, and additionally from any observed change of power on a
+`Powerplay` login snapshot or a `PowerplayMerits` grant, which recovers the
+case where the pledge event itself falls outside the scanned journal range.
+Where no Join event is available, `Powerplay.TimePledged` is used to date
+the pledge.
+
+The Career block's PowerPlay tab and the Summary tab now both show the
+power pledged to and how long ago, merits earned this cycle (the server's
+figure, which resets weekly), and merits earned since the pledge began —
+labelled separately, because they count different things.
+
+### Ship Health: New window
+A new Panel-classed window for neutron hoppers, who need to know before
+each leg whether anything wants repairing.  Hull sits in the first row and
+shields in the second, then a rule, then every fitted module sorted by
+power priority and — within each priority group — by health ascending, so
+whatever most needs an AFM unit pointed at it floats to the top of its
+group and cannot hide in the middle of a thirty-row list.  The Modules
+header carries a count of anything below full health.
+
+Per-module condition is tracked by a new `ship_health` component.  Nothing
+else in EDLD carried it: `ModulesInfo.json` has `Priority` but no `Health`
+at all, and the Assets component parses `Loadout` for value and engineering
+rather than condition.  `Loadout` is the only source carrying both fields
+together, so it provides the baseline and `AfmuRepairs`, `Repair`,
+`RepairAll`, `RebootRepair` and `HullDamage` are applied incrementally on
+top.  The component seeds itself from the most recent `Loadout` on disk at
+startup, so the window has content before the first one of the session
+fires.
+
+Power priority is displayed 1-based to match the in-game power distribution
+panel; the journal reports it 0-based.  Paint jobs, decals, nameplates,
+ship kits, engine and weapon colours and voice packs are filtered out — all
+report priority 1 and full health forever, and would otherwise pad the
+first priority group with a dozen rows that can never need repair.
+
+### Display
+Both new windows are Panel class, so either can be assigned to any Panel
+position from Preferences > Display.  The position layout itself is
+unchanged — the left and right columns hold three Panel windows each, which
+is what fits on screen at a readable height.  There are now eleven Panel
+windows for seven positions, so placing Session or Ship Health means
+choosing what it replaces, as it already did for the other windows.
+
+---
+
 ## Released in 20260614
 
 ### Session Management: New

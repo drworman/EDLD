@@ -9,7 +9,8 @@ Every block:
 
 Helper widgets:
   KVRow   — key/value display row with optional colour class on value
-  SepRow  — horizontal separator row
+  SepRow  — zero-height spacer (grouping without consuming a line)
+  HRule   — visible one-row horizontal rule
   SecHdr  — bold section header
 """
 
@@ -100,6 +101,20 @@ class SepRow(Static):
 
     def __init__(self, **kw) -> None:
         super().__init__("─" * 40, classes="sep", **kw)
+
+
+class HRule(Static):
+    """Visible full-width horizontal rule.
+
+    Distinct from SepRow, which is a zero-height spacer the Commander block
+    relies on for grouping without consuming a line.  HRule occupies a real
+    row and draws a rule across it, for windows that want a visible division
+    between sections.
+    """
+    DEFAULT_CSS = "HRule { height: 1; padding: 0 1; }"
+
+    def __init__(self, width: int = 60, **kw) -> None:
+        super().__init__("─" * width, classes="sep", **kw)
 
 
 class SecHdr(Static):

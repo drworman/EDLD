@@ -12,8 +12,9 @@ Windows are grouped into interchangeable classes.  A *position* (slot) accepts
 only windows of its own class, which is what keeps the layout from breaking when
 the user reassigns one.
 
-    panel    Every interchangeable window (Career, Cargo, Missions, Navigation,
-             Colonisation, Exploration, Exobiology, Assets, Engineering)
+    panel    Every interchangeable window (Career, Session, Ship Health,
+             Cargo, Missions, Navigation, Colonisation, Exploration,
+             Exobiology, Assets, Engineering)
     compact  Alerts · Crew/SLF   (two halves of one Panel height)
     anchor   Commander           (one Panel height)
 
@@ -63,6 +64,8 @@ BLOCK_CLASS = {
     "assets":       PANEL,
     "engineering":  PANEL,
     "career":       PANEL,
+    "session":      PANEL,
+    "ship_health":  PANEL,
     "cargo":        PANEL,
     "exploration":  PANEL,
     "exobiology":   PANEL,
@@ -78,6 +81,8 @@ BLOCK_DISPLAY = {
     "assets":       "Assets",
     "engineering":  "Engineering",
     "career":       "Career",
+    "session":      "Session",
+    "ship_health":  "Ship Health",
     "cargo":        "Cargo",
     "exploration":  "Exploration",
     "exobiology":   "Exobiology",

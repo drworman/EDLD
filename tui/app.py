@@ -28,6 +28,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from tui.preferences   import PreferencesScreen
 from tui.confirm_modal import ConfirmModal
 from tui.blocks.career import CareerBlock
+from tui.blocks.session     import SessionBlock
+from tui.blocks.ship_health import ShipHealthBlock
 from tui.blocks.navigation import NavigationBlock
 from tui.blocks.colonisation  import ColonisationBlock
 from tui.blocks.commander     import CommanderBlock
@@ -49,25 +51,25 @@ if TYPE_CHECKING:
 
 _MSG_DISPATCH: dict[str, list[str]] = {
     "career_update":      ["block-career"],
-    # Session counter / reset events repaint Career (which absorbed the
-    # deprecated Session Stats block's Summary tab).
-    "stats_update":       ["block-career"],
-    # Generic state changes — keep Career's session-scoped Summary live,
-    # plus Navigation's Carrier tab readout.
-    "state_update":       ["block-career", "block-nav"],
+    # Session counter / reset events repaint the Session window.
+    "stats_update":       ["block-session"],
+    # Generic state changes — keep Career's wealth rows and the Session
+    # window live, plus Navigation's Carrier tab readout.
+    "state_update":       ["block-career", "block-session", "block-nav"],
     "colonisation_update":["block-colon"],
     "crew_update":        ["block-crew"],
     "slf_update":         ["block-crew"],
-    "vessel_update":      ["block-commander"],
+    "vessel_update":      ["block-commander", "block-ship-health"],
+    "ship_health_update": ["block-ship-health"],
     "location_update":    ["block-commander", "block-nav"],
     "mission_update":     ["block-missions"],
     "cargo_update":       ["block-cargo"],
     "assets_update":      ["block-assets"],
-    "exploration_update": ["block-exploration"],
-    "exobiology_update":  ["block-exobiology"],
+    "exploration_update": ["block-exploration", "block-session"],
+    "exobiology_update":  ["block-exobiology", "block-session"],
     "materials_update":   ["block-eng"],
     "alert_update":       ["block-alerts"],
-    "pp_update":          ["block-career", "block-commander"],
+    "pp_update":          ["block-career", "block-session", "block-commander"],
     "cmdr_update":        ["block-commander"],
     "capi_updated":       ["block-commander", "block-crew", "block-assets",
                            "block-cargo", "block-nav"],
@@ -85,6 +87,8 @@ _PLUGIN_TO_BLOCK: dict[str, str] = {
     "assets":        "block-assets",
     "engineering":   "block-eng",
     "alerts":        "block-alerts",
+    "session_stats": "block-session",
+    "ship_health":   "block-ship-health",
 }
 
 # Window name → TUI block class.  compose() builds the dashboard from the shared
@@ -100,6 +104,8 @@ _BLOCK_CLASSES = {
     "missions":     MissionsBlock,
     "navigation":   NavigationBlock,
     "career":       CareerBlock,
+    "session":      SessionBlock,
+    "ship_health":  ShipHealthBlock,
     "exploration":  ExplorationBlock,
     "exobiology":   ExobiologyBlock,
 }
@@ -246,6 +252,7 @@ class EdmdTui(App):
             "block-career", "block-nav", "block-colon",
             "block-commander", "block-alerts", "block-missions", "block-cargo",
             "block-crew", "block-assets", "block-eng", "block-exploration", "block-exobiology",
+            "block-session", "block-ship-health",
         ]
 
     # ── Actions ───────────────────────────────────────────────────────────────
@@ -255,6 +262,7 @@ class EdmdTui(App):
 
     def action_reset_session(self) -> None:
         self._core.plugin_call("session_stats", "on_new_session", 0)
+        self._refresh_block("block-session")
 
     def action_clear_alerts(self) -> None:
         self._core.plugin_call("alerts", "clear_alerts")

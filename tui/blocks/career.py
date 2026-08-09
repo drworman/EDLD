@@ -4,11 +4,22 @@ tui/blocks/career.py — Career block (Textual).
 Career block: nine tabs in fixed order — Summary,
 Combat, Explore, Exobio, Mining, Trade, Credits, Carrier, PPlay.
 
-The Summary tab is session-scoped at the top and shows a live wealth
-breakdown (Net worth, Liquid credits, Carrier bank) using the same
-state attributes the Wallet/Assets block uses.  All other tabs are
-lifetime activity sourced from the journal_history scan plus the most
-recent in-game Statistics event.
+The Summary tab is a genuine career summary: it pulls the headline
+figures from every other tab into one place — wealth, combat,
+exploration, exobiology, mining, trade, missions, on-foot, PowerPlay,
+fleet carrier, and the top earning and spending categories — so the tab
+answers "how is my career going" without tabbing through the other
+eight.  It is built from ``core.summary_model.career_sections()``.
+
+That model is shared with the Session window, which renders the same
+sections in the same order at session scope.  The two windows are meant
+to show the same things at different scopes, so they are built from one
+model rather than two renderers that would drift apart.  Current-session
+activity used to live at the bottom of this tab; it now has a window of
+its own (tui/blocks/session.py) and full height to go with it.
+
+All other tabs are lifetime activity sourced from the journal_history
+scan plus the most recent in-game Statistics event.
 
 The Credits tab carries the journal-derived earnings/spending ledger
 introduced in v20260515.  In-game Statistics fields like
@@ -22,6 +33,7 @@ from textual.widgets    import Label, TabbedContent, TabPane
 from textual.containers import VerticalScroll
 
 from tui.block_base     import TuiBlock, KVRow, SecHdr, _fmt, _fmt_credits
+from core.summary_model import career_sections
 
 
 _ALL_TABS = [
@@ -49,6 +61,26 @@ def _fmt_distance(n) -> str:
     return f"{v:.2f} ly"
 
 
+def _fmt_pledged(iso_ts) -> str:
+    """Render a pledge start as a date plus elapsed days."""
+    if not iso_ts:
+        return ""
+    try:
+        from datetime import datetime, timezone
+        when = datetime.fromisoformat(str(iso_ts).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return ""
+    days = (datetime.now(timezone.utc) - when).days
+    stamp = when.strftime("%Y-%m-%d")
+    if days < 0:
+        return stamp
+    if days == 0:
+        return f"{stamp}  (today)"
+    if days == 1:
+        return f"{stamp}  (1 day)"
+    return f"{stamp}  ({days} days)"
+
+
 class CareerBlock(TuiBlock):
     BLOCK_TITLE = "CAREER"
 
@@ -61,43 +93,9 @@ class CareerBlock(TuiBlock):
     # ── Refresh ───────────────────────────────────────────────────────────────
 
     def refresh_data(self) -> None:
-        # ── Summary tab — session activity + live wealth breakdown ────────────
-        # Top: live wealth breakdown (Net worth / Liquid / Carrier bank),
-        # same data sources as the Assets/Wallet block.  Bottom: current
-        # session activity from session_providers (reset via Ctrl+R).
         state = getattr(self.core, "state", None)
-        summary: list = []
 
-        summary.extend(self._wealth_rows(state))
-
-        providers = getattr(self.core, "session_providers", [])
-        plugin    = self.core._plugins.get("session_stats")
-        dur_s     = plugin.session_duration_seconds() if plugin else 0.0
-        sess_rows: list = []
-        if dur_s > 0:
-            sess_rows.append(KVRow("Duration", self.fmt_duration(dur_s)))
-        for p in sorted(providers,
-                        key=lambda p: getattr(p, "ACTIVITY_TAB_TITLE", "")):
-            try:
-                if not p.has_activity():
-                    continue
-                rows = p.get_summary_rows()
-            except Exception:
-                continue
-            kvrows = self._build_kv_rows(rows)
-            if not kvrows:
-                continue
-            title = getattr(p, "ACTIVITY_TAB_TITLE", "")
-            if title:
-                sess_rows.append(SecHdr(title))
-            sess_rows.extend(kvrows)
-        if sess_rows:
-            summary.append(SecHdr("Current session"))
-            summary.extend(sess_rows)
-
-        if not summary:
-            summary.append(Label("No data yet", classes="dim"))
-        self._repopulate("car-tab-summary", summary)
+        self._refresh_summary()
 
         # ── Lifetime activity tabs ────────────────────────────────────────────
         hist = self.core._plugins.get("journal_history")
@@ -137,70 +135,40 @@ class CareerBlock(TuiBlock):
         self._refresh_carrier(carrier, fc_stat, state)
         self._refresh_pplay  (pp)
 
-    # ── Wealth breakdown ──────────────────────────────────────────────────────
+    # ── Summary tab ───────────────────────────────────────────────────────────
 
-    def _wealth_rows(self, state) -> list:
-        """Build the wealth breakdown shown at the top of the Summary tab.
+    def _refresh_summary(self) -> None:
+        """Render the career-scoped summary from the shared summary model.
 
-        Liquid credits, ship+module value, and the carrier bank balance
-        are all maintained on live state by the Assets plugin (CAPI +
-        LoadGame + Commander + CarrierFinance events).  Those are the
-        authoritative numbers — fresher than a one-shot journal scan.
-        Statistics.Current_Wealth is the floor: if our computed sum is
-        bigger (credits earned since the last Statistics event fired),
-        the computed sum wins.
+        The same model backs the Session window at session scope, so the two
+        windows stay in step: a section added to core/summary_model.py shows
+        up in both without either renderer changing.
         """
-        rows: list = []
-        if state is None:
-            return rows
+        try:
+            sections = career_sections(self.core)
+        except Exception:
+            sections = []
 
-        hist = self.core._plugins.get("journal_history")
-        scan_results = hist.results if hist and hist.scan_done.is_set() else {}
-        finance      = scan_results.get("finance",  {})
-        carrier_scan = scan_results.get("carrier",  {})
-        stats        = scan_results.get("statistics", {})
-        bank         = stats.get("Bank_Account", {})
+        if not sections:
+            hist = self.core._plugins.get("journal_history")
+            msg = ("Lifetime scan in progress…"
+                   if hist is not None and not hist.scan_done.is_set()
+                   else "No career data yet")
+            self._repopulate("car-tab-summary", [Label(msg, classes="dim")])
+            return
 
-        live_bal = getattr(state, "assets_balance", None)
-        liquid   = int(live_bal) if live_bal is not None else (
-                   finance.get("liquid_credits", 0))
-
-        cur = getattr(state, "assets_current_ship", None) or {}
-        stored_ships   = getattr(state, "assets_stored_ships",   []) or []
-        stored_modules = getattr(state, "assets_stored_modules", []) or []
-        cur_id     = cur.get("ship_id")
-        all_ships  = ([cur] if cur else []) + [
-            s for s in stored_ships
-            if isinstance(s, dict) and s.get("ship_id") != cur_id
-        ]
-        ships_val  = sum(s.get("value", 0) for s in all_ships if s)
-        mods_val   = sum(m.get("value", 0) for m in stored_modules
-                         if isinstance(m, dict))
-
-        live_carrier = getattr(state, "assets_carrier", None) or {}
-        cbank        = (live_carrier.get("balance")
-                        or carrier_scan.get("bank_balance", 0)
-                        or 0)
-
-        risk = 0
-        for attr in ("holdings_bounties", "holdings_bonds",
-                     "holdings_trade",    "holdings_cartography",
-                     "holdings_exobiology"):
-            risk += getattr(state, attr, 0) or 0
-
-        stat_wealth = bank.get("Current_Wealth", 0) or 0
-        computed    = liquid + ships_val + mods_val + cbank + risk
-        net_worth   = max(stat_wealth, computed)
-
-        if net_worth or liquid or cbank:
-            rows.append(SecHdr("Wealth"))
-        if net_worth:
-            rows.append(KVRow("Net worth", _fmt_credits(net_worth)))
-        if liquid:
-            rows.append(KVRow("  Liquid credits", _fmt_credits(liquid)))
-        if cbank:
-            rows.append(KVRow("  Carrier bank",   _fmt_credits(cbank)))
-        return rows
+        widgets: list = []
+        for section in sections:
+            widgets.append(SecHdr(section["title"]))
+            for row in section["rows"]:
+                if row["kind"] == "sub":
+                    widgets.append(Label(row["label"], classes="dim"))
+                    continue
+                value = row["value"]
+                if row.get("rate"):
+                    value = f"{value}  {row['rate']}"
+                widgets.append(KVRow(row["label"], value))
+        self._repopulate("car-tab-summary", widgets)
 
     # ── Combat ────────────────────────────────────────────────────────────────
 
@@ -542,23 +510,48 @@ class CareerBlock(TuiBlock):
     # ── PowerPlay ─────────────────────────────────────────────────────────────
 
     def _refresh_pplay(self, pp) -> None:
+        """PowerPlay tab — scoped to the current pledge.
+
+        Merits earned under a former allegiance are not shown.  They bought
+        standing with a power the commander has since left and say nothing
+        about where they stand now, so journal_history clears its merit
+        accumulators at every pledge boundary and what arrives here belongs
+        to one allegiance.
+
+        Two measures coexist and are labelled separately because they count
+        different things: the server's TotalMerits resets every cycle, while
+        the journal tally runs from the pledge date.
+        """
         live_merits = getattr(self.core.state, "pp_merits_total", None)
-        pp_total    = live_merits if live_merits else pp.get("total_merits", 0)
-        pp_power    = getattr(self.core.state, "pp_power", None) or ""
+        cycle_total = live_merits if live_merits else pp.get("total_merits", 0)
+        pp_power    = (getattr(self.core.state, "pp_power", None)
+                       or pp.get("power") or "")
         pp_rank     = getattr(self.core.state, "pp_rank", None)
 
         rows = []
-        if pp_power:    rows.append(KVRow("Power", pp_power))
-        if pp_rank is not None: rows.append(KVRow("Rank", str(pp_rank)))
-        if pp_total:    rows.append(KVRow("Merits total", _fmt(pp_total)))
+        if pp_power:
+            rows.append(KVRow("Pledged to", pp_power))
+            since = _fmt_pledged(pp.get("pledged_since"))
+            if since:
+                rows.append(KVRow("  Since", since))
+        if pp_rank is not None:
+            rows.append(KVRow("Rank", str(pp_rank)))
+        if cycle_total:
+            rows.append(KVRow("Merits this cycle", _fmt(cycle_total)))
 
-        by_act = pp.get("by_activity", {}) or {}
+        by_act  = {a: m for a, m in (pp.get("by_activity", {}) or {}).items() if m}
+        pledge  = pp.get("pledge_merits", 0) or sum(by_act.values())
+        if pledge:
+            rows.append(KVRow("Merits this pledge", _fmt(pledge)))
+
         if by_act:
             rows.append(SecHdr("Merits by activity"))
             for act, m in by_act.items():
-                rows.append(KVRow(act, _fmt(m)))
+                pct = f"  {m / pledge * 100:.0f}%" if pledge else ""
+                rows.append(KVRow(act, f"{_fmt(m)}{pct}"))
 
         by_sys = pp.get("system_merits", {}) or pp.get("by_system", {})
+        by_sys = {s: m for s, m in by_sys.items() if m}
         if by_sys:
             rows.append(SecHdr("Merits by system (top 20)"))
             sys_total = sum(by_sys.values())
@@ -568,7 +561,7 @@ class CareerBlock(TuiBlock):
                 rows.append(KVRow(sys_name, f"{_fmt(merits)}{pct}"))
 
         if not rows:
-            rows.append(Label("No PowerPlay activity",
+            rows.append(Label("Not pledged to a power",
                               classes="dim"))
         self._repopulate("car-tab-powerplay", rows)
 
@@ -582,16 +575,4 @@ class CareerBlock(TuiBlock):
         scroll.remove_children()
         scroll.mount(*(rows or [Label("—", classes="dim")]))
 
-    def _build_kv_rows(self, raw_rows: list) -> list:
-        """Convert provider summary rows (label/value/rate dicts) into KVRow
-        widgets.  Plain-string section dividers (rows starting with "─")
-        are skipped; SecHdr is used for grouping instead."""
-        out: list = []
-        for row in raw_rows:
-            lbl  = row.get("label", "")
-            val  = row.get("value", "—")
-            rate = row.get("rate")
-            if lbl.startswith("─"):
-                continue
-            out.append(KVRow(lbl, f"{val}  {rate}" if rate else val))
-        return out
+

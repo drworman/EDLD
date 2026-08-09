@@ -235,6 +235,17 @@ class MonitorState:
         self.ship_shields           = True
         self.ship_shields_recharging = False
 
+        # Per-module condition (ship_health component, Ship Health window).
+        # ship_modules entries: {slot, name_internal, name_display,
+        #                        priority, on, health}
+        #   priority — raw journal value, 0-based (the in-game power panel
+        #              labels the same groups one higher)
+        #   health   — 0.0–1.0
+        # ship_hull_exact keeps hull integrity at full precision; ship_hull
+        # above stays the rounded percentage the commander component owns.
+        self.ship_modules:          list         = []
+        self.ship_hull_exact:       "float|None" = None
+
         # ── Vehicle / on-foot state ────────────────────────────────────────
         self.vessel_mode:     str  = "ship"
         self.srv_type:        str  = ""

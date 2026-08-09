@@ -56,6 +56,9 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | 🚀 **Assets Block** | Full fleet overview — current ship, stored ships with loadouts, stored modules, fleet carrier status, wallet with At-Risk holdings and net worth |
 | 🧑 **Commander Block** | Commander identity, squadron, home location, fuel, shields/hull, and adaptive display for SRV and on-foot states |
 | 🪪 **Career Block** | Combat / Trade / Exploration / Mercenary / Exobiology rank progression with detail tabs |
+| 📊 **Session Window** | Current-session activity in full detail across combat, exploration, exobiology, mining, trade, missions, on-foot and PowerPlay. Reset with Ctrl+R |
+| 📈 **Career Summary** | Lifetime counterpart to the Session window — the headline figures from every Career tab in one place, built from the same shared model so both read identically at their own scope |
+| 🔧 **Ship Health Window** | Hull, shields, and every fitted module sorted by power priority then by health ascending, so modules needing repair surface first. Built for neutron hopping |
 | 👥 **Crew / SLF Block** | NPC crew roster and ship-launched fighter status with correct variant identification |
 | 💰 **At-Risk Holdings Tracker** | Persistent cross-session tracker for unredeemed bounties, combat bonds, trade vouchers, cartography, and exobiology. Survives session resets, zeroed on death |
 | 🛡️ **Unified Data Provider** | Single source of truth for all game state — CAPI › journal › Status.json |
