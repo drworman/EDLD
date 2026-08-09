@@ -1,10 +1,10 @@
 # EDLD CHANGELOG
 
-Last updated: 20260614
+Last updated: 20260809
 
 ---
 
-## Unreleased
+## Released in 20260809
 
 ### Session Summary: New window
 Current-session activity has moved out of the Career block's Summary tab
