@@ -1,0 +1,28 @@
+name: Discord Release Notification
+
+permissions:
+  contents: read
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify-discord:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord Webhook
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+        run: |
+          curl -H "Content-Type: application/json" \
+          -X POST \
+          -d "$(jq -n \
+              --arg title "$RELEASE_NAME" \
+              --arg body "$RELEASE_BODY" \
+              --arg url "$RELEASE_URL" \
+              '{username: "GitHub", embeds: [{title: $title, description: $body, url: $url, color: 7506394}]}')" \
+          $DISCORD_WEBHOOK_URL
