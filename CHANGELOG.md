@@ -1,6 +1,98 @@
 # EDLD CHANGELOG
 
-Last updated: 20260809
+Last updated: 20260810
+
+---
+
+## Released in 20260810
+
+### Renamed: ED Linux Dash is now ED Live Dashboard
+
+EDLD runs on Linux, Windows and macOS as of this release, so "Linux" in the
+name had become wrong.  The acronym, the GitHub repository, the data
+directory at `~/.local/share/EDLD/` and every config key are unchanged, so
+there is nothing to migrate — existing installs pick the new name up and
+carry on with the same config, the same per-commander data and the same
+window layout.
+
+### New: desktop interface (`--gui`)
+
+A PySide6 desktop window rendering the same dashboard as the terminal
+interface.  It is built from the same layout model and the same components,
+so the two show the same windows in the same positions with the same data;
+Preferences → Display drives both.
+
+All fourteen windows are present — Career, Session, Ship Health, Commander,
+Crew/SLF, Alerts, Cargo, Missions, Navigation, Colonisation, Exploration,
+Exobiology, Assets and Engineering — along with the preferences dialog, the
+home-location and target-market search pickers, the update notice and the
+session-management controls.  Columns are draggable splitters, initially
+sized from the layout model's own proportions.  Window controls are the
+platform's own: minimise, maximise, snap, tiling and the close button all
+behave as the desktop expects, on all three operating systems.
+
+The terminal dashboard remains the default.  Nothing about it changed.
+
+### New: `--tui`, `--gui` and `--terminal` flags
+
+The three interfaces now have flags of their own.  `--mode textual|terminal|gui`
+still works and means the same thing; passing both a flag and a conflicting
+`--mode` is an error rather than a silent resolution.
+
+`--version` prints the version and exits before touching config, journals or
+components, so it answers on a machine that has never run Elite Dangerous.
+
+### New: cross-platform binaries
+
+The release workflow now builds single-file binaries for Linux, Windows and
+macOS alongside the source tarball it has always published, with optional
+code signing and macOS notarisation that skip cleanly when the secrets are
+absent.  Windows and macOS users no longer need a Python install.
+
+Every artefact is smoke-tested before publication.  This is not ceremony: a
+binary that cannot load its own components starts perfectly and shows an
+empty dashboard, which is indistinguishable from a working build until you
+notice no data ever arrives.
+
+### Fixed: components did not load in a frozen build
+
+`core/plugin_loader.py` discovers components by globbing `components/*.py`
+and loads each by file path, which gives every component its own module
+namespace and a sandboxed `open()`.  In a one-file PyInstaller build the
+sources live in the compiled archive rather than on disk, so the glob matched
+nothing and the dashboard came up with every window permanently empty.
+
+The component sources now ship as bundled data as well as compiled code, and
+the loader looks for them under `sys._MEIPASS` when frozen.  The loading
+mechanism, including the sandbox, is unchanged.
+
+### Fixed: bracketed text was dropped from display strings
+
+The dashboard blocks build their display strings with console markup, and the
+Qt front end translates that markup into rich text.  Any bracketed token that
+named no known tag was being discarded — which silently ate squadron tags
+rendering as `[SOL]` and faction names of the form `[XYZ] Corporation`.
+Unrecognised bracketed tokens are now passed through as literal text.
+
+### Licensing
+
+The desktop interface adds Qt, so the project now carries an LGPL v3
+obligation alongside its own MIT licence.  `docs/LICENSING.md` sets out how
+each condition of LGPLv3 section 4 is met, `THIRD-PARTY-NOTICES.md` lists
+every dependency, and the GPL and LGPL texts ship in `licenses/` inside every
+binary and every release archive.  `docs/BUILDING.md` covers building from
+source and relinking against your own Qt.
+
+Qt is never statically linked and UPX stays disabled; both matter for the
+above and both are enforced in `packaging/`.
+
+### Support links
+
+The desktop window carries a "Support EDLD Development" strip along the
+bottom with Patreon, Ko-fi and PayPal icons, and the same links appear in
+Help → About.  The destinations are read from `.github/FUNDING.yml` at
+runtime rather than hard-coded, so there is one place to change them.  The
+strip can be hidden from the View menu.
 
 ---
 

@@ -29,6 +29,35 @@ from core.emit import Terminal
 from core.state import EDLD_DATA_DIR, cmdr_data_dir
 
 
+# ── Frozen-build component discovery ──────────────────────────────────────────
+
+def _components_dir(repo_root: Path) -> Path:
+    """Return the directory holding the ``components/*.py`` files.
+
+    Components are discovered by globbing a directory and loaded by file path,
+    which keeps each one in its own module namespace with a sandboxed
+    ``open()``.  That mechanism needs the sources to exist as real files.
+
+    In a PyInstaller one-file build the application's own modules live inside
+    the compiled archive, not on disk, so the glob would match nothing and the
+    dashboard would come up with every window empty — a failure that looks
+    exactly like a working build until you notice no data ever arrives.  The
+    packaging spec therefore ships ``components/`` as bundled *data* as well,
+    which PyInstaller extracts to ``sys._MEIPASS`` at launch, and this function
+    points the loader there.
+
+    Falls back to the repo-root path when the bundled copy is absent, so a
+    source checkout and a ``--onedir`` build both behave as before.
+    """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            bundled = Path(meipass) / "components"
+            if bundled.is_dir():
+                return bundled
+    return repo_root / "components"
+
+
 # ── PluginStorage ─────────────────────────────────────────────────────────────
 
 class PluginStorage:
@@ -500,7 +529,7 @@ class PluginLoader:
             from core import debug as _dbg
             _dbg.info(f"  [storage] migrated {moved} file(s) from plugins/ → data/")
 
-        components_dir = self._repo_root / "components"
+        components_dir = _components_dir(self._repo_root)
 
         for plugin_file in sorted(components_dir.glob("*.py")):
             if plugin_file.name == "__init__.py":

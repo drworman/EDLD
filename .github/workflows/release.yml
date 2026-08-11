@@ -1,22 +1,38 @@
 name: Release
 
+# Builds the source tarball EDLD has always published, plus single-file
+# binaries for Linux, Windows and macOS.
+#
+# The LGPL relinking requirement for Qt is satisfied under LGPLv3 section
+# 4(d)(1): the complete application source is public, the build spec lives in
+# packaging/, and PySide6 is a pip install away, so anyone can regenerate these
+# binaries against their own build of Qt. The licence texts in licenses/ ship
+# inside every binary and every archive. Read docs/LICENSING.md before changing
+# how these artefacts are produced.
+#
 # Two triggers:
 #
 #   1. push: tags: ['*']
 #      Fires on any tag push or force-push, from any branch.
-#      Use for test builds: git push origin vX.Y.Z
-#      Re-trigger: git push --force origin vX.Y.Z
+#      Use for test builds: git push origin YYYYMMDD
+#      Re-trigger: git push --force origin YYYYMMDD
 #
 #   2. release: types: [published]
 #      Fires when you publish a release in the GitHub UI.
 #
 # Artifacts:
-#   EDLD-{version}.tar.gz / .sig
-#   EDLD-{version}.sha256 / .sig
+#   EDLD-{version}.tar.gz / .sig                  source
+#   EDLD-{version}-linux-x86_64.tar.gz  / .sig    binary
+#   EDLD-{version}-windows-x86_64.zip   / .sig    binary
+#   EDLD-{version}-macos-arm64.zip      / .sig    binary
+#   EDLD-{version}.sha256 / .sig                  checksums over all of it
 #
 # Secrets required:
 #   SIGNING_KEY       ed25519 private key, no passphrase
 #   SIGNING_IDENTITY  email matching signing_key.pub
+#
+# Code-signing secrets are optional. Every signing step is skipped when its
+# secret is absent, so a fork builds successfully with no credentials at all.
 
 on:
   push:
@@ -31,17 +47,17 @@ permissions:
 env:
   VERSION:    ${{ github.event.release.tag_name || github.ref_name }}
   SIGNING_NS: edld.release
-
-# ── Job 1: Source tarball ──────────────────────────────────────────────────────
+  PYTHON_VERSION: "3.12"
 
 jobs:
-  source:
-    name: Source tarball
-    runs-on: ubuntu-latest
 
+# -- Job 1: Verify the tag ---------------------------------------------------
+
+  verify:
+    name: Verify tag matches core/version
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.release.tag_name || github.ref_name }}
           fetch-depth: 1
@@ -55,6 +71,20 @@ jobs:
             echo "ERROR: tag '$TAG' does not match core/version '$FILE_VER'"
             exit 1
           fi
+
+# -- Job 2: Source tarball ---------------------------------------------------
+
+  source:
+    name: Source tarball
+    runs-on: ubuntu-latest
+    needs: [verify]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
 
       - name: Create dist
         run: mkdir -p dist
@@ -98,14 +128,256 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ env.VERSION }}" dist/* --clobber \
-            2>/dev/null || echo "No matching release — artifacts available in Actions run"
+            2>/dev/null || echo "No matching release - artifacts available in Actions run"
 
-# ── Job 2: Checksums ───────────────────────────────────────────────────────────
+# -- Job 3: Binaries ---------------------------------------------------------
+
+  binaries:
+    name: Binary (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    needs: [verify]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: windows-latest
+            platform: windows-x86_64
+          - os: macos-latest
+            platform: macos-arm64
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Install Qt runtime libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-randr0 \
+            libxcb-render-util0 libxcb-xinerama0 xvfb
+
+      - name: Build single-file binary
+        run: pyinstaller packaging/edld.spec --noconfirm --clean
+
+      # ----------------------------------------------------------------- #
+      # Code signing. Every step is skipped when its secret is absent, so
+      # forks build successfully without any credentials configured.
+      # ----------------------------------------------------------------- #
+
+      - name: Sign Windows binary
+        if: runner.os == 'Windows' && env.CERT != ''
+        env:
+          CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String($env:CERT)
+          $path = Join-Path $env:RUNNER_TEMP "edld-signing.pfx"
+          [IO.File]::WriteAllBytes($path, $bytes)
+          $signtool = Get-ChildItem `
+            "C:/Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe" |
+            Select-Object -Last 1
+          & $signtool.FullName sign /f $path /p $env:CERT_PASSWORD `
+            /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+            "dist/EDLD.exe"
+          & $signtool.FullName verify /pa "dist/EDLD.exe"
+          Remove-Item $path -Force
+
+      - name: Sign and notarise macOS app
+        if: runner.os == 'macOS' && env.CERT != ''
+        env:
+          CERT: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/edld.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+
+          # Hardened runtime is required for notarisation. Qt loads its
+          # plugins at runtime, so the JIT and unsigned-memory entitlements
+          # must be granted or the app is killed on launch.
+          codesign --force --deep --options runtime --timestamp \
+            --entitlements packaging/entitlements.plist \
+            --sign "$SIGN_IDENTITY" "dist/EDLD.app"
+          codesign --verify --deep --strict --verbose=2 "dist/EDLD.app"
+
+          ditto -c -k --keepParent "dist/EDLD.app" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" \
+            --team-id "$NOTARY_TEAM_ID" --wait
+          xcrun stapler staple "dist/EDLD.app"
+
+          security delete-keychain "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notarize.zip"
+
+      # ----------------------------------------------------------------- #
+      # Smoke test: prove the artefact actually starts. A binary that
+      # builds but cannot import its own components starts fine and shows
+      # an empty dashboard - that is the failure mode this catches, and it
+      # is easy to ship without it. --version answers before any journal or
+      # config work, so it succeeds on a runner that has never seen Elite
+      # Dangerous. The optional-dependency banner may precede the version
+      # on stdout, so the comparison takes the last non-empty line.
+      # ----------------------------------------------------------------- #
+
+      - name: Smoke-test the binary (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          chmod +x "dist/EDLD"
+          ACTUAL="$(xvfb-run -a ./dist/EDLD --version | tail -n1 | tr -d '[:space:]')"
+          EXPECTED="${{ env.VERSION }}"
+          echo "reported: '$ACTUAL' / expected: '$EXPECTED'"
+          test -n "$ACTUAL" || { echo "::error::No output from the binary."; exit 1; }
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Smoke-test the binary (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          chmod +x "dist/EDLD"
+          ACTUAL="$(./dist/EDLD --version | tail -n1 | tr -d '[:space:]')"
+          EXPECTED="${{ env.VERSION }}"
+          echo "reported: '$ACTUAL' / expected: '$EXPECTED'"
+          test -n "$ACTUAL" || { echo "::error::No output from the binary."; exit 1; }
+          test "$ACTUAL" = "$EXPECTED"
+
+      # The Windows binary is built windowed, so it starts with no console.
+      # core/win_console.py reattaches stdout for --version and --terminal;
+      # this step is what proves it still works.
+      #
+      # Two ways of capturing are tried before giving up. Piping is the
+      # normal path, but it depends on the console attachment behaving, and
+      # that is the part that cannot be tested off Windows. Falling back to
+      # a redirect to a file exercises the inherited-handle path instead, so
+      # a regression in one does not block a release on the other.
+      - name: Smoke-test the binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $expected = "${{ env.VERSION }}"
+          $exe = "dist/EDLD.exe"
+
+          $actual = ((& $exe --version 2>&1 | Out-String) -split "`n" |
+                     Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
+          $code = $LASTEXITCODE
+          Write-Host "pipe capture : '$actual' (exit $code)"
+
+          if ([string]::IsNullOrWhiteSpace($actual)) {
+            Write-Host "Pipe capture was empty; retrying with a file redirect."
+            $tmp = Join-Path $env:RUNNER_TEMP "edld-version.txt"
+            & $exe --version > $tmp 2>&1
+            $code = $LASTEXITCODE
+            $actual = ((Get-Content $tmp -Raw) -split "`n" |
+                       Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
+            Write-Host "file capture : '$actual' (exit $code)"
+          }
+
+          if ($code -ne 0) { throw "Binary exited with code $code." }
+          if ([string]::IsNullOrWhiteSpace($actual)) {
+            throw ("The binary produced no output by either method. A " +
+                   "windowed Windows build cannot write to stdout unless " +
+                   "it attaches to the parent console or picks up an " +
+                   "inherited handle - check enable_console_output() in " +
+                   "core/win_console.py.")
+          }
+          if ($actual -ne $expected) {
+            throw "Version mismatch: got '$actual', expected '$expected'."
+          }
+          Write-Host "OK"
+
+      - name: Package artefacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ env.VERSION }}"
+          STEM="EDLD-${VERSION}-${{ matrix.platform }}"
+          mkdir -p out
+
+          # Every archive carries the licence texts. LGPLv3 section 4(b)
+          # requires a copy to accompany the binary; a link is not enough.
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            7z a "out/${STEM}.zip" "./dist/EDLD.exe" \
+              ./LICENSE ./THIRD-PARTY-NOTICES.md ./licenses
+          elif [ "${RUNNER_OS}" = "macOS" ]; then
+            ditto -c -k --keepParent "dist/EDLD.app" "out/${STEM}.zip" \
+              2>/dev/null || \
+              tar -czf "out/${STEM}.tar.gz" -C dist "EDLD" \
+                -C .. LICENSE THIRD-PARTY-NOTICES.md licenses
+          else
+            tar -czf "out/${STEM}.tar.gz" -C dist "EDLD" \
+              -C .. LICENSE THIRD-PARTY-NOTICES.md licenses
+          fi
+          ls -la out/
+
+      - name: Sign binary archive
+        shell: bash
+        env:
+          SIGNING_KEY:      ${{ secrets.SIGNING_KEY }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SIGNING_KEY:-}" ]; then
+            echo "No SIGNING_KEY configured - skipping signature."
+            exit 0
+          fi
+          KEY=$(mktemp); chmod 600 "$KEY"; echo "$SIGNING_KEY" > "$KEY"
+          for f in out/*; do
+            case "$f" in *.sig) continue;; esac
+            ssh-keygen -Y sign -f "$KEY" -n "${{ env.SIGNING_NS }}" "$f"
+          done
+          rm -f "$KEY"
+          ls -la out/
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: binary-${{ matrix.platform }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ env.VERSION }}" out/* --clobber \
+            2>/dev/null || echo "No matching release - artifacts available in Actions run"
+
+# -- Job 4: Checksums --------------------------------------------------------
 
   checksums:
     name: Aggregate checksums
     runs-on: ubuntu-latest
-    needs: [source]
+    needs: [source, binaries]
 
     steps:
       - name: Checkout
@@ -181,7 +453,7 @@ jobs:
             dist/EDLD-${{ env.VERSION }}.sha256 \
             dist/EDLD-${{ env.VERSION }}.sha256.sig \
             --clobber 2>/dev/null \
-            || echo "No matching release — checksums available in Actions run"
+            || echo "No matching release - checksums available in Actions run"
           for f in dist/*.sig; do
             [ -f "$f" ] && gh release upload "${{ env.VERSION }}" "$f" \
               --clobber 2>/dev/null || true

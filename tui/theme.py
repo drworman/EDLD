@@ -330,148 +330,24 @@ Tab.-active { color: $accent; text-style: bold; }
 """
 
 # ── Colour palettes ────────────────────────────────────────────────────────────
+# The palettes themselves live in core/palette.py so the Qt GUI can render the
+# same themes without importing anything from this module (and therefore
+# without requiring Textual to be installed).  Re-exported under the original
+# private name so nothing else in the TUI needs to change.
 
-_PALETTES = {
-    # ── Default (Elite orange) ────────────────────────────────────────────────
-    # Backgrounds carry a warm orange-amber tint matching the accent.
-    # Accent #e07b20 — Elite Dangerous orange.
-    "default": {
-        "$bg":       "#120f0b",   # warm near-black, slight orange tint
-        "$block-bg": "#1c1810",   # warm dark block fill
-        "$title-bg": "#241e16",   # warm title / panel bar
-        "$fg":       "#e8ddd0",   # warm off-white
-        "$dim":      "#7a6a52",   # warm amber-brown muted text
-        "$accent":   "#e07b20",   # Elite orange
-        "$border":   "#3d2e18",   # dark amber-brown border
-        "$green":    "#57e389",
-        "$amber":    "#f8e45c",
-        "$red":      "#e05c5c",
-    },
-    # ── Default Green ─────────────────────────────────────────────────────────
-    # Backgrounds carry a cool forest-green tint.
-    # Accent #00aa44 — green.
-    "default-green": {
-        "$bg":       "#0b0f0d",   # very dark, subtle green tint
-        "$block-bg": "#141c18",   # dark green-tinted block fill
-        "$title-bg": "#1a2420",   # green title / panel bar
-        "$fg":       "#d4e4da",   # cool, slightly green-tinted white
-        "$dim":      "#567060",   # muted green-gray
-        "$accent":   "#00aa44",   # ED green
-        "$border":   "#1e3428",   # dark forest-green border
-        "$green":    "#57e389",
-        "$amber":    "#f8e45c",
-        "$red":      "#e05c5c",
-    },
-    # ── Default Blue ──────────────────────────────────────────────────────────
-    # Accent #3d8fd4 — blue.
-    "default-blue": {
-        "$bg":       "#0c0e14",
-        "$block-bg": "#141820",
-        "$title-bg": "#1a2030",
-        "$fg":       "#d0d8e8",
-        "$dim":      "#556070",
-        "$accent":   "#3d8fd4",
-        "$border":   "#253050",
-        "$green":    "#57e389",
-        "$amber":    "#f8e45c",
-        "$red":      "#e05c5c",
-    },
-    # ── Default Purple ────────────────────────────────────────────────────────
-    # Accent #9b59b6 — purple.
-    "default-purple": {
-        "$bg":       "#0e0d14",
-        "$block-bg": "#17151f",
-        "$title-bg": "#201c28",
-        "$fg":       "#dcd8e8",
-        "$dim":      "#60587a",
-        "$accent":   "#9b59b6",
-        "$border":   "#302845",
-        "$green":    "#57e389",
-        "$amber":    "#f8e45c",
-        "$red":      "#e05c5c",
-    },
-    # ── Default Red ───────────────────────────────────────────────────────────
-    # Accent #cc3333 — red.
-    "default-red": {
-        "$bg":       "#130e0e",
-        "$block-bg": "#1e1414",
-        "$title-bg": "#261818",
-        "$fg":       "#e8d8d8",
-        "$dim":      "#7a5858",
-        "$accent":   "#cc3333",
-        "$border":   "#3d2020",
-        "$green":    "#57e389",
-        "$amber":    "#f8e45c",
-        "$red":      "#e05c5c",
-    },
-    # ── Default Yellow ────────────────────────────────────────────────────────
-    # Accent #d4a017 — yellow.
-    "default-yellow": {
-        "$bg":       "#110f08",
-        "$block-bg": "#1a1810",
-        "$title-bg": "#231f14",
-        "$fg":       "#ede8d4",
-        "$dim":      "#7a7050",
-        "$accent":   "#d4a017",
-        "$border":   "#3a3018",
-        "$green":    "#57e389",
-        "$amber":    "#f8e45c",
-        "$red":      "#e05c5c",
-    },
-    "default-light": {
-        "$bg":       "#f0f2f5",
-        "$block-bg": "#ffffff",
-        "$title-bg": "#e4e8f0",
-        "$fg":       "#1a1e28",
-        "$dim":      "#888ea0",
-        "$accent":   "#005faa",
-        "$border":   "#c8cdd8",
-        "$green":    "#1a7a3a",
-        "$amber":    "#b07000",
-        "$red":      "#cc2222",
-    },
-}
-_PALETTES["default-dark"] = _PALETTES["default"]
+from core.palette import PALETTES as _PALETTES  # noqa: E402
 
 
 def _load_custom_palette(css_path) -> dict | None:
     """Parse a custom theme CSS file and extract a TUI palette dict."""
-    import re as _re
-    try:
-        block_m = _re.search(r":root\s*\{([^}]+)\}", css_path.read_text(encoding="utf-8"), _re.DOTALL)
-        if not block_m:
-            return None
-        block = block_m.group(1)
-        def _v(name, default=""):
-            m = _re.search(rf"--{name}\s*:\s*([^;]+);", block)
-            return m.group(1).strip() if m else default
-        return {
-            "$bg":       _v("bg-deep",  "#0d0f12"),
-            "$block-bg": _v("bg-mid",   "#161a1f"),
-            "$title-bg": _v("bg-panel", "#1c2128"),
-            "$fg":       _v("fg",       "#d8dce5"),
-            "$dim":      _v("fg-dim",   "#606878"),
-            "$accent":   _v("accent",   "#aaaaaa"),
-            "$border":   _v("border",   "#2a3040"),
-            "$green":    _v("green",    "#57e389"),
-            "$amber":    _v("amber",    "#f8e45c"),
-            "$red":      _v("red",      "#e05c5c"),
-        }
-    except Exception:
-        return None
+    from core.palette import load_custom_palette
+    return load_custom_palette(css_path)
 
 
 def list_custom_themes() -> list[tuple[str, str]]:
     """Return [(theme_id, stem)] for .css files in themes/custom/."""
-    try:
-        from pathlib import Path as _P
-        custom_dir = _P(__file__).parents[1] / "themes" / "custom"
-        return [
-            (f"custom/{f.stem}", f.stem)
-            for f in sorted(custom_dir.glob("*.css"))
-        ]
-    except Exception:
-        return []
+    from core.palette import list_custom_themes as _lct
+    return _lct()
 
 
 def build_css(theme_name: str) -> str:

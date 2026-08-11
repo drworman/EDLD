@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-edld.py — ED Linux Dash — entry point
+edld.py — ED Live Dashboard — entry point
 
 All business logic lives in the packages below:
   core/       — state, config, emit, journal loop, plugin loader, shared API
@@ -42,11 +42,54 @@ parser.add_argument("-t", "--test", action="store_true", default=None,
                     help="Re-route Discord output to terminal instead of webhook")
 parser.add_argument("-d", "--trace", action="store_true", default=None,
                     help="Print verbose debug/trace output")
-parser.add_argument("--mode", choices=["terminal", "textual"],
+parser.add_argument("--mode", choices=["terminal", "textual", "gui"],
                     default=None, metavar="MODE",
-                    help="UI mode: textual (default) | terminal")
+                    help="UI mode: textual (default) | terminal | gui")
+
+# Convenience flags.  --tui and --gui are the two dashboards; --terminal is
+# the scrolling event log.  They are mutually exclusive with each other and
+# are equivalent to the matching --mode value, which stays supported because
+# it is what existing scripts and desktop entries already pass.
+_mode_group = parser.add_mutually_exclusive_group()
+_mode_group.add_argument("--tui", dest="mode_flag", action="store_const",
+                         const="textual",
+                         help="Terminal dashboard (default)")
+_mode_group.add_argument("--gui", dest="mode_flag", action="store_const",
+                         const="gui",
+                         help="Desktop window (PySide6)")
+_mode_group.add_argument("--terminal", dest="mode_flag", action="store_const",
+                         const="terminal",
+                         help="Scrolling terminal event log")
+
+parser.add_argument("--version", action="store_true",
+                    help="Print the version and exit")
 
 args = parser.parse_args()
+
+# ── Windows: reconnect stdout before anything prints ──────────────────────────
+# The Windows binary is built windowed so the GUI has no console behind it,
+# which leaves stdout unusable until this runs.  A no-op everywhere else.
+try:
+    from core.win_console import enable_console_output
+    enable_console_output()
+except Exception:
+    pass
+
+# --version answers before any config, journal or plugin work, so it succeeds
+# on a machine that has never run Elite Dangerous.  The release workflow uses
+# it to prove the built artefact actually starts.
+if args.version:
+    print(VERSION)
+    sys.exit(0)
+
+# A convenience flag and an explicit --mode should not disagree silently.
+if args.mode_flag and args.mode and args.mode != args.mode_flag:
+    parser.error(
+        f"--mode {args.mode} conflicts with the --{args.mode_flag} flag; "
+        f"pass only one."
+    )
+if args.mode_flag and not args.mode:
+    args.mode = args.mode_flag
 
 
 
@@ -270,7 +313,7 @@ if _cfg_mode == "gtk4":
 
 if args.mode:
     ui_mode = args.mode
-elif _cfg_mode in ("terminal", "textual"):
+elif _cfg_mode in ("terminal", "textual", "gui"):
     ui_mode = _cfg_mode
 else:
     ui_mode = "textual"
@@ -325,10 +368,10 @@ _debug.install_exception_hooks()
 #   terminal — neither.  Scrolling event output to the terminal is the whole
 #             point of this mode.
 
-if ui_mode == "textual":
+if ui_mode in ("textual", "gui"):
     log_p = _debug.path()
     print(
-        f"{Terminal.GOOD}Launching textual{Terminal.END}"
+        f"{Terminal.GOOD}Launching {ui_mode}{Terminal.END}"
         + (f" — diagnostic logs: {log_p}" if log_p else "")
     )
     sys.stdout.flush()
@@ -422,7 +465,7 @@ if _update_notice:
     )
     if ui_mode == "terminal":
         print(_term_msg)
-    else:  # textual — surface it in the TUI's update-notice bar
+    else:  # textual / gui — surface it in the dashboard's notice bar
         gui_queue.put(("update_notice", ("release", _value)))
     emitter.set_update_notice(_value)
 
@@ -458,8 +501,52 @@ def run_monitor() -> None:
     )
 
 
+def _start_background_threads() -> tuple:
+    """Start the journal monitor and Status.json poller.
+
+    Both dashboards need these running before their event loop takes over the
+    main thread; the terminal mode runs the monitor in the foreground instead.
+    """
+    monitor_thread = threading.Thread(target=run_monitor, daemon=True)
+    monitor_thread.start()
+
+    status_thread = threading.Thread(
+        target=_poll_status_json,
+        args=(journal_dir, state, gui_queue),
+        daemon=True,
+    )
+    status_thread.start()
+    return monitor_thread, status_thread
+
+
 if __name__ == "__main__":
-    if ui_mode == "textual":
+    if ui_mode == "gui":
+        try:
+            from gui.app import run_gui
+        except ImportError as _gui_err:
+            import traceback as _tb
+            # stdout is /dev/null by this point in GUI mode, so the message
+            # has to go to the debug log as well as the (silenced) terminal.
+            _msg = (
+                f"PySide6 GUI import failed: {_gui_err}\n"
+                f"Traceback:\n{_tb.format_exc()}\n"
+                f"If PySide6 is missing: pip install PySide6"
+            )
+            _debug.log(_msg, level="ERROR")
+            # sys.stderr is /dev/null in GUI mode; sys.__stderr__ is the
+            # real one, so this is the only way the user sees the failure.
+            try:
+                sys.__stderr__.write(f"ERROR: {_msg}\n")
+            except Exception:
+                pass
+            sys.exit(1)
+
+        _gui_theme = mgr.ui_cfg.get("Theme", "default")
+        _start_background_threads()
+        sys.exit(run_gui(core, PROGRAM, VERSION, AUTHOR, GITHUB_REPO,
+                         theme=_gui_theme))
+
+    elif ui_mode == "textual":
         try:
             from tui.app import run_tui
         except ImportError as _tui_err:
@@ -478,15 +565,7 @@ if __name__ == "__main__":
         # this point sys.stdout/sys.stderr are already routed to /dev/null
         # in textual mode.  Just start the monitor + the TUI.
 
-        monitor_thread = threading.Thread(target=run_monitor, daemon=True)
-        monitor_thread.start()
-
-        status_thread = threading.Thread(
-            target=_poll_status_json,
-            args=(journal_dir, state, gui_queue),
-            daemon=True,
-        )
-        status_thread.start()
+        _start_background_threads()
 
         run_tui(core, PROGRAM, VERSION, theme=_tui_theme)
 

@@ -18,7 +18,7 @@ from pathlib import Path
 
 # ── Program identity ──────────────────────────────────────────────────────────
 
-PROGRAM = "ED Linux Dash"
+PROGRAM = "ED Live Dashboard"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR HUGH JASSOLE"
 VERSION = (Path(__file__).parent / "version").read_text().strip()

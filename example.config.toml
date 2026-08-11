@@ -1,5 +1,5 @@
 # ==============================================================================
-# ED Monitor Daemon (EDLD) - config.toml
+# ED Live Dashboard (EDLD) - config.toml
 # ==============================================================================
 #
 # HOT-RELOAD: EDLD monitors this file for changes while running.
@@ -121,11 +121,15 @@ PeriodicCredits  = 2   # Credits earned in the quarter-hour summary
 PeriodicMerits   = 2   # Merits earned in the quarter-hour summary (powerplay only)
 
 # ── UI ───────────────────────────────────────────────────────────────────────
-# The EDLD dashboard (Textual TUI).
+# The EDLD dashboard.  Three interfaces over the same windows and data:
+#   textual   terminal dashboard (default)
+#   gui       desktop window (needs PySide6)
+#   terminal  plain scrolling output
 #
 [UI]
-Mode       = "textual"         # textual (default) | terminal
-                               # CLI: --mode textual | terminal
+Mode       = "textual"         # textual (default) | terminal | gui
+                               # CLI: --tui | --gui | --terminal
+                               # (or the older --mode textual|terminal|gui)
 Theme      = "default"         # built-in: "default", "default-dark",
                                #           "default-light", "default-blue",
                                #           "default-green", "default-purple",

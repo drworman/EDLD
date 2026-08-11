@@ -128,13 +128,13 @@ class Emitter:
         self._discord_up   = True
 
         if dc.get("Identity"):
-            self._discord_hook.username   = "ED Linux Dash"
+            self._discord_hook.username   = "ED Live Dashboard"
             self._discord_hook.avatar_url = AVATAR_URL
 
     def _restore_identity(self) -> None:
         dc = self._cfg.discord_cfg
         if dc.get("Identity") and self._discord_hook:
-            self._discord_hook.username   = "ED Linux Dash"
+            self._discord_hook.username   = "ED Live Dashboard"
             self._discord_hook.avatar_url = AVATAR_URL
 
     def _post(self, message: str) -> None:
@@ -214,7 +214,7 @@ class Emitter:
                 upd_hook = DiscordWebhook(
                     url=dc.get("WebhookURL", ""),
                     content=content,
-                    username="ED Linux Dash" if dc.get("Identity") else None,
+                    username="ED Live Dashboard" if dc.get("Identity") else None,
                     avatar_url=AVATAR_URL if dc.get("Identity") else None,
                 )
                 upd_hook.execute()

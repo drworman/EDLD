@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # EDLD — install.sh
-# Linux installer for ED Monitor Daemon
+# Linux installer for ED Live Dashboard
 # https://github.com/drworman/EDLD
 # =============================================================================
 
@@ -21,7 +21,7 @@ fail()    { echo -e "${RED}[ FAIL ]${NC} $*"; exit 1; }
 section() { echo -e "\n${WHT}── $* ──${NC}"; }
 
 # ── Banner ────────────────────────────────────────────────────────────────────
-echo -e "${WHT}  ED Monitor Daemon — Linux Installer${NC}"
+echo -e "${WHT}  ED Live Dashboard — Linux Installer${NC}"
 echo    "  https://github.com/drworman/EDLD"
 echo
 
@@ -126,7 +126,42 @@ section "Installing pip packages"
 # We check if they are already importable first so we never error
 # on "already satisfied" — which some pip versions treat as success
 # but external-package guards can still block.
-for PKG in "discord-webhook>=1.3.0:discord_webhook" "cryptography>=41.0.0:cryptography" "textual>=0.47.0:textual"; do
+#
+# Textual drives the terminal dashboard (--tui, the default). PySide6 drives
+# the desktop window (--gui) and is by far the largest download here, so it is
+# offered rather than assumed: a headless box or a remote-SSH setup has no use
+# for it, and the terminal interfaces work perfectly without it.
+PIP_PACKAGES=(
+    "discord-webhook>=1.3.0:discord_webhook"
+    "cryptography>=41.0.0:cryptography"
+    "textual>=0.47.0:textual"
+)
+
+INSTALL_GUI="no"
+if $PYTHON -c "import PySide6" &>/dev/null 2>&1; then
+    ok "PySide6 already installed — desktop interface (--gui) available"
+elif [ "${EDLD_INSTALL_GUI:-}" = "yes" ]; then
+    INSTALL_GUI="yes"
+elif [ "${EDLD_INSTALL_GUI:-}" = "no" ]; then
+    info "Skipping PySide6 (EDLD_INSTALL_GUI=no) — terminal interfaces only"
+elif [ -t 0 ]; then
+    echo
+    echo -e "  ${WHT}Desktop interface (--gui)${NC}"
+    echo    "  Adds a PySide6 desktop window alongside the terminal dashboard."
+    echo    "  This is a large download (~100 MB) and is not needed if you only"
+    echo    "  ever use the terminal interfaces."
+    read -r -p "  Install PySide6 for the desktop interface? [y/N] " _reply
+    case "$_reply" in [Yy]*) INSTALL_GUI="yes" ;; *) INSTALL_GUI="no" ;; esac
+else
+    info "Non-interactive shell — skipping PySide6."
+    info "Set EDLD_INSTALL_GUI=yes to install the desktop interface."
+fi
+
+if [ "$INSTALL_GUI" = "yes" ]; then
+    PIP_PACKAGES+=("PySide6>=6.6.0:PySide6")
+fi
+
+for PKG in "${PIP_PACKAGES[@]}"; do
     PKG_SPEC="${PKG%%:*}"   # e.g. "discord-webhook>=1.3.0"
     PKG_IMPORT="${PKG##*:}" # e.g. "discord_webhook"
     PKG_NAME="${PKG_SPEC%%[>=]*}"
@@ -186,11 +221,14 @@ section "Installation complete"
 echo
 echo -e "  ${GRN}EDLD is ready to run.${NC}"
 echo
-echo -e "  ${WHT}Dashboard (Textual TUI — default):${NC}"
-echo -e "    ./edld.py"
+echo -e "  ${WHT}Terminal dashboard (default):${NC}"
+echo -e "    ./edld.py            ${CYN}# or --tui${NC}"
+echo
+echo -e "  ${WHT}Desktop window:${NC}"
+echo -e "    ./edld.py --gui"
 echo
 echo -e "  ${WHT}Plain terminal output:${NC}"
-echo -e "    ./edld.py --mode terminal"
+echo -e "    ./edld.py --terminal ${CYN}# or --mode terminal${NC}"
 echo
 
 echo -e "  ${WHT}With a config profile:${NC}"

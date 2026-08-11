@@ -117,7 +117,7 @@ _COLUMN_DOM = {"A": "col-left", "B": "col-centre", "C": "col-right"}
 
 # ── Main app ──────────────────────────────────────────────────────────────────
 
-class EdmdTui(App):
+class EdldTui(App):
     """EDLD Textual dashboard."""
 
     BINDINGS = [
@@ -304,5 +304,5 @@ class EdmdTui(App):
 
 def run_tui(core: "CoreAPI", program: str, version: str, theme: str = "default") -> None:
     """Entry point: build and run the Textual app synchronously."""
-    app = EdmdTui(core, program, version, theme=theme)
+    app = EdldTui(core, program, version, theme=theme)
     app.run()

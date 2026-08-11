@@ -1459,7 +1459,7 @@ def monitor_journal(
                     inline=False,
                 )
             from core.state import VERSION
-            embed.set_footer(text=f"ED Linux Dash v{VERSION}")
+            embed.set_footer(text=f"ED Live Dashboard v{VERSION}")
             embed.set_timestamp()
             emitter.post_embed(embed)
         except ImportError:

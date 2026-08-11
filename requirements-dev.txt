@@ -1,0 +1,13 @@
+# Build and development requirements for EDLD.
+#
+# Everything in requirements.txt, plus the tooling needed to produce the
+# release binaries.  The release workflow installs this file.
+
+-r requirements.txt
+
+# Packaging.  GPL 2.0 with the bootloader exception — a build tool only, never
+# shipped inside an artefact.  See docs/LICENSING.md.
+pyinstaller>=6.3.0
+
+# Icon generation (scripts/generate_icons.py).
+Pillow>=10.0.0
