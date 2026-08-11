@@ -36,11 +36,19 @@ pyinstaller packaging/edld.spec --noconfirm --clean
 The artefact lands in `dist/` — `dist/EDLD` on Linux, `dist/EDLD.exe` on
 Windows, `dist/EDLD.app` on macOS.
 
-Verify it starts:
+Verify it starts, and that both interfaces load:
 
 ```sh
 ./dist/EDLD --version     # should print the contents of core/version
+./dist/EDLD --selftest    # imports each front end and reports
 ```
+
+Both matter. `--version` proves the process starts; `--selftest` proves the
+interfaces are actually intact. A packaged build can start perfectly and still
+be missing a module that only fails when the dashboard is drawn — Textual
+resolves its widgets through a runtime `__getattr__`, which static analysis
+cannot follow, so this has happened. The release workflow runs both on every
+platform.
 
 ### Linux runtime libraries
 
@@ -76,6 +84,25 @@ libraries as visibly separate files, build with `-D`:
 pyinstaller packaging/edld.spec --noconfirm --clean -D
 ```
 
+## What the bundle carries beyond the code
+
+Three things are shipped as data because the code alone is not enough:
+
+- **`components/`** — the component sources, in addition to being compiled in.
+  `core/plugin_loader.py` discovers components by globbing that directory and
+  loads each by file path, giving every one its own namespace and a sandboxed
+  `open()`. That needs real files on disk, which a one-file build does not
+  otherwise have.
+- **A CA bundle** (`certifi`) — a frozen binary carries its own OpenSSL, built
+  with the build machine's certificate paths compiled in. Those paths rarely
+  exist on the target machine, so without a bundled store every HTTPS call
+  fails verification and CAPI, EDDN, EDSM, EDAstro, Inara and Spansh all stop
+  working with no visible error. `core/certs.py` points OpenSSL at the bundled
+  copy at startup.
+- **`licenses/`** — required to accompany the binary by LGPLv3 section 4(b).
+
+Each has already been the cause of a build that looked fine and was not.
+
 ## Why the spec lists so many hidden imports
 
 `core/plugin_loader.py` discovers components by walking `components/` at
@@ -88,17 +115,26 @@ A component missing from that list produces a binary that builds cleanly, starts
 cleanly, and shows an empty dashboard. That failure mode is the reason the
 release workflow smoke-tests every artefact before publishing it.
 
+Textual is collected wholesale for the same reason from the other direction:
+`textual.widgets` imports lazily by a name built at runtime, so nothing static
+analysis can see refers to most of its widgets.
+
 ## Releases
 
 Tag with a bare `YYYYMMDD` datestamp matching `core/version`:
 
 ```sh
-echo 20260810 > core/version
-git commit -am "Release 20260810"
-git tag 20260810
+echo 20260811 > core/version
+git commit -am "Release 20260811"
+git tag 20260811
 git push origin main --tags
 ```
 
-The `Release` workflow verifies the tag matches the version file, builds and
-smoke-tests binaries for Linux, Windows and macOS, signs the source tarball, and
-publishes everything with checksums.
+The `Release` workflow checks the tag matches the version file, verifies the
+checkout contains everything the build needs, then builds and smoke-tests
+binaries for Linux, Windows and macOS, signs the artefacts, and publishes a
+release with notes taken from `CHANGELOG.md` and checksums attached.
+
+A version with a suffix — `20260811-rc1` — is published as a prerelease. To
+build everything without publishing, run the workflow manually from the Actions
+tab with `dry_run` left on.

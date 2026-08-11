@@ -19,10 +19,14 @@ proprietary. Keep the copyright notice.
 | Rich | MIT | yes |
 | discord-webhook | MIT | yes |
 | cryptography | Apache 2.0 | yes |
-| psutil | BSD 3-Clause | only when installed |
+| psutil | BSD 3-Clause | yes |
+| certifi | MPL 2.0 | yes — CA bundle, shipped unmodified as data |
 | PyInstaller | GPL 2.0 with bootloader exception | build tool only, not shipped |
 
-Only PySide6 constrains how EDLD is packaged.
+Only PySide6 constrains how EDLD is packaged. certifi is MPL 2.0, whose
+copyleft is file-level: it attaches to the covered files, not to a work that
+ships alongside them, and the bundle is included unmodified as data. It places
+no condition on EDLD's own licence.
 
 ## Why PySide6 and not PyQt
 

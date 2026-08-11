@@ -53,8 +53,9 @@ Fuel quits are suppressed while in supercruise and for `QuitFuelSCGraceSeconds` 
 
 You can arm or disarm session management on the fly without editing config:
 
-- **Ctrl+K** toggles it for the current run. This is a runtime override on top of the config master switch — useful for temporarily disabling termination without changing your saved settings.
-- The header shows a small status indicator: **✕** when armed (master enabled *and* the runtime toggle on), **□** when idle. If either the config master switch is off or you have toggled it off with Ctrl+K, it reads idle.
+- **Ctrl+K** toggles it for the current run. This is a runtime override on top of the config master switch — useful for temporarily disabling termination without changing your saved settings. In the desktop window it is also on the Session menu, alongside **Ctrl+T** to end the session immediately.
+- The header shows a small status indicator: **✕** when armed (master enabled *and* the runtime toggle on), **□** when idle. If either the config master switch is off or you have toggled it off with Ctrl+K, it reads idle. The desktop window shows the same indicator in its title bar.
+- Session management needs **psutil** in order to find and stop the game process. Prebuilt binaries bundle it. Running from source without it, EDLD still starts and everything else works, but this feature reports that psutil is missing rather than acting. Install it with your distro package manager (`python-psutil` / `python3-psutil`), not pip.
 
 The runtime toggle resets to armed on the next start; the config master switch is the persistent setting.
 

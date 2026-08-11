@@ -134,6 +134,9 @@ If no config file is found on startup, EDLD creates one with safe defaults and p
 | `textual>=0.47` | Terminal dashboard (`--tui`) | pip |
 | `PySide6>=6.6` | Desktop window (`--gui`) — optional | pip |
 
+Prebuilt binaries bundle all of the above, including psutil and a CA
+certificate bundle, so they have no external requirements at all.
+
 > **Do not install `psutil` via pip on Linux.** It has C extensions that require system libraries only available through the distro package manager.
 
 ---
@@ -141,9 +144,28 @@ If no config file is found on startup, EDLD creates one with safe defaults and p
 ## Verifying a Linux install
 
 ```bash
-python3 -c "import psutil, discord_webhook, cryptography, textual; print('Core dependencies OK')"
-python3 -c "import PySide6; print('Desktop interface OK')"   # only if you want --gui
+./edld.py --selftest
 ```
+
+That reports on each interface directly:
+
+```
+EDLD 20260811 selftest
+  OK    terminal dashboard (--tui)
+  OK    desktop window (--gui)
+```
+
+A `FAIL` line names the missing piece. To check the individual packages
+instead:
+
+```bash
+python3 -c "import discord_webhook, cryptography, textual; print('Core OK')"
+python3 -c "import psutil;  print('psutil OK')"    # game-process detection
+python3 -c "import PySide6; print('Desktop OK')"   # only if you want --gui
+```
+
+EDLD starts and runs without psutil, but it cannot detect whether the game is
+running and session management is unavailable.
 
 ---
 

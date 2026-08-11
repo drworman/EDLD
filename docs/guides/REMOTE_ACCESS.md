@@ -1,5 +1,9 @@
 # Remote Access — EDLD on a Second Machine
 
+> Since 20260811 the dashboard machine can run either interface — the terminal
+> dashboard over SSH, or the desktop window (`--gui`) if it has a display. The
+> setup below is unchanged either way; only the launch flag differs.
+
 This guide explains how to run EDLD's dashboard on a secondary machine
 (e.g. a laptop) while the game runs on your main machine. The game machine handles
 all monitoring, Discord notifications, and session control logic. The secondary machine

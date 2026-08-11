@@ -1,9 +1,14 @@
 # EDLD Theming
 
-The EDLD dashboard (Textual TUI) ships eight built-in colour themes and supports
-user-defined custom themes.  A theme is just a palette — a small set of colour
-values.  All structural rules (layout, spacing, borders) are fixed in the UI and
-are not part of a theme, so switching themes only changes colours.
+EDLD ships eight built-in colour themes and supports user-defined custom
+themes.  A theme is just a palette — a small set of colour values.  All
+structural rules (layout, spacing, borders) are fixed in the UI and are not
+part of a theme, so switching themes only changes colours.
+
+Themes apply to **both** interfaces.  The palettes live in `core/palette.py`,
+which the terminal dashboard turns into Textual CSS and the desktop window
+turns into a Qt stylesheet, so a theme is defined once and appears in both.
+Custom themes work the same way in each.
 
 ---
 
@@ -50,7 +55,9 @@ variables.  To create one:
    ```
 
 2. Edit the colour values in the `:root { }` block of
-   `themes/custom/my-theme.css`.  The recognised variables are:
+   `themes/custom/my-theme.css`.  Both interfaces read the same file, so there
+   is nothing further to do for the desktop window.  The recognised variables
+   are:
 
    | Variable | Purpose |
    |----------|---------|

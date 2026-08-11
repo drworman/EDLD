@@ -4,6 +4,20 @@ Last updated: 20260613
 
 ---
 
+## Recently shipped
+
+**Cross-platform desktop interface** (20260811) — a PySide6 window rendering
+the same dashboard as the terminal interface, with prebuilt binaries for Linux,
+Windows and macOS. This is what prompted the rename from ED Linux Dash to ED
+Live Dashboard. See the changelog for the full entry.
+
+Worth noting for anyone picking up work here: both front ends are rendered from
+one layout model and one set of components, so a new dashboard window should be
+added to both rather than to whichever is convenient. `core/summary_model.py`
+and `core/palette.py` exist for the same reason.
+
+---
+
 ## Deferred
 
 ### Exploration / Exobiology module split

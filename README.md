@@ -69,15 +69,15 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | 🔐 **CAPI Authentication** | OAuth2 to Frontier's Companion API for authoritative fleet roster, market prices, fleet carrier finance, and squadron identity |
 | 🌐 **Data Contributions** | Opt-in journal uploading to EDDN, EDSM, EDAstro, and Inara |
 | 🏗️ **Colonisation Tracking** | Construction site resource requirements, delivery progress, and Raven Colonial integration (experimental) |
-| 🎨 **Themes** | Eight built-in colour themes (default-orange, green, blue, purple, red, yellow, dark, light) plus a documented template for custom themes |
+| 🎨 **Themes** | Eight built-in colour themes (default-orange, green, blue, purple, red, yellow, dark, light) plus a documented template for custom themes — all render in both the terminal and desktop interfaces |
 | 🔌 **Plugin Architecture** | Three-tier plugin loader with per-commander data isolation, named config profiles, plugins dialog with enable/disable controls, and a `plugins/` directory for user plugins |
 | 📚 **Native Documentation Viewer** | In-app viewer for all bundled documentation |
-| 🔍 **Search Modals** | Searchable pickers for home location and Spansh target market |
+| 🔍 **Search Modals** | Searchable pickers for home location and Spansh target market, in both interfaces |
 | 🔔 **Update Notifier** | Background check for new tagged releases on GitHub; notice surfaced in the terminal, the TUI, and the desktop window |
 
 <div align="center">
-<img src="images/tui-screenshot.png" alt="EDLD Textual TUI" width="900"/>
-<br><em>Textual TUI — default theme, live session in progress</em>
+<img src="images/tui-screenshot.png" alt="EDLD terminal dashboard" width="900"/>
+<br><em>Terminal dashboard (<code>--tui</code>) — default theme, live session in progress</em>
 </div>
 
 ---
@@ -122,7 +122,10 @@ install is required; everything is bundled.
 
 The Windows and macOS builds start the desktop window by default. The terminal
 interfaces are still there if you run the executable from a shell with `--tui`
-or `--terminal`.
+or `--terminal`, and `--selftest` reports whether each one loads.
+
+Verify a download against the release's `.sha256` file — see
+[docs/SIGNING.md](docs/SIGNING.md).
 
 ---
 
@@ -137,7 +140,7 @@ bash install.sh
 ./edld.py --gui              # desktop window
 ./edld.py --terminal         # plain scrolling output
 ./edld.py -p MyProfile       # named config profile
-./edld.py --version          # print version and exit
+./edld.py --selftest         # check both interfaces load
 ```
 
 `--tui`, `--gui` and `--terminal` are the three interfaces. The older

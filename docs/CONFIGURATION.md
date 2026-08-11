@@ -43,8 +43,13 @@
 
 | Key | Default | Hot | Description |
 |-----|---------|:---:|-------------|
-| `Mode` | `"textual"` | ❌ | UI mode: `textual` (TUI dashboard, default) or `terminal` (plain output) |
+| `Mode` | `"textual"` | ❌ | Interface: `textual` (terminal dashboard, default), `gui` (desktop window), or `terminal` (plain scrolling output) |
 | `Theme` | `"default"` | ❌ | Theme name — changing this in Preferences triggers an automatic restart |
+
+All three interfaces render the same windows from the same components and share
+one config, one set of per-commander data, and one window layout, so you can
+switch between them freely. `gui` requires PySide6; see
+[INSTALL.md](../INSTALL.md).
 
 ---
 
@@ -86,7 +91,8 @@ All entries are hot-reloadable. Controls terminal, Discord, and dashboard output
 ## Command Line Arguments
 
 ```
-python edld.py [-p PROFILE] [-g] [-t] [-d] [--mode MODE] [--log-file PATH]
+python edld.py [-p PROFILE] [-t] [-d] [--tui | --gui | --terminal]
+               [--mode MODE] [--log-file PATH] [--version] [--selftest]
 ```
 
 | Flag | Description |
@@ -94,10 +100,40 @@ python edld.py [-p PROFILE] [-g] [-t] [-d] [--mode MODE] [--log-file PATH]
 | `-p`, `--config_profile` | Load a named config profile |
 | `-t`, `--test` | Re-route Discord output to terminal instead of sending to webhook |
 | `-d`, `--trace` | Print verbose debug and trace output to terminal |
-| `--mode MODE` | UI mode: `textual` (default) or `terminal` |
+| `--tui` | Terminal dashboard (the default) |
+| `--gui` | Desktop window — requires PySide6 |
+| `--terminal` | Plain scrolling event output |
+| `--mode MODE` | Older form of the above: `textual`, `gui`, or `terminal` |
 | `--log-file PATH` | Tee all terminal output to PATH |
+| `--version` | Print the version and exit |
+| `--selftest` | Report whether each interface can be loaded, then exit |
 
-When a new release is available on GitHub, EDLD displays a notification at startup (terminal) or in the title bar (TUI). Updating is performed manually — pull the new source from the [releases page](https://github.com/drworman/EDLD/releases) and re-run `install.sh`.
+The three interface flags are mutually exclusive, and passing one alongside a
+conflicting `--mode` is an error rather than a silent resolution.
+
+`--version` and `--selftest` both answer before any config, journal or
+component work, so they run on a machine that has never started the game. The
+release workflow uses them to verify each published binary.
+
+### Environment variables
+
+| Variable | Effect |
+|----------|--------|
+| `EDLD_KEEP_STDERR=1` | Keep stdout and stderr attached in `--tui` and `--gui` |
+| `SSL_CERT_FILE` | Override the CA bundle used for HTTPS verification |
+| `EDLD_INSTALL_GUI=yes\|no` | Answer `install.sh`'s PySide6 prompt ahead of time |
+
+The dashboards normally route stdout and stderr to `/dev/null` so terminal
+noise cannot corrupt the display. A startup failure is recorded in the
+diagnostic log regardless; `EDLD_KEEP_STDERR=1` is for the rarer case where
+something fails before the log exists.
+
+Packaged builds ship their own CA bundle, because a frozen binary's OpenSSL
+looks for certificates where the build machine kept them. `SSL_CERT_FILE` is
+respected if you set it — point it at your own root if you are behind a
+TLS-inspecting proxy. The startup log records which store is in use.
+
+When a new release is available on GitHub, EDLD displays a notification at startup (terminal), in the title bar (terminal dashboard), or in a bar below the menu (desktop window). Updating is manual — take the new source or binary from the [releases page](https://github.com/drworman/EDLD/releases), and re-run `install.sh` if you run from source.
 
 ---
 

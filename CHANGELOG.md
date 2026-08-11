@@ -1,98 +1,181 @@
 # EDLD CHANGELOG
 
-Last updated: 20260810
+Last updated: 20260811
 
 ---
 
-## Released in 20260810
+## Released in 20260811
+
+The headline change is that EDLD is cross-platform again, with a desktop
+interface alongside the terminal one and prebuilt binaries for Linux, Windows
+and macOS.  Because the project no longer runs only on Linux, it has been
+renamed.
 
 ### Renamed: ED Linux Dash is now ED Live Dashboard
 
-EDLD runs on Linux, Windows and macOS as of this release, so "Linux" in the
-name had become wrong.  The acronym, the GitHub repository, the data
-directory at `~/.local/share/EDLD/` and every config key are unchanged, so
-there is nothing to migrate — existing installs pick the new name up and
-carry on with the same config, the same per-commander data and the same
-window layout.
+"Linux" in the name had become wrong.  The acronym, the GitHub repository, the
+data directory at `~/.local/share/EDLD/` and every config key are unchanged,
+so there is nothing to migrate — existing installs pick the new name up and
+carry on with the same config, the same per-commander data and the same window
+layout.
 
 ### New: desktop interface (`--gui`)
 
 A PySide6 desktop window rendering the same dashboard as the terminal
-interface.  It is built from the same layout model and the same components,
-so the two show the same windows in the same positions with the same data;
+interface.  It is built from the same layout model and the same components, so
+the two show the same windows in the same positions with the same data;
 Preferences → Display drives both.
 
 All fourteen windows are present — Career, Session, Ship Health, Commander,
 Crew/SLF, Alerts, Cargo, Missions, Navigation, Colonisation, Exploration,
 Exobiology, Assets and Engineering — along with the preferences dialog, the
 home-location and target-market search pickers, the update notice and the
-session-management controls.  Columns are draggable splitters, initially
-sized from the layout model's own proportions.  Window controls are the
-platform's own: minimise, maximise, snap, tiling and the close button all
-behave as the desktop expects, on all three operating systems.
+session-management controls.  Columns are draggable splitters, initially sized
+from the layout model's own proportions.  Window controls are the platform's
+own: minimise, maximise, snap, tiling and the close button all behave as the
+desktop expects, on all three operating systems.
+
+All eight themes render in both front ends, custom themes included; the
+palettes moved to `core/palette.py` so a theme added once appears in both.
 
 The terminal dashboard remains the default.  Nothing about it changed.
 
-### New: `--tui`, `--gui` and `--terminal` flags
+### New: `--tui`, `--gui` and `--terminal`
 
 The three interfaces now have flags of their own.  `--mode textual|terminal|gui`
 still works and means the same thing; passing both a flag and a conflicting
-`--mode` is an error rather than a silent resolution.
+`--mode` is an error rather than a silent resolution.  `UI.Mode` in
+`config.toml` accepts `gui` as well.
 
-`--version` prints the version and exits before touching config, journals or
-components, so it answers on a machine that has never run Elite Dangerous.
+Two diagnostic flags are new:
+
+- `--version` prints the version and exits before touching config, journals or
+  components, so it answers on a machine that has never run Elite Dangerous.
+- `--selftest` imports both front ends and reports on each.  A packaged build
+  can start cleanly and still be missing a lazily-imported module that only
+  fails when the dashboard is drawn; this turns that into something the
+  release workflow can catch on every platform.
 
 ### New: cross-platform binaries
 
-The release workflow now builds single-file binaries for Linux, Windows and
-macOS alongside the source tarball it has always published, with optional
-code signing and macOS notarisation that skip cleanly when the secrets are
-absent.  Windows and macOS users no longer need a Python install.
+The release workflow builds single-file binaries for Linux, Windows and macOS
+alongside the source tarball, with optional code signing and macOS notarisation
+that skip cleanly when the secrets are absent.  Windows and macOS users no
+longer need a Python install.
 
-Every artefact is smoke-tested before publication.  This is not ceremony: a
-binary that cannot load its own components starts perfectly and shows an
-empty dashboard, which is indistinguishable from a working build until you
-notice no data ever arrives.
+Pushing a version tag now publishes the release itself: notes are taken from
+this changelog, artefacts and checksums are attached, and a version suffix such
+as `-rc1` marks it a prerelease.  A manual dry run builds everything without
+publishing.
 
-### Fixed: components did not load in a frozen build
+Every artefact is smoke-tested before publication.  This is not ceremony — a
+binary that cannot load its own components starts perfectly and shows an empty
+dashboard, which is indistinguishable from a working build until you notice no
+data ever arrives.
 
-`core/plugin_loader.py` discovers components by globbing `components/*.py`
-and loads each by file path, which gives every component its own module
-namespace and a sandboxed `open()`.  In a one-file PyInstaller build the
-sources live in the compiled archive rather than on disk, so the glob matched
-nothing and the dashboard came up with every window permanently empty.
+### Fixed: HTTPS failed in every packaged build
+
+A frozen binary carries its own OpenSSL, compiled with the *build* machine's
+certificate paths baked in.  Those paths do not exist on most target machines,
+so certificate verification failed for everything and every network feature
+stopped working at once — CAPI returned no profile, which is why the Commander
+window lost its squadron line and its ranks, and EDDN, EDSM, EDAstro, Inara and
+Spansh all went quiet.
+
+Nothing crashed, which is what made it hard to spot: each failure was a single
+unremarkable warning line and none of them said "none of this is going to
+work".
+
+Binaries now ship a CA bundle and point OpenSSL at it before anything opens a
+connection, leaving a deliberately-set `SSL_CERT_FILE` alone.  Startup records
+one line saying where verification will look, so the next report of "uploads
+stopped" is answered outright.
+
+### Fixed: components did not load in a packaged build
+
+`core/plugin_loader.py` discovers components by globbing `components/*.py` and
+loads each by file path, which gives every component its own module namespace
+and a sandboxed `open()`.  In a one-file build the sources live in the compiled
+archive rather than on disk, so the glob matched nothing and the dashboard came
+up with every window permanently empty.
 
 The component sources now ship as bundled data as well as compiled code, and
-the loader looks for them under `sys._MEIPASS` when frozen.  The loading
+the loader looks under the extraction directory when frozen.  The loading
 mechanism, including the sandbox, is unchanged.
+
+### Fixed: the terminal dashboard would not start in a packaged build
+
+`textual.widgets` resolves its widgets lazily through a module-level
+`__getattr__` that imports by a name built at runtime.  Static analysis cannot
+see through that, so the build bundled only the widgets something imported
+directly and dropped the rest; `--tui` then died at startup with
+`No module named 'textual.widgets._tab_pane'`.  All of Textual is now collected
+explicitly.
+
+### Fixed: a dashboard that failed to start said nothing
+
+`--tui` and `--gui` route stdout and stderr to `/dev/null` before components
+load, so terminal noise cannot corrupt the display.  Correct, but it also meant
+an exception during dashboard startup vanished: the process exited non-zero
+with no message anywhere, including the diagnostic log.
+
+Both launch paths now record a failure in the diagnostic log and on the real
+stderr, and `EDLD_KEEP_STDERR=1` leaves both streams attached for cases the log
+cannot reach.
+
+On Windows a startup crash was worse still: the windowed build rendered the
+traceback in a modal dialog and waited for a click, so a crash presented as a
+hang.  That dialog is disabled.
+
+### Fixed: missing psutil stopped EDLD from starting
+
+`core/journal.py` imported psutil at module scope, although the only use is one
+fallback process-name scan already wrapped in `try`/`except`.  Since psutil is
+documented as a distro-package install, a source install legitimately might not
+have it — and then EDLD would not start at all.  The import is now guarded in
+both `core/journal.py` and the session-management component, which reports the
+reason instead of disappearing.  Binaries bundle psutil, so nothing is lost
+there.
 
 ### Fixed: bracketed text was dropped from display strings
 
 The dashboard blocks build their display strings with console markup, and the
-Qt front end translates that markup into rich text.  Any bracketed token that
-named no known tag was being discarded — which silently ate squadron tags
-rendering as `[SOL]` and faction names of the form `[XYZ] Corporation`.
-Unrecognised bracketed tokens are now passed through as literal text.
+desktop front end translates that markup into rich text.  Any bracketed token
+that named no known tag was discarded — silently eating squadron tags rendering
+as `[SOL]` and faction names of the form `[XYZ] Corporation`.  Unrecognised
+bracketed tokens are now passed through as literal text.
+
+### Changed: Crew / SLF header
+
+A fighter's model and its variant are one designation — `GU-97 (Gelid G)` — and
+they now appear together, on the right of the header row, in both front ends.
+Previously the model sat on the header row and the variant was parked at the
+end of the combat-rank line, so neither line read as a complete answer to what
+the crew was flying.  The combat-rank line now shows only the rank.
 
 ### Licensing
 
-The desktop interface adds Qt, so the project now carries an LGPL v3
-obligation alongside its own MIT licence.  `docs/LICENSING.md` sets out how
-each condition of LGPLv3 section 4 is met, `THIRD-PARTY-NOTICES.md` lists
-every dependency, and the GPL and LGPL texts ship in `licenses/` inside every
-binary and every release archive.  `docs/BUILDING.md` covers building from
-source and relinking against your own Qt.
+The desktop interface adds Qt, so the project now carries an LGPL v3 obligation
+alongside its own MIT licence.  `docs/LICENSING.md` sets out how each condition
+of LGPLv3 section 4 is met, `THIRD-PARTY-NOTICES.md` lists every dependency,
+and the GPL and LGPL texts ship in `licenses/` inside every binary and every
+release archive.  `docs/BUILDING.md` covers building from source and relinking
+against your own Qt.
 
-Qt is never statically linked and UPX stays disabled; both matter for the
-above and both are enforced in `packaging/`.
+Qt is never statically linked and UPX stays disabled; both matter for the above
+and both are enforced in `packaging/`.
+
+The disclaimers and trademark notice have moved out of `LICENSE` and into the
+README, so the file is now the MIT text alone and GitHub detects the licence
+correctly again.
 
 ### Support links
 
-The desktop window carries a "Support EDLD Development" strip along the
-bottom with Patreon, Ko-fi and PayPal icons, and the same links appear in
-Help → About.  The destinations are read from `.github/FUNDING.yml` at
-runtime rather than hard-coded, so there is one place to change them.  The
-strip can be hidden from the View menu.
+The desktop window carries a "Support EDLD Development" strip along the bottom
+with Patreon, Ko-fi and PayPal icons, and the same links appear in Help →
+About.  The destinations are read from `.github/FUNDING.yml` at runtime rather
+than hard-coded, so there is one place to change them.  The strip can be hidden
+from the View menu.
 
 ---
 
