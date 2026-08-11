@@ -654,12 +654,63 @@ jobs:
           echo "----- release notes -----"
           cat release-notes.md
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-          body_path: release-notes.md
-          draft: false
+      # Published with the GitHub CLI rather than a third-party action.
+      # This repository restricts Actions to those owned by GitHub or by the
+      # repository owner, which rules out softprops/action-gh-release. `gh` is
+      # preinstalled on every hosted runner and does the same job, so this
+      # needs no change to the repository's Actions policy and adds no
+      # third-party dependency to the release path.
+      #
+      # Re-running a tag is normal here (a force-pushed tag rebuilds), so an
+      # existing release is updated in place rather than treated as an error.
+      - name: Publish the release
+        env:
+          # A release created with GITHUB_TOKEN does not raise a `release:
+          # published` event — GitHub suppresses it to stop workflows
+          # triggering each other in a loop. That is fine for this workflow,
+          # but it means discord-release-notify.yml never fires for an
+          # automatically published release.
+          #
+          # Setting a RELEASE_PAT secret (a fine-grained PAT with Contents:
+          # write on this repository) makes the event fire and the Discord
+          # notification work. Without it everything else behaves normally and
+          # only the notification is skipped, so the secret stays optional.
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.verify.outputs.version }}"
+
+          shopt -s nullglob
+          FILES=(artifacts/*)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::No artefacts to publish — the build jobs produced" \
+                 "nothing. Refusing to create an empty release."
+            exit 1
+          fi
+          echo "Publishing ${#FILES[@]} file(s) for ${VERSION}."
+
           # A suffix such as 20260810-rc1 marks a prerelease; a bare datestamp
           # is a full release.
-          prerelease: ${{ contains(needs.verify.outputs.version, '-') }}
-          fail_on_unmatched_files: true
+          FLAGS=()
+          case "$VERSION" in
+            *-*) FLAGS+=(--prerelease) ;;
+            *)   FLAGS+=(--latest) ;;
+          esac
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION exists — updating it."
+            gh release edit "$VERSION" \
+              --notes-file release-notes.md \
+              --draft=false \
+              "${FLAGS[@]}"
+            gh release upload "$VERSION" "${FILES[@]}" --clobber
+          else
+            echo "Creating release $VERSION."
+            gh release create "$VERSION" "${FILES[@]}" \
+              --title "EDLD $VERSION" \
+              --notes-file release-notes.md \
+              "${FLAGS[@]}"
+          fi
+
+          echo "Published: $(gh release view "$VERSION" --json url -q .url)"
