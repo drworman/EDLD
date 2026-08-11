@@ -159,6 +159,13 @@ HIDDEN_IMPORTS = (
         "tui.theme",
         # Optional at runtime; present when the user installed them.
         "discord_webhook",
+        # psutil is imported inside a try/except so a source install without it
+        # still runs. That makes it look optional to PyInstaller's static
+        # analysis, which may then leave it out of the bundle even when it is
+        # installed in the build environment. Naming it here is what guarantees
+        # the shipped binary keeps game-process detection and session
+        # management.
+        "psutil",
     ]
 )
 

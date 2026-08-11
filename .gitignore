@@ -28,6 +28,21 @@ dist/
 *.egg-info/
 *.egg
 
+# ── PyInstaller ───────────────────────────────────────────────────────────────
+# PyInstaller writes a .spec next to whatever it was pointed at, and those
+# generated files are throwaway — hence the original blanket rule.
+#
+# EDLD's spec is not generated. packaging/edld.spec is the hand-written build
+# definition the release workflow builds every binary from, and publishing it
+# is also how the LGPL relinking condition is met (see docs/LICENSING.md), so
+# it has to be tracked. A blanket *.spec swallows it silently: git says
+# nothing, `git add .` skips it, and the failure only surfaces in CI as
+# "Spec file not found".
+#
+# So: ignore stray specs anywhere, but keep the packaging ones.
+*.spec
+!packaging/*.spec
+
 # ── OS noise ──────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

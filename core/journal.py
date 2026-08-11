@@ -13,7 +13,18 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import psutil
+# psutil backs one defensive fallback below (scanning process names to decide
+# whether the game is running) and is otherwise unused here.  The call site is
+# already wrapped in try/except, so a missing psutil should degrade that single
+# check rather than stop EDLD from starting — which is what an unguarded import
+# at module scope would do, since this module is imported during startup.
+#
+# It is documented as a distro-package install because of its C extensions, so
+# a source install legitimately may not have it.
+try:
+    import psutil
+except ImportError:            # pragma: no cover - environment dependent
+    psutil = None
 
 from core.state import (
     EDLD_DATA_DIR,
@@ -76,6 +87,8 @@ def _ed_client_running(journal_dir: Path | None = None) -> bool:
             pass
 
     # Fallback: process name scan
+    if psutil is None:
+        return False
     try:
         for proc in psutil.process_iter(["name"]):
             if proc.info.get("name") in _ED_PROCESS_NAMES:

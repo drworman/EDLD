@@ -37,7 +37,15 @@ Remote kill (thin-client / remote profile mode):
 import subprocess as _sp
 import time
 
-import psutil
+# Session management genuinely needs psutil in order to find and stop the game
+# process, so a missing psutil disables this component rather than degrading it.
+# Raising here would abort the component load and be reported by the loader;
+# setting it to None instead lets the component load and report the reason
+# through its own status, which is the friendlier of the two.
+try:
+    import psutil
+except ImportError:            # pragma: no cover - environment dependent
+    psutil = None
 
 from core.plugin_loader import BasePlugin
 
@@ -72,6 +80,11 @@ _GAME_PATTERNS = [
 
 def _release_handle_local(pattern: str, description: str) -> None:
     """Kill the game process on the local machine using psutil."""
+    if psutil is None:
+        print("Session management needs psutil, which is not installed. "
+              "Install it with your distro package manager "
+              "(python-psutil / python3-psutil) and restart EDLD.")
+        return
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
             cmdline = proc.info.get("cmdline") or []

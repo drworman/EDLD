@@ -11,3 +11,12 @@ pyinstaller>=6.3.0
 
 # Icon generation (scripts/generate_icons.py).
 Pillow>=10.0.0
+
+# psutil is a distro-package install for people running from source, because of
+# its C extensions — which is why it is not in requirements.txt.  A frozen
+# binary has no distro packages to fall back on, so it has to be present in the
+# build environment for PyInstaller to bundle it, or the shipped binary loses
+# game-process detection and session management entirely.
+#
+# Wheels exist for all three release platforms, so pip is fine here.
+psutil>=5.9.0

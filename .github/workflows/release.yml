@@ -250,10 +250,26 @@ jobs:
 
       - name: Smoke-test the binary (Linux)
         if: runner.os == 'Linux'
+        # The binary is run first and its exit status captured, rather than
+        # substituting it straight into an assignment. Under `set -e` with
+        # pipefail, a crashing binary aborts the step at the assignment itself,
+        # so the traceback never reaches the log and the failure is reported as
+        # a bare "exit code 1" with nothing to go on.
         run: |
-          set -euo pipefail
+          set -uo pipefail
           chmod +x "dist/EDLD"
-          ACTUAL="$(xvfb-run -a ./dist/EDLD --version | tail -n1 | tr -d '[:space:]')"
+          set +e
+          OUTPUT="$(xvfb-run -a ./dist/EDLD --version 2>&1)"
+          RC=$?
+          set -e
+          echo "--- binary output (exit $RC) ---"
+          echo "$OUTPUT"
+          echo "--------------------------------"
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::Binary exited with status $RC. Output above."
+            exit 1
+          fi
+          ACTUAL="$(printf '%s\n' "$OUTPUT" | tail -n1 | tr -d '[:space:]')"
           EXPECTED="${{ env.VERSION }}"
           echo "reported: '$ACTUAL' / expected: '$EXPECTED'"
           test -n "$ACTUAL" || { echo "::error::No output from the binary."; exit 1; }
@@ -261,10 +277,24 @@ jobs:
 
       - name: Smoke-test the binary (macOS)
         if: runner.os == 'macOS'
+        # Same shape as the Linux step, and for the same reason: capture the
+        # binary's output and status before asserting on either, so a crash
+        # shows its traceback instead of dying silently at an assignment.
         run: |
-          set -euo pipefail
+          set -uo pipefail
           chmod +x "dist/EDLD"
-          ACTUAL="$(./dist/EDLD --version | tail -n1 | tr -d '[:space:]')"
+          set +e
+          OUTPUT="$(./dist/EDLD --version 2>&1)"
+          RC=$?
+          set -e
+          echo "--- binary output (exit $RC) ---"
+          echo "$OUTPUT"
+          echo "--------------------------------"
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::Binary exited with status $RC. Output above."
+            exit 1
+          fi
+          ACTUAL="$(printf '%s\n' "$OUTPUT" | tail -n1 | tr -d '[:space:]')"
           EXPECTED="${{ env.VERSION }}"
           echo "reported: '$ACTUAL' / expected: '$EXPECTED'"
           test -n "$ACTUAL" || { echo "::error::No output from the binary."; exit 1; }
@@ -281,27 +311,82 @@ jobs:
       # a regression in one does not block a release on the other.
       - name: Smoke-test the binary (Windows)
         if: runner.os == 'Windows'
+        # Bounded so a hang fails in two minutes instead of occupying the
+        # runner until the job's whole allowance is gone. A windowed build that
+        # raises during startup used to pop a modal traceback dialog and wait
+        # for a click that never comes on CI; the spec now suppresses that
+        # dialog, and this timeout is the backstop for anything else that
+        # blocks - a Qt plugin probe, an antivirus scan, a first-run prompt.
+        timeout-minutes: 5
         shell: pwsh
         run: |
           $expected = "${{ env.VERSION }}"
           $exe = "dist/EDLD.exe"
 
-          $actual = ((& $exe --version 2>&1 | Out-String) -split "`n" |
-                     Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
-          $code = $LASTEXITCODE
-          Write-Host "pipe capture : '$actual' (exit $code)"
+          function Invoke-WithTimeout($file, $redirectPath) {
+            $psi = [Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = (Resolve-Path $file).Path
+            $psi.Arguments = "--version"
+            $psi.UseShellExecute = $false
+            if ($redirectPath) {
+              # Exercise the inherited-handle path: stdout goes to a real file
+              # handle rather than a pipe.
+              $psi.RedirectStandardOutput = $false
+              $p = Start-Process -FilePath $psi.FileName -ArgumentList "--version" `
+                     -NoNewWindow -PassThru -Wait:$false `
+                     -RedirectStandardOutput $redirectPath `
+                     -RedirectStandardError "$redirectPath.err"
+            } else {
+              $psi.RedirectStandardOutput = $true
+              $psi.RedirectStandardError = $true
+              $p = [Diagnostics.Process]::Start($psi)
+            }
+
+            if (-not $p.WaitForExit(120000)) {
+              try { $p.Kill($true) } catch { }
+              throw ("The binary did not exit within 120s - it is hanging, not " +
+                     "crashing. A windowed build blocking on a modal dialog is " +
+                     "the usual cause; check disable_windowed_traceback in " +
+                     "packaging/edld.spec.")
+            }
+
+            if ($redirectPath) {
+              $out = ""
+              if (Test-Path $redirectPath)        { $out += (Get-Content $redirectPath -Raw) }
+              if (Test-Path "$redirectPath.err")  { $out += (Get-Content "$redirectPath.err" -Raw) }
+            } else {
+              $out = $p.StandardOutput.ReadToEnd() + $p.StandardError.ReadToEnd()
+            }
+            return @{ Output = $out; Code = $p.ExitCode }
+          }
+
+          # Piping is the normal path, but it depends on the console attachment
+          # behaving, and that is the part that cannot be tested off Windows.
+          # A file redirect exercises the inherited-handle path instead, so a
+          # regression in one does not block a release on the other.
+          $r = Invoke-WithTimeout $exe $null
+          $code = $r.Code
+          Write-Host "--- pipe capture (exit $code) ---"
+          Write-Host $r.Output
+          Write-Host "---------------------------------"
+          $actual = (($r.Output -split "`n" |
+                      Where-Object { $_.Trim() } | Select-Object -Last 1))
+          if ($actual) { $actual = $actual.Trim() }
 
           if ([string]::IsNullOrWhiteSpace($actual)) {
             Write-Host "Pipe capture was empty; retrying with a file redirect."
             $tmp = Join-Path $env:RUNNER_TEMP "edld-version.txt"
-            & $exe --version > $tmp 2>&1
-            $code = $LASTEXITCODE
-            $actual = ((Get-Content $tmp -Raw) -split "`n" |
-                       Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
-            Write-Host "file capture : '$actual' (exit $code)"
+            $r = Invoke-WithTimeout $exe $tmp
+            $code = $r.Code
+            Write-Host "--- file capture (exit $code) ---"
+            Write-Host $r.Output
+            Write-Host "---------------------------------"
+            $actual = (($r.Output -split "`n" |
+                        Where-Object { $_.Trim() } | Select-Object -Last 1))
+            if ($actual) { $actual = $actual.Trim() }
           }
 
-          if ($code -ne 0) { throw "Binary exited with code $code." }
+          if ($code -ne 0) { throw "Binary exited with code $code. Output above." }
           if ([string]::IsNullOrWhiteSpace($actual)) {
             throw ("The binary produced no output by either method. A " +
                    "windowed Windows build cannot write to stdout unless " +

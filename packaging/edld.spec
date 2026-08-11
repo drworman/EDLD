@@ -55,7 +55,14 @@ exe = EXE(
     upx=False,          # UPX corrupts signed Qt libraries on Windows
     runtime_tmpdir=None,
     console=_console,
-    disable_windowed_traceback=False,
+    # A windowed build that raises during startup shows the traceback in a
+    # modal dialog and waits for someone to dismiss it. On a CI runner nobody
+    # ever does, so the process sits there until the job is cancelled — a crash
+    # that presents as a hang, with the real error hidden inside a window no
+    # one can see. Suppressing the dialog turns that back into a normal
+    # non-zero exit with the traceback on stderr, where the smoke test and the
+    # logs can both see it.
+    disable_windowed_traceback=True,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
