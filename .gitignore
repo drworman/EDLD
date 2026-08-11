@@ -28,9 +28,6 @@ dist/
 *.egg-info/
 *.egg
 
-# ── PyInstaller (if ever bundled) ─────────────────────────────────────────────
-*.spec
-
 # ── OS noise ──────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
