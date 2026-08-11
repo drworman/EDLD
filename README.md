@@ -2,13 +2,14 @@
 
 <img src="images/edld_avatar_512.png" width="140" alt="EDLD"/>
 
-# ED Linux Dash
+# ED Live Dashboard
 **Commander monitoring dashboard for Elite Dangerous**
 
 [![Elite Dangerous](https://img.shields.io/badge/Game-Elite%20Dangerous-orange?style=flat-square)](https://www.elitedangerous.com)
-[![Linux](https://img.shields.io/badge/Platform-Linux-FCC624?style=flat-square)]()
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-blue?style=flat-square)]()
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square)](https://python.org)
 [![Textual](https://img.shields.io/badge/TUI-Textual-1D8348?style=flat-square)](https://github.com/Textualize/textual)
+[![PySide6](https://img.shields.io/badge/GUI-PySide6-41CD52?style=flat-square)](https://doc.qt.io/qtforpython/)
 [![Discord](https://img.shields.io/badge/Discord-Webhook%20Support-5865F2?style=flat-square)]()
 
 [![GitHub release](https://img.shields.io/github/v/release/drworman/EDLD?style=flat-square)](https://github.com/drworman/EDLD/releases)
@@ -23,13 +24,15 @@ Combat · Trade · Mining · Exploration · Missions · Exobiology · PowerPlay 
 FDev CAPI · EDDN · EDSM · EDAstro · Inara · Raven Colonial · Discord Webhooks
 
 <ins>Multiple Interface Options</ins></br>
-Terminal scroll · Textual TUI
+Terminal dashboard · Desktop window · Terminal scroll
 
 </div>
 
 ## Overview
 
-EDLD is a CMDR career and real-time session monitoring dashboard for Elite Dangerous on Linux. It tails your journal and presents either a scrolling feed or a live Textual terminal dashboard alongside the game, tracking everything you do across combat, trade, mining, exploration, missions, exobiology, and PowerPlay.
+EDLD is a CMDR career and real-time session monitoring dashboard for Elite Dangerous, running on Linux, Windows and macOS. It tails your journal and presents the same dashboard three ways — a live terminal dashboard, a desktop window, or a scrolling feed — tracking everything you do across combat, trade, mining, exploration, missions, exobiology, and PowerPlay.
+
+All three interfaces are built from one layout model and one set of components, so they show the same windows with the same data; only the rendering differs. Pick whichever suits the machine: the terminal dashboard over SSH, the desktop window on a second monitor beside the game.
 
 Alerts fire when things go wrong: shields down, hull taking damage, fuel running low, fighter destroyed. Session statistics accumulate across all activity types in a tabbed panel that shows only what's relevant to your current session.
 
@@ -44,7 +47,8 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | 💥 **Combat Tracking** | Kills, bounties, combat bonds, deaths, and fighter losses with per-kill timing and faction tally |
 | 🎯 **Mission Stack** | Active massacre mission tracking — stack value, completion status, and full bootstrap on start |
 | 📊 **Session Statistics** | Tabbed activity dashboard — Combat, Trade, Mining, Exploration, Missions, Exobiology, PowerPlay — showing totals and /hr rates |
-| 🖵 **Textual TUI** | Full terminal dashboard with all panels. Runs on any machine with Python and a modern terminal |
+| 🖵 **Terminal Dashboard** | Full terminal dashboard with all panels. Runs on any machine with Python and a modern terminal |
+| 🖥️ **Desktop Window** | The same dashboard as a native PySide6 window on Linux, Windows and macOS, with resizable columns, real menus, and full platform window controls |
 | 🛡️ **Combat Alerts** | Shield drops, hull damage, fighter loss, ship destruction. Auto-clear on login and docking, plus a manual clear button |
 | ⛽ **Fuel Monitoring** | Warn and critical thresholds for fuel percentage and estimated time remaining |
 | 🚨 **Security & Cargo Events** | Cargo scans, police scans, security attacks, low-value cargo notices |
@@ -69,7 +73,7 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | 🔌 **Plugin Architecture** | Three-tier plugin loader with per-commander data isolation, named config profiles, plugins dialog with enable/disable controls, and a `plugins/` directory for user plugins |
 | 📚 **Native Documentation Viewer** | In-app viewer for all bundled documentation |
 | 🔍 **Search Modals** | Searchable pickers for home location and Spansh target market |
-| 🔔 **Update Notifier** | Background check for new tagged releases on GitHub; notice surfaced in the terminal and the TUI |
+| 🔔 **Update Notifier** | Background check for new tagged releases on GitHub; notice surfaced in the terminal, the TUI, and the desktop window |
 
 <div align="center">
 <img src="images/tui-screenshot.png" alt="EDLD Textual TUI" width="900"/>
@@ -105,6 +109,21 @@ bash install.sh
 
 > `psutil` has C extensions requiring system libraries — install it via your distro's package manager, not pip. See [INSTALL.md](INSTALL.md) for details.
 
+`install.sh` offers to install PySide6 for the desktop interface. Decline it if
+you only use the terminal interfaces — it is the largest dependency by far and
+nothing else needs it. Set `EDLD_INSTALL_GUI=yes` or `=no` to answer ahead of
+time in a scripted install.
+
+### Windows and macOS
+
+Download the binary for your platform from the
+[Releases page](https://github.com/drworman/EDLD/releases) and run it. No Python
+install is required; everything is bundled.
+
+The Windows and macOS builds start the desktop window by default. The terminal
+interfaces are still there if you run the executable from a shell with `--tui`
+or `--terminal`.
+
 ---
 
 ## Quick Start
@@ -114,10 +133,15 @@ git clone https://github.com/drworman/EDLD.git
 cd EDLD
 bash install.sh
 
-./edld.py                    # Textual TUI dashboard (default)
-./edld.py --mode terminal    # plain terminal output
+./edld.py                    # terminal dashboard (default)
+./edld.py --gui              # desktop window
+./edld.py --terminal         # plain scrolling output
 ./edld.py -p MyProfile       # named config profile
+./edld.py --version          # print version and exit
 ```
+
+`--tui`, `--gui` and `--terminal` are the three interfaces. The older
+`--mode textual|terminal|gui` form still works and means the same thing.
 
 If no `config.toml` exists, EDLD creates one with defaults and prints its location on startup. Set `JournalFolder` to your ED journal directory before proceeding.
 
@@ -161,6 +185,8 @@ UserID = 123456789012345678
 | [Mission Bootstrap](docs/MISSION_BOOTSTRAP.md) | How EDLD reconstructs mission state on startup |
 | [Roadmap](docs/ROADMAP.md) | Active, near-term, and deferred work |
 | [Release Signing](docs/SIGNING.md) | How to verify release artifacts |
+| [Building](docs/BUILDING.md) | Running from source, building binaries, relinking against your own Qt |
+| [Licensing](docs/LICENSING.md) | MIT, and how the LGPL obligations for Qt are met |
 
 ### Guides
 
@@ -173,12 +199,50 @@ UserID = 123456789012345678
 
 ---
 
+## License
+
+EDLD is released under the [MIT License](LICENSE) — use it, fork it, sell it,
+embed it in something proprietary. Keep the copyright notice.
+
+Its dependencies carry their own terms. The one that constrains redistribution
+is Qt: the desktop interface uses **PySide6 under the LGPL v3**, so a binary
+you distribute must ship the licence texts and let recipients relink against
+their own Qt. Both obligations are already met by the official builds.
+
+| | |
+|--|--|
+| [LICENSE](LICENSE) | The MIT licence covering EDLD itself |
+| [docs/LICENSING.md](docs/LICENSING.md) | How each LGPLv3 condition is met, and what to do if you fork and distribute binaries |
+| [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) | Every dependency, its licence, and whether it is bundled |
+| [licenses/](licenses/) | Full GPL and LGPL texts, shipped inside every binary and release archive |
+
+The terminal interfaces depend only on permissively licensed packages; a build
+carrying just `--tui` and `--terminal` has no LGPL obligations at all.
+
+---
+
+## Attribution and disclaimer
+
+**ED Live Dashboard (EDLD) is an unofficial community tool.**
+
+Elite Dangerous is a trademark of Frontier Developments plc. This project is
+not affiliated with, endorsed by, or supported by Frontier Developments plc.
+Please do not imply otherwise in a fork.
+
+EDLD reads the journal files the game writes to your local filesystem, in the
+documented format Frontier publishes for exactly this purpose. It does not
+modify the game, inject code, or read process memory. Its only contact with
+Frontier's servers is through the Companion API, using your own credentials and
+only when you choose to connect.
+
+---
+
 <div align="center">
 
 *Fly safe out there, CMDR.*
 
 <img src="images/edld_avatar_512.png" width="56" alt="EDLD"/>
 
-**ED Linux Dash** · by CMDR HUGH JASSOLE
+**ED Live Dashboard** · by CMDR HUGH JASSOLE
 
 </div>
