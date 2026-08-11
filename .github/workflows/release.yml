@@ -119,7 +119,7 @@ jobs:
       - name: Save artifacts for checksums job
         uses: actions/upload-artifact@v6
         with:
-          name: source-artifacts
+          name: EDLD-source-artifacts
           path: dist/EDLD-${{ env.VERSION }}.*
           if-no-files-found: error
 
@@ -275,6 +275,13 @@ jobs:
           test -n "$ACTUAL" || { echo "::error::No output from the binary."; exit 1; }
           test "$ACTUAL" = "$EXPECTED"
 
+          # Both front ends must import. --version only proves the process
+          # starts; a packaged build can start cleanly and still be missing a
+          # lazily-imported Textual widget, which only surfaces when the
+          # dashboard is drawn.
+          echo "--- selftest ---"
+          xvfb-run -a ./dist/EDLD --selftest
+
       - name: Smoke-test the binary (macOS)
         if: runner.os == 'macOS'
         # Same shape as the Linux step, and for the same reason: capture the
@@ -300,6 +307,9 @@ jobs:
           test -n "$ACTUAL" || { echo "::error::No output from the binary."; exit 1; }
           test "$ACTUAL" = "$EXPECTED"
 
+          echo "--- selftest ---"
+          ./dist/EDLD --selftest
+
       # The Windows binary is built windowed, so it starts with no console.
       # core/win_console.py reattaches stdout for --version and --terminal;
       # this step is what proves it still works.
@@ -323,16 +333,16 @@ jobs:
           $expected = "${{ env.VERSION }}"
           $exe = "dist/EDLD.exe"
 
-          function Invoke-WithTimeout($file, $redirectPath) {
+          function Invoke-WithTimeout($file, $redirectPath, $arg = "--version") {
             $psi = [Diagnostics.ProcessStartInfo]::new()
             $psi.FileName = (Resolve-Path $file).Path
-            $psi.Arguments = "--version"
+            $psi.Arguments = $arg
             $psi.UseShellExecute = $false
             if ($redirectPath) {
               # Exercise the inherited-handle path: stdout goes to a real file
               # handle rather than a pipe.
               $psi.RedirectStandardOutput = $false
-              $p = Start-Process -FilePath $psi.FileName -ArgumentList "--version" `
+              $p = Start-Process -FilePath $psi.FileName -ArgumentList $arg `
                      -NoNewWindow -PassThru -Wait:$false `
                      -RedirectStandardOutput $redirectPath `
                      -RedirectStandardError "$redirectPath.err"
@@ -397,6 +407,12 @@ jobs:
           if ($actual -ne $expected) {
             throw "Version mismatch: got '$actual', expected '$expected'."
           }
+
+          Write-Host "--- selftest ---"
+          $st = Invoke-WithTimeout $exe (Join-Path $env:RUNNER_TEMP "edld-selftest.txt") "--selftest"
+          Write-Host $st.Output
+          if ($st.Code -ne 0) { throw "Selftest failed with code $($st.Code). Output above." }
+
           Write-Host "OK"
 
       - name: Package artefacts
@@ -444,7 +460,9 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: binary-${{ matrix.platform }}
+          # Prefixed so the archive is identifiable once it is sitting in
+          # somebody's downloads folder next to everything else.
+          name: EDLD-binary-${{ matrix.platform }}
           path: out/*
           if-no-files-found: error
           retention-days: 14

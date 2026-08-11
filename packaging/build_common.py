@@ -143,9 +143,32 @@ def _block_imports() -> list[str]:
     return out
 
 
+def _textual_submodules() -> list[str]:
+    """Every submodule of Textual, collected explicitly.
+
+    ``textual.widgets.__init__`` resolves its widgets lazily through a module
+    level ``__getattr__`` that calls ``importlib.import_module`` on a name
+    built at runtime. PyInstaller's static analysis cannot see through that,
+    so it bundles only the handful of submodules something imports directly
+    and silently drops the rest — the binary then dies on first use with
+    ``No module named 'textual.widgets._tab_pane'`` or similar.
+
+    Collecting the whole package costs a little size and removes the entire
+    class of failure, including for widgets a future block might use.
+    """
+    try:
+        from PyInstaller.utils.hooks import collect_submodules
+        return collect_submodules("textual")
+    except Exception:
+        # Textual absent from the build environment: a GUI-only build. The
+        # terminal front end will not work in that binary either way.
+        return []
+
+
 HIDDEN_IMPORTS = (
     _component_imports()
     + _block_imports()
+    + _textual_submodules()
     + [
         "core.palette",
         "gui.app",

@@ -63,6 +63,8 @@ _mode_group.add_argument("--terminal", dest="mode_flag", action="store_const",
 
 parser.add_argument("--version", action="store_true",
                     help="Print the version and exit")
+parser.add_argument("--selftest", action="store_true",
+                    help="Verify both front ends can be imported, then exit")
 
 args = parser.parse_args()
 
@@ -81,6 +83,27 @@ except Exception:
 if args.version:
     print(VERSION)
     sys.exit(0)
+
+# --selftest imports each front end and reports, then exits. It exists because
+# a packaged build can fail at import in ways a source checkout never does:
+# Textual resolves its widgets through a runtime __getattr__, so a frozen
+# binary can be missing a widget module and still start, run, and only die at
+# the moment the dashboard is drawn. Importing both front ends up front turns
+# that into something the release workflow can catch on every platform.
+if args.selftest:
+    import importlib as _il
+    _results, _failed = [], False
+    for _label, _mod in (("terminal dashboard (--tui)", "tui.app"),
+                         ("desktop window (--gui)",     "gui.app")):
+        try:
+            _il.import_module(_mod)
+            _results.append(f"  OK    {_label}")
+        except Exception as _e:
+            _failed = True
+            _results.append(f"  FAIL  {_label}: {type(_e).__name__}: {_e}")
+    print(f"EDLD {VERSION} selftest")
+    print("\n".join(_results))
+    sys.exit(1 if _failed else 0)
 
 # A convenience flag and an explicit --mode should not disagree silently.
 if args.mode_flag and args.mode and args.mode != args.mode_flag:
@@ -378,11 +401,18 @@ if ui_mode in ("textual", "gui"):
     sys.stderr.flush()
     # Python-level only — Textual writes to fd 1 directly and needs fd 0
     # for TTY input, so we don't touch the underlying file descriptors.
-    try:
-        sys.stdout = open(os.devnull, "w", encoding="utf-8")
-        sys.stderr = open(os.devnull, "w", encoding="utf-8")
-    except OSError:
-        pass
+    #
+    # EDLD_KEEP_STDERR=1 leaves both streams alone. A dashboard that dies
+    # during startup otherwise takes its traceback to /dev/null with it, and
+    # the only symptom is the process vanishing — so there has to be a way to
+    # get the streams back without editing the source, which is impossible in
+    # a shipped binary.
+    if os.environ.get("EDLD_KEEP_STDERR") not in ("1", "true", "yes"):
+        try:
+            sys.stdout = open(os.devnull, "w", encoding="utf-8")
+            sys.stderr = open(os.devnull, "w", encoding="utf-8")
+        except OSError:
+            pass
 
 
 # ── Now safe to start background threads ──────────────────────────────────────
@@ -501,6 +531,29 @@ def run_monitor() -> None:
     )
 
 
+def _log_fatal(what: str) -> None:
+    """Record a fatal dashboard error where it can actually be found.
+
+    Called from the launch paths, which run with stdout and stderr pointed at
+    /dev/null so terminal noise cannot corrupt the display. That redirect is
+    correct but it also means an uncaught exception disappears silently, so
+    this writes the traceback to the diagnostic log and to the process's real
+    stderr, which the redirect never replaced.
+    """
+    import traceback as _tb
+    detail = _tb.format_exc()
+    message = f"{what} failed to start:\n{detail}"
+    try:
+        _debug.log(message, level="ERROR")
+    except Exception:
+        pass
+    try:
+        sys.__stderr__.write(f"\nERROR: {message}\n")
+        sys.__stderr__.flush()
+    except Exception:
+        pass
+
+
 def _start_background_threads() -> tuple:
     """Start the journal monitor and Status.json poller.
 
@@ -543,8 +596,14 @@ if __name__ == "__main__":
 
         _gui_theme = mgr.ui_cfg.get("Theme", "default")
         _start_background_threads()
-        sys.exit(run_gui(core, PROGRAM, VERSION, AUTHOR, GITHUB_REPO,
-                         theme=_gui_theme))
+        try:
+            sys.exit(run_gui(core, PROGRAM, VERSION, AUTHOR, GITHUB_REPO,
+                             theme=_gui_theme))
+        except SystemExit:
+            raise
+        except Exception:
+            _log_fatal("Desktop window")
+            sys.exit(1)
 
     elif ui_mode == "textual":
         try:
@@ -567,7 +626,16 @@ if __name__ == "__main__":
 
         _start_background_threads()
 
-        run_tui(core, PROGRAM, VERSION, theme=_tui_theme)
+        try:
+            run_tui(core, PROGRAM, VERSION, theme=_tui_theme)
+        except Exception:
+            # stdout and stderr are /dev/null by now, so an escaping exception
+            # would leave nothing behind but a non-zero exit. The diagnostic
+            # log is the one channel still open, and it is the file users are
+            # asked for when something goes wrong, so the traceback belongs
+            # there. sys.__stderr__ is the real stream and gets a copy.
+            _log_fatal("Textual dashboard")
+            sys.exit(1)
 
     else:  # terminal
         run_monitor()
