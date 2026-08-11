@@ -36,10 +36,18 @@ name: Release
 
 on:
   push:
-    tags:
-      - '*'
+    # Tags are bare YYYYMMDD datestamps with no "v" prefix, so the filter
+    # matches any tag starting with a digit. The verify job is what actually
+    # rejects a tag that does not match core/version.
+    tags: ["[0-9]*"]
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build artefacts without publishing a release"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -56,21 +64,58 @@ jobs:
   verify:
     name: Verify tag matches core/version
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.release.tag_name || github.ref_name }}
           fetch-depth: 1
 
-      - name: Verify version matches core/version
+      # Versions are bare YYYYMMDD datestamps. A manual dry-run has no tag, so
+      # the comparison only happens when one is present; the version file is
+      # authoritative either way and is published for the later jobs.
+      - id: read
+        name: Read and check the version
+        shell: bash
         run: |
-          TAG="${{ env.VERSION }}"
-          FILE_VER=$(cat core/version | tr -d '[:space:]')
-          echo "Tag: $TAG  |  core/version: $FILE_VER"
-          if [ "$TAG" != "$FILE_VER" ]; then
-            echo "ERROR: tag '$TAG' does not match core/version '$FILE_VER'"
+          VERSION="$(tr -d '[:space:]' < core/version)"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Version file: ${VERSION}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            if [ "${TAG}" != "${VERSION}" ]; then
+              echo "::error::Tag '${TAG}' does not match core/version" \
+                   "('${VERSION}'). Tags are bare datestamps with no 'v'" \
+                   "prefix. Update core/version or move the tag."
+              exit 1
+            fi
+          fi
+
+      # Everything the build needs must be in the checkout. A file missing here
+      # fails in seconds with a clear message; without this check the same
+      # problem surfaces as a build error three parallel dependency installs
+      # later. packaging/edld.spec has been lost to .gitignore once already.
+      - name: Preflight — required paths are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          MISSING=0
+          for path in packaging/edld.spec packaging/build_common.py \
+                      packaging/icons licenses THIRD-PARTY-NOTICES.md \
+                      requirements.txt requirements-dev.txt \
+                      gui components core tui edld.py; do
+            if [ ! -e "$path" ]; then
+              echo "::error::Missing from the repository: $path"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -ne 0 ]; then
+            echo "::error::The checkout is incomplete. If a file exists" \
+                 "locally but not here, check .gitignore is not excluding it."
             exit 1
           fi
+          echo "All required paths present."
 
 # -- Job 2: Source tarball ---------------------------------------------------
 
@@ -122,13 +167,6 @@ jobs:
           name: EDLD-source-artifacts
           path: dist/EDLD-${{ env.VERSION }}.*
           if-no-files-found: error
-
-      - name: Upload to release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "${{ env.VERSION }}" dist/* --clobber \
-            2>/dev/null || echo "No matching release - artifacts available in Actions run"
 
 # -- Job 3: Binaries ---------------------------------------------------------
 
@@ -467,14 +505,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload to release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "${{ env.VERSION }}" out/* --clobber \
-            2>/dev/null || echo "No matching release - artifacts available in Actions run"
-
 # -- Job 4: Checksums --------------------------------------------------------
 
   checksums:
@@ -548,16 +578,88 @@ jobs:
           [ "$FAIL" -eq 0 ] || { echo "Signature verification failed"; exit 1; }
           echo "All signatures OK."
 
-      - name: Upload checksums and sigs to release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Save the complete artefact set for the release job
+        uses: actions/upload-artifact@v6
+        with:
+          name: EDLD-release-bundle
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+# -- Job 5: Publish the release ----------------------------------------------
+# Creates the GitHub release itself, so pushing a version tag is the only
+# manual step. Skipped for a manual dry run, and for a run triggered by a
+# release that already exists (the artefacts are attached to it instead).
+
+  release:
+    name: Publish release
+    needs: [verify, source, binaries, checksums]
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag' && !inputs.dry_run
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: EDLD-release-bundle
+          path: artifacts
+
+      - name: List what will be published
+        run: ls -la artifacts/
+
+      # EDLD's changelog uses "## Released in YYYYMMDD" headings rather than
+      # the bracketed form, so the section for this version runs from its
+      # heading to the next one.
+      - name: Extract release notes from the changelog
+        id: notes
+        shell: bash
         run: |
-          gh release upload "${{ env.VERSION }}" \
-            dist/EDLD-${{ env.VERSION }}.sha256 \
-            dist/EDLD-${{ env.VERSION }}.sha256.sig \
-            --clobber 2>/dev/null \
-            || echo "No matching release - checksums available in Actions run"
-          for f in dist/*.sig; do
-            [ -f "$f" ] && gh release upload "${{ env.VERSION }}" "$f" \
-              --clobber 2>/dev/null || true
-          done
+          VERSION="${{ needs.verify.outputs.version }}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## Released in " v "[[:space:]]*$" { flag = 1; next }
+            flag && /^## Released in / { exit }
+            flag { print }
+          ' CHANGELOG.md > release-notes.md
+
+          # Trim the leading and trailing blank lines awk leaves behind.
+          sed -i -e '/./,$!d' release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No changelog entry found for ${VERSION}." > release-notes.md
+          fi
+
+          {
+            echo ""
+            echo "---"
+            echo ""
+            echo "### Downloads"
+            echo ""
+            echo "| Platform | File |"
+            echo "|---|---|"
+            echo "| Linux (x86_64) | \`EDLD-${VERSION}-linux-x86_64.tar.gz\` |"
+            echo "| Windows (x86_64) | \`EDLD-${VERSION}-windows-x86_64.zip\` |"
+            echo "| macOS (Apple silicon) | \`EDLD-${VERSION}-macos-arm64.zip\` |"
+            echo "| Source | \`EDLD-${VERSION}.tar.gz\` |"
+            echo ""
+            echo "No Python install is needed for the binaries. Each archive"
+            echo "carries the licence texts required by the LGPL."
+            echo ""
+            echo "Verify a download against \`EDLD-${VERSION}.sha256\`;"
+            echo "see [docs/SIGNING.md](docs/SIGNING.md) for signatures."
+          } >> release-notes.md
+
+          echo "----- release notes -----"
+          cat release-notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          body_path: release-notes.md
+          draft: false
+          # A suffix such as 20260810-rc1 marks a prerelease; a bare datestamp
+          # is a full release.
+          prerelease: ${{ contains(needs.verify.outputs.version, '-') }}
+          fail_on_unmatched_files: true

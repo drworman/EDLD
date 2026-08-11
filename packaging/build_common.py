@@ -54,6 +54,24 @@ DATA_FILES = [
     (str(ROOT / "components"), "components"),
 ]
 
+
+def _ca_bundle() -> list[tuple[str, str]]:
+    """Ship certifi's CA bundle so HTTPS works in the packaged build.
+
+    The binary carries its own OpenSSL, built with the build machine's
+    certificate paths compiled in. Those paths do not exist on most target
+    machines, so verification fails everywhere and every network feature stops
+    working silently. core/certs.py points OpenSSL at this copy at startup.
+    """
+    try:
+        import certifi
+        return [(certifi.where(), "certs")]
+    except Exception:
+        return []
+
+
+DATA_FILES += _ca_bundle()
+
 #: Qt modules EDLD never touches.  Excluding them roughly halves the binary
 #: and removes components with their own licensing questions.
 QT_EXCLUDES = [

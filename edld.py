@@ -77,6 +77,17 @@ try:
 except Exception:
     pass
 
+# ── HTTPS trust store ─────────────────────────────────────────────────────────
+# Must run before anything opens a connection.  A frozen build ships its own
+# OpenSSL, which looks for certificates where the *build* machine kept them, so
+# without this every HTTPS call fails verification and CAPI, EDDN, EDSM,
+# EDAstro, Inara and Spansh all stop working without any of them saying so.
+try:
+    from core import certs as _certs
+    _certs.install()
+except Exception:
+    pass
+
 # --version answers before any config, journal or plugin work, so it succeeds
 # on a machine that has never run Elite Dangerous.  The release workflow uses
 # it to prove the built artefact actually starts.
@@ -390,6 +401,14 @@ _debug.install_exception_hooks()
 #
 #   terminal — neither.  Scrolling event output to the terminal is the whole
 #             point of this mode.
+
+# Record where TLS verification will look. When someone reports that uploads
+# stopped, this line answers it outright instead of after a round of guessing.
+try:
+    _debug.log(_certs.diagnose(), level="INFO")
+except Exception:
+    pass
+
 
 if ui_mode in ("textual", "gui"):
     log_p = _debug.path()

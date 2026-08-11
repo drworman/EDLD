@@ -20,3 +20,10 @@ Pillow>=10.0.0
 #
 # Wheels exist for all three release platforms, so pip is fine here.
 psutil>=5.9.0
+
+# The CA bundle shipped inside the binaries. A frozen build carries its own
+# OpenSSL, whose compiled-in certificate paths do not exist on most target
+# machines, so without this every HTTPS call fails verification and CAPI,
+# EDDN, EDSM, EDAstro, Inara and Spansh stop working with no visible error.
+# See core/certs.py.
+certifi>=2024.2.2

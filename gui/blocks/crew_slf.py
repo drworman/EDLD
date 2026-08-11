@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from gui.block_base import GuiBlock, _health_cls, _fmt_credits
 from gui.markup import to_html
@@ -50,11 +50,19 @@ class CrewSlfBlock(GuiBlock):
         self._name_lbl = QLabel()
         self._name_lbl.setTextFormat(Qt.RichText)
         self._name_lbl.setProperty("role", "hdrkey")
+        # Expanding rather than the default Preferred: the stretch factor alone
+        # only distributes *surplus* space, so in a narrow column the name
+        # label stops growing and the type label drifts left until the two sit
+        # against each other. Expanding keeps the name filling the row and the
+        # designation pinned to the right edge at any width.
+        self._name_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._type_lbl = QLabel()
         self._type_lbl.setTextFormat(Qt.RichText)
         self._type_lbl.setProperty("role", "dim")
         self._type_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._type_lbl.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         nl.addWidget(self._name_lbl, 1)
+        nl.addStretch(0)
         nl.addWidget(self._type_lbl, 0)
         layout.addWidget(name_row)
 
@@ -82,8 +90,10 @@ class CrewSlfBlock(GuiBlock):
             self._kv_slf.setVisible(True)
             return
 
-        # ── Header: CREW: <n> (left)  <SLF type> (right) ─────────────────
-        slf_full = s.slf_type or ""
+        # ── Header: CREW: <n> (left)   <model> (<variant>) (right) ────────
+        # Model and variant are one designation and are shown together, on the
+        # right, matching the terminal dashboard.
+        slf_full = (s.slf_type or "").strip()
         if "(" in slf_full and slf_full.endswith(")"):
             paren       = slf_full.index("(")
             slf_base    = slf_full[:paren].strip()
@@ -92,17 +102,20 @@ class CrewSlfBlock(GuiBlock):
             slf_base    = slf_full
             slf_variant = ""
 
+        if slf_base and slf_variant:
+            slf_label = f"{slf_base} ({slf_variant})"
+        else:
+            slf_label = slf_base or slf_variant
+
         crew_label = f"CREW: {s.crew_name or 'NPC'}"
         if s.cmdr_in_slf:
             crew_label += "  [IN FIGHTER]"
         self._name_lbl.setText(to_html(crew_label, self.palette_map))
-        self._type_lbl.setText(to_html(slf_base, self.palette_map))
+        self._type_lbl.setText(to_html(slf_label, self.palette_map))
 
         rank_str = ""
         if s.crew_rank is not None and 0 <= s.crew_rank < len(PP_RANK_NAMES):
             rank_str = f"Combat Rank: {PP_RANK_NAMES[s.crew_rank]}"
-            if slf_variant:
-                rank_str += f"  ({slf_variant})"
         self._rank_lbl.set_text(rank_str)
 
         # ── SLF status ────────────────────────────────────────────────────────

@@ -59,8 +59,13 @@ class CrewSlfBlock(TuiBlock):
             self._kv("kv-paid",   "—")
             return
 
-        # ── Header: CREW: <name> (left)  <SLF type> (right) ─────────────────
-        slf_full = s.slf_type or ""
+        # ── Header: CREW: <name> (left)   <model> (<variant>) (right) ───────
+        # The fighter's model and its variant are one designation — "GU-97
+        # (Gelid G)" — and they belong together. Splitting them, with the
+        # model on the header row and the variant parked at the end of the
+        # combat-rank line, meant neither line read as a complete answer to
+        # "what is this crew flying".
+        slf_full = (s.slf_type or "").strip()
         if "(" in slf_full and slf_full.endswith(")"):
             paren       = slf_full.index("(")
             slf_base    = slf_full[:paren].strip()
@@ -69,17 +74,20 @@ class CrewSlfBlock(TuiBlock):
             slf_base    = slf_full
             slf_variant = ""
 
+        if slf_base and slf_variant:
+            slf_label = f"{slf_base} ({slf_variant})"
+        else:
+            slf_label = slf_base or slf_variant
+
         crew_label = f"CREW: {s.crew_name or 'NPC'}"
         if s.cmdr_in_slf:
             crew_label += "  [IN FIGHTER]"
         self._lbl("crew-name-lbl", crew_label)
-        self._lbl("crew-type-lbl", slf_base)
+        self._lbl("crew-type-lbl", slf_label)
 
         rank_str = ""
         if s.crew_rank is not None and 0 <= s.crew_rank < len(PP_RANK_NAMES):
             rank_str = f"Combat Rank: {PP_RANK_NAMES[s.crew_rank]}"
-            if slf_variant:
-                rank_str += f"  ({slf_variant})"
         self._lbl("crew-rank-lbl", rank_str)
 
         # ── SLF status ────────────────────────────────────────────────────────
