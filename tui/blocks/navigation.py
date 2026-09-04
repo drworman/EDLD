@@ -8,10 +8,10 @@ for Neutron) followed by a "Plot" button.  Plotting is asynchronous —
 the Spansh API call runs on a background thread and posts the result
 back via Textual's call_from_thread when complete.
 
-Carrier tab is a static read of state.assets_carrier (Fleet section)
-and state.pilot_squadron_name (Squadron section, with the
-documented limitation that no anonymous API surfaces squadron
-carrier jump data).
+Carrier tab plots fleet-carrier routes through Spansh, with fuel planning.
+Full carrier detail lives in the Assets block's Carrier tab.
+
+
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from textual.widgets    import Label, TabbedContent, TabPane, Input, Button
 from textual.containers import VerticalScroll, Horizontal
 
 from tui.block_base     import TuiBlock, KVRow, SecHdr, _fmt_credits
+from core.ui_helpers    import carrier_route_rows, carrier_route_summary
 
 
 def _fmt_ly(d) -> str:
@@ -70,14 +71,24 @@ class NavigationBlock(TuiBlock):
                     yield VerticalScroll(id="nav-neutron-results")
 
             # ── Carrier tab ──────────────────────────────────────────────────
-            # Carrier ROUTING is deferred with no target release — the
-            # Spansh fleet-carrier API integration doesn't reliably return
-            # results from its accepted POSTs.  This tab continues to surface
-            # the live carrier *status* (balance / fuel / cargo) which is
-            # genuinely useful; the route-plotting form will be added if and
-            # when the API issue is resolved.
-            with TabPane("Carrier⚠", id="nav-tab-carrier"):
-                yield VerticalScroll(id="nav-carrier-scroll")
+            # Fleet-carrier routing plots through Spansh's /api/fleetcarrier
+            # /route endpoint.  The form defaults are filled from the live
+            # carrier state on refresh so a plot is usually one button press.
+            with TabPane("Carrier", id="nav-tab-carrier"):
+                with VerticalScroll(id="nav-carrier-scroll"):
+                    yield Label("", id="nav-carrier-info", classes="dim")
+                    yield Input(placeholder="From (carrier's system)",
+                                id="nav-carrier-from")
+                    yield Input(placeholder="To (e.g. Colonia)",
+                                id="nav-carrier-to")
+                    yield Input(placeholder="Cargo used, t",
+                                id="nav-carrier-used")
+                    yield Input(placeholder="Tritium in tank, t",
+                                id="nav-carrier-fuel")
+                    yield Button("Plot Carrier",
+                                 id="nav-carrier-plot", variant="primary")
+                    yield Label("", id="nav-carrier-status", classes="dim")
+                    yield VerticalScroll(id="nav-carrier-results")
 
     # ── Button dispatch ───────────────────────────────────────────────────────
 
@@ -87,6 +98,103 @@ class NavigationBlock(TuiBlock):
             self._launch_plot(is_neutron=False)
         elif btn_id == "nav-neutron-plot":
             self._launch_plot(is_neutron=True)
+        elif btn_id == "nav-carrier-plot":
+            self._launch_carrier_plot()
+
+    # ── Carrier plotting ──────────────────────────────────────────────────────
+
+    def _launch_carrier_plot(self) -> None:
+        """Validate the carrier form, then plot on a background thread.
+
+        Carrier jobs are far heavier server-side than ship routes — a
+        galaxy-crossing route is 40+ jumps — so this can legitimately take
+        a couple of minutes.
+        """
+        def _v(node_id: str) -> str:
+            try:
+                return self.query_one(f"#nav-carrier-{node_id}", Input).value.strip()
+            except Exception:
+                return ""
+
+        status = self.query_one("#nav-carrier-status", Label)
+        carrier = getattr(self.core.state, "assets_carrier", None) or {}
+
+        src = _v("from") or str(carrier.get("system") or "").strip()
+        dst = _v("to")
+        if not src or not dst:
+            status.update("[red]Source and destination required.[/red]")
+            return
+
+        def _int(node_id: str, fallback: int) -> int | None:
+            raw = _v(node_id)
+            if not raw:
+                return fallback
+            try:
+                return max(int(float(raw)), 0)
+            except ValueError:
+                return None
+
+        used = _int("used", int(carrier.get("cargo_used") or 0))
+        fuel = _int("fuel", int(carrier.get("fuel") or 0))
+        if used is None or fuel is None:
+            status.update("[red]Cargo and tritium must be numbers.[/red]")
+            return
+
+        total_capacity = int(carrier.get("cargo_total") or 25000) or 25000
+
+        try:
+            self.query_one("#nav-carrier-results", VerticalScroll).remove_children()
+        except Exception:
+            pass
+        status.update("Plotting carrier route… (can take a minute or two)")
+
+        def _worker():
+            try:
+                result = self.core.plugin_call(
+                    "spansh", "plot_carrier_route", src, dst, used,
+                    total_capacity, fuel,
+                )
+            except Exception as exc:
+                result = {"_error": f"{type(exc).__name__}: {exc}"}
+            self.app.call_from_thread(self._on_carrier_plot_done, result)
+
+        threading.Thread(target=_worker, daemon=True,
+                         name="nav-plot-carrier").start()
+
+    def _on_carrier_plot_done(self, result) -> None:
+        try:
+            status  = self.query_one("#nav-carrier-status", Label)
+            results = self.query_one("#nav-carrier-results", VerticalScroll)
+        except Exception:
+            return
+        results.remove_children()
+
+        if not result:
+            status.update("[yellow]No route returned (timeout or error).[/yellow]")
+            return
+        if isinstance(result, dict) and result.get("_error"):
+            status.update(f"[red]Plot failed: {result['_error']}[/red]")
+            return
+        if not (result.get("jumps") or []):
+            status.update("[yellow]No jumps in response.[/yellow]")
+            return
+
+        s = carrier_route_summary(result)
+        status.update(
+            f"[green]{s['jumps']} jumps · {s['distance_ly']:,.0f} ly · "
+            f"{s['fuel_total']:,} t tritium[/green]"
+        )
+
+        rows = [SecHdr("Route")]
+        if s["restocks"]:
+            rows.append(Label(
+                f"[yellow]{s['restocks']} restock stop(s)[/yellow] · "
+                f"{s['tritium_sources']} systems with tritium available",
+                classes="dim",
+            ))
+        for label, value in carrier_route_rows(result):
+            rows.append(KVRow(label, value))
+        results.mount(*rows)
 
     def _launch_plot(self, is_neutron: bool) -> None:
         """Validate inputs, then dispatch the Spansh call on a background
@@ -231,47 +339,38 @@ class NavigationBlock(TuiBlock):
         self._refresh_carrier()
 
     def _refresh_carrier(self) -> None:
+        """Keep the carrier form's defaults in step with the live carrier.
+
+        Only empty fields are filled, so anything typed by hand survives a
+        refresh.  Full carrier detail lives in the Assets block's Carrier
+        tab; this is just enough context to plot from.
+        """
+        carrier = getattr(self.core.state, "assets_carrier", None)
+
         try:
-            scroll = self.query_one("#nav-carrier-scroll", VerticalScroll)
+            info = self.query_one("#nav-carrier-info", Label)
         except Exception:
             return
-        scroll.remove_children()
-        rows: list = []
 
-        # Carrier routing is deferred (no target release) — keep this notice
-        # visible at the top of the tab so it's obvious why no plot form.
-        rows.append(Label(
-            "[yellow]⚠ Carrier routing is UNFINISHED — disabled for this "
-            "release. Status display below remains live.[/yellow]"
-        ))
-
-        rows.append(SecHdr("Fleet carrier"))
-        carrier = getattr(self.core.state, "assets_carrier", None)
         if not carrier:
-            rows.append(Label("No carrier on file.", classes="dim"))
-        else:
-            rows.append(KVRow("Name",       str(carrier.get("name", "—"))))
-            rows.append(KVRow("Callsign",   str(carrier.get("callsign", "—"))))
-            rows.append(KVRow("System",     str(carrier.get("system", "—"))))
-            rows.append(KVRow("Fuel",       f"{carrier.get('fuel', 0)} t"))
-            rows.append(KVRow("Cargo",
-                f"{carrier.get('cargo_used', 0)} / "
-                f"{carrier.get('cargo_total', 0)} t"))
-            rows.append(KVRow("Balance",   _fmt_credits(carrier.get("balance"))))
-            rows.append(KVRow("Available", _fmt_credits(carrier.get("available"))))
-            rows.append(KVRow("Docking",   str(carrier.get("docking", "—"))))
+            info.update("[dim]No carrier on file — enter values by hand.[/dim]")
+            return
 
-        rows.append(SecHdr("Squadron carrier"))
-        sq_name = getattr(self.core.state, "pilot_squadron_name", "") or ""
-        if sq_name:
-            rows.append(KVRow("Squadron", sq_name))
-            rows.append(Label(
-                "Squadron carrier jump-status data is not available "
-                "from the journal or any anonymous API.  This section will "
-                "populate once a squadron-data integration ships.",
-                classes="dim",
-            ))
-        else:
-            rows.append(Label("No squadron on file.", classes="dim"))
+        name = str(carrier.get("name") or "Carrier")
+        sysm = str(carrier.get("system") or "—")
+        fuel = carrier.get("fuel") or 0
+        used = carrier.get("cargo_used") or 0
+        cap  = carrier.get("cargo_total") or 25000
+        info.update(f"{name} · {sysm} · {fuel} t tritium · {used}/{cap} t")
 
-        scroll.mount(*rows)
+        for node_id, value in (
+            ("from", sysm),
+            ("used", str(int(used))),
+            ("fuel", str(int(fuel))),
+        ):
+            try:
+                inp = self.query_one(f"#nav-carrier-{node_id}", Input)
+                if not (inp.value or "").strip() and value and value != "—":
+                    inp.value = value
+            except Exception:
+                pass

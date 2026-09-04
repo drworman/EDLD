@@ -49,28 +49,75 @@ _REFRESH_INTERVAL = 1800   # 30 minutes
 #   /api/generic/route  — exists but wants source/destination param names;
 #                         not needed since /api/route covers our cases.
 #
-# The fleet-carrier router is a different shape.  Its result URLs look like
-#   /fleet-carrier/results/<job>?source_system=X&destinations=["A","B"]&used_capacity=N
-# so the POST params are source_system / destinations (a JSON-array string)
-# / used_capacity — NOT from/to/range.  The exact submit path isn't
-# publicly documented and has moved before, so it carries a candidate list
-# walked on 404.  All of these are overridable from config.json under
-# "spansh_route_urls": {"fsd": [...], "neutron": [...], "carrier": [...]}.
+# The fleet-carrier router is a different shape.  Its endpoint and parameter
+# names were confirmed against spansh.co.uk's own front-end bundle and a
+# saved job envelope:
+#
+#   elite-dangerous-gui-*.js:
+#       plotFleetCarrierRoute(e){return this.performRequest("/api/fleetcarrier/route", e)}
+#       routeResults(e){return this.performGetRequest(`/api/results/${e}`)}
+#
+# so the POST goes to /api/fleetcarrier/route and polling uses the same
+# /api/results/<job> endpoint as every other route type.  Crucially,
+# performRequest passes the body through jQuery's $.ajax with
+# ``traditional: true``, which serialises a list as a repeated *bare* key
+# (destination_systems=123&destination_systems=456) — not as a JSON string
+# and not with a [] suffix.  See _plot_route for why that matters.
+#
+# All of these are overridable from config.json under "spansh_route_urls":
+# {"fsd": [...], "neutron": [...], "carrier": [...]}.
 _SPANSH_ROUTE_URLS: dict[str, list[str]] = {
     # FSD routing no longer goes through Spansh — see plot_fsd_route, which
     # uses EDSM's system database for genuine jump-by-jump routing.
     "neutron": ["https://spansh.co.uk/api/route"],
-    "carrier": [
-        # /api/fleetcarrier/search is the working POST endpoint.
-        # /api/fleetcarrier/route returns HTTP 202 to POST but the resulting
-        # UUID never resolves anywhere, so the other candidates remain only as
-        # fallbacks if /search ever stops working.
-        "https://spansh.co.uk/api/fleetcarrier/search",
-        "https://spansh.co.uk/api/fleet-carrier/route",
-        "https://spansh.co.uk/api/fleetcarrier/route",
-        "https://spansh.co.uk/api/fleet_carrier/route",
-    ],
+    "carrier": ["https://spansh.co.uk/api/fleetcarrier/route"],
 }
+
+#: Parameters the route endpoints expect as repeated bare keys rather than as
+#: a single JSON-encoded value.  Sending these as JSON is accepted with a 202
+#: — the job is queued — but the destination list parses to nothing, so the
+#: job never yields a usable result.  That is why carrier routing appeared to
+#: "accept the POST but never resolve".
+_SPANSH_LIST_PARAMS = frozenset({"destination_systems", "refuel_destinations"})
+
+
+def _normalise_list_params(params: dict) -> dict:
+    """Return ``params`` with every list-shaped field ready for ``doseq=True``.
+
+    Three shapes reach this function and all must end up as a real list:
+
+      ["Sol", "Deciat"]     already correct — passed through
+      '["Sol", "Deciat"]'   a JSON string, from a caller that pre-encoded it
+      "Sol"                 a bare scalar, wrapped into a single-element list
+
+    An empty list is dropped entirely rather than sent as an empty value,
+    because jQuery's traditional serialisation omits empty arrays and Spansh
+    treats a present-but-empty ``refuel_destinations`` differently from an
+    absent one.
+    """
+    out: dict = {}
+    for key, value in params.items():
+        if key not in _SPANSH_LIST_PARAMS:
+            out[key] = value
+            continue
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith("["):
+                try:
+                    value = json.loads(stripped)
+                except ValueError:
+                    value = [stripped]
+            else:
+                value = [stripped] if stripped else []
+
+        if not isinstance(value, (list, tuple)):
+            value = [value]
+
+        items = [str(v) for v in value if str(v).strip()]
+        if items:
+            out[key] = items
+    return out
 
 # HTTP statuses Spansh uses to mean "job accepted" on the async route POST.
 _SPANSH_OK_STATUSES = (200, 201, 202)
@@ -584,24 +631,42 @@ class SpanshPlugin(BasePlugin):
                             calc_starting_fuel: bool = True) -> dict | None:
         """Plot a fleet carrier route from source to destination.
 
-        The carrier router's parameters were reverse-engineered from a
-        real Spansh website job — the exact param names and shapes matter:
+        The carrier router's parameters were confirmed against a saved job
+        envelope from spansh.co.uk, whose ``parameters`` block echoes exactly
+        what the server parsed:
 
           source_system        — the SOURCE system's id64 (NOT its name)
-          destination_systems  — JSON array of destination id64s
+          destination_systems  — LIST of destination id64s.  Must be sent as
+                                 repeated bare keys, not a JSON string; see
+                                 _normalise_list_params and _plot_route.
           capacity             — the carrier's TOTAL capacity (25000 for a
-                                 standard fleet carrier) — not the used
-                                 figure
+                                 standard fleet carrier) — not the used figure
           capacity_used        — tonnes currently used on the carrier
           current_fuel         — tritium currently in the carrier's tank
           mass                 — carrier mass (= total capacity)
           tritium_amount       — tritium available to load (0 lets Spansh
                                  decide)
           calculate_starting_fuel — 1 to let Spansh work out the fill
-          refuel_destinations  — JSON array, empty unless pre-specifying
+          refuel_destinations  — LIST, omitted on the wire when empty
 
-        Because the endpoint wants id64s, source/destination names are
-        resolved through EDSM first.
+        The result carries per-jump fuel planning, which is the whole point
+        of the carrier router for long hauls.  Each entry in ``jumps``:
+
+          name, id64, x/y/z      — the system
+          distance               — this leg, ly (capped at the 500 ly max jump)
+          distance_to_destination— remaining, ly
+          fuel_used              — tritium burned on this leg
+          fuel_in_tank           — tritium aboard on arrival
+          must_restock,
+          restock_amount         — where to top up and by how much
+          tritium_in_market      — tritium purchasable in that system
+          has_icy_ring,
+          is_system_pristine     — whether tritium can be mined there
+          is_desired_destination — marks the requested endpoint(s)
+
+        Note the carrier result uses ``jumps`` (not ``system_jumps``) and
+        carries no top-level ``total_jumps`` or ``distance``; the total
+        distance is jumps[0]["distance_to_destination"].
 
         Args:
             source / destination — system NAMES (resolved to id64 here)
@@ -625,13 +690,13 @@ class SpanshPlugin(BasePlugin):
 
         return self._plot_route("carrier", {
             "source_system":           str(src["id64"]),
-            "destination_systems":     json.dumps([str(dst["id64"])]),
+            "destination_systems":     [str(dst["id64"])],
             "capacity":                int(total_capacity),
             "capacity_used":           int(capacity_used),
             "current_fuel":            int(current_fuel),
             "mass":                    int(total_capacity),
             "tritium_amount":          0,
-            "refuel_destinations":     json.dumps([]),
+            "refuel_destinations":     [],
             "calculate_starting_fuel": 1 if calc_starting_fuel else 0,
         }, store_key="spansh_carrier_route")
 
@@ -666,6 +731,8 @@ class SpanshPlugin(BasePlugin):
         if not candidates:
             return {"_error": f"No Spansh endpoint configured for '{route_kind}' routes"}
 
+        params = _normalise_list_params(params)
+
         start    = None
         used_url = None
         tried:   list[str] = []
@@ -674,7 +741,12 @@ class SpanshPlugin(BasePlugin):
         for post_url in candidates:
             tried.append(post_url)
             try:
-                body = urllib.parse.urlencode(params).encode("utf-8")
+                # doseq=True gives jQuery's ``traditional: true`` serialisation:
+                # a list value becomes repeated bare keys
+                # (destination_systems=A&destination_systems=B) rather than one
+                # JSON-encoded value.  Spansh's form parser only understands the
+                # former; the latter is queued and then yields nothing.
+                body = urllib.parse.urlencode(params, doseq=True).encode("utf-8")
                 req = urllib.request.Request(
                     post_url,
                     data=body,

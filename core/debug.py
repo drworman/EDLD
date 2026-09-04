@@ -297,6 +297,42 @@ def _format_argv(argv: list[str]) -> str:
     return " ".join(out)
 
 
+#: Substrings that mark a config key as carrying a credential.  Matched
+#: case-insensitively against the key name, so a future ``ApiToken`` or
+#: ``Webhook_URL`` is covered without another edit here.
+#:
+#: The trace header dumps the effective config on every launch, and these
+#: logs get attached to bug reports.  A Discord webhook URL is a bearer
+#: credential — anyone holding it can post to the channel — so it must never
+#: reach the file.  The redaction still reports whether a value was set,
+#: which is the only thing the config dump was answering anyway.
+_SECRET_KEY_PARTS = (
+    "webhook", "token", "secret", "password", "passwd",
+    "apikey", "api_key", "auth", "credential",
+)
+
+
+def _is_secret_key(key: str) -> bool:
+    lowered = str(key).replace("-", "").replace("_", "").lower()
+    return any(part.replace("_", "") in lowered for part in _SECRET_KEY_PARTS)
+
+
+def _redact(key: str, value: Any) -> Any:
+    """Replace a credential value with a set/unset marker.
+
+    Non-secret keys pass through untouched.
+    """
+    if not _is_secret_key(key):
+        return value
+    if isinstance(value, str):
+        return "<redacted — set>" if value.strip() else "<redacted — empty>"
+    if isinstance(value, (list, tuple)):
+        return f"<redacted — {len(value)} item(s)>"
+    if value in (None, 0, False):
+        return "<redacted — unset>"
+    return "<redacted — set>"
+
+
 def _format_toml_block(cfg: dict) -> list[str]:
     """Render a dict-of-dicts as TOML-style comment lines.
 
@@ -305,20 +341,22 @@ def _format_toml_block(cfg: dict) -> list[str]:
     ``# key = value`` lines.  Values use repr-style formatting for
     strings and Python's native repr for everything else, which is
     close enough to TOML for human readability.
+
+    Credential-shaped keys are redacted — see ``_SECRET_KEY_PARTS``.
     """
     lines: list[str] = []
 
     # Top-level scalars first (rare but possible)
     scalars = {k: v for k, v in cfg.items() if not isinstance(v, dict)}
     for k, v in scalars.items():
-        lines.append(f"# {k} = {_fmt_val(v)}")
+        lines.append(f"# {k} = {_fmt_val(_redact(k, v))}")
 
     for section, body in cfg.items():
         if not isinstance(body, dict):
             continue
         lines.append(f"# [{section}]")
         for k, v in body.items():
-            lines.append(f"# {k} = {_fmt_val(v)}")
+            lines.append(f"# {k} = {_fmt_val(_redact(k, v))}")
     return lines
 
 

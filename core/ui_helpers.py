@@ -105,3 +105,88 @@ def explo_fault(core, exc: BaseException | None = None) -> str:
         return f"Body data unavailable: {type(exc).__name__}: {exc}"
 
     return ""
+
+
+# ── Fleet carrier route rendering ─────────────────────────────────────────────
+#
+# Both front ends render the Spansh fleet-carrier result identically, and the
+# fuel arithmetic is the part worth getting right exactly once.  These helpers
+# return plain data so tui/blocks/navigation.py and gui/blocks/navigation.py
+# each only have to turn tuples into their own row widgets.
+#
+# The carrier result differs from the ship-route results in three ways that
+# matter here: waypoints live under "jumps" rather than "system_jumps", there
+# is no top-level total_jumps or distance, and every leg carries fuel planning.
+
+#: Fleet carriers jump at most 500 ly at a time.
+CARRIER_MAX_JUMP_LY = 500.0
+
+
+def carrier_route_summary(result: dict) -> dict:
+    """Derive the headline figures for a Spansh fleet-carrier route.
+
+    Returns {jumps, distance_ly, fuel_total, restocks, tritium_sources,
+    destination}.  Totals are derived from the legs because the carrier
+    result carries no top-level totals.
+    """
+    jumps = result.get("jumps") or []
+    if not jumps:
+        return {"jumps": 0, "distance_ly": 0.0, "fuel_total": 0,
+                "restocks": 0, "tritium_sources": 0, "destination": ""}
+
+    # jumps[0] is the origin (distance 0), so legs flown is len - 1.
+    legs = max(len(jumps) - 1, 0)
+    distance = float(jumps[0].get("distance_to_destination") or 0.0)
+    fuel_total = sum(int(j.get("fuel_used") or 0) for j in jumps)
+    restocks = sum(1 for j in jumps if j.get("must_restock"))
+    sources = sum(
+        1 for j in jumps
+        if j.get("has_icy_ring") or int(j.get("tritium_in_market") or 0) > 0
+    )
+    return {
+        "jumps":           legs,
+        "distance_ly":     distance,
+        "fuel_total":      fuel_total,
+        "restocks":        restocks,
+        "tritium_sources": sources,
+        "destination":     str(jumps[-1].get("name") or ""),
+    }
+
+
+def carrier_route_rows(result: dict) -> list[tuple[str, str]]:
+    """Return (label, value) pairs, one per waypoint, for the carrier route.
+
+    Value column carries the leg distance then the fuel picture, because on a
+    long haul the question at every stop is "can I make the next jump and
+    where do I top up".  Markers:
+
+        ⛽ n   restock here, n tonnes
+        ✦      pristine icy ring — tritium is mineable
+        ·      icy ring present
+        n t    tritium purchasable in the market
+    """
+    rows: list[tuple[str, str]] = []
+    for i, jump in enumerate(result.get("jumps") or []):
+        name = str(jump.get("name") or "—")
+        dist = float(jump.get("distance") or 0.0)
+        used = int(jump.get("fuel_used") or 0)
+        tank = int(jump.get("fuel_in_tank") or 0)
+
+        parts = [f"{dist:,.0f} ly" if i else "start"]
+        if used:
+            parts.append(f"-{used}t")
+        parts.append(f"[{tank}t]")
+
+        if jump.get("must_restock"):
+            parts.append(f"⛽{int(jump.get('restock_amount') or 0)}t")
+        elif jump.get("is_system_pristine") and jump.get("has_icy_ring"):
+            parts.append("✦")
+        elif jump.get("has_icy_ring"):
+            parts.append("·")
+
+        market = int(jump.get("tritium_in_market") or 0)
+        if market:
+            parts.append(f"mkt {market}t")
+
+        rows.append((f"{i}. {name}", "  ".join(parts)))
+    return rows

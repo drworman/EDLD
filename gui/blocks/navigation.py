@@ -10,9 +10,8 @@ thread through a Qt signal, which is the Qt equivalent of the Textual block's
 call_from_thread.  Touching widgets from the worker thread would be a crash;
 the signal hop is what makes it safe.
 
-Carrier tab is a static read of state.assets_carrier (Fleet section) and
-state.pilot_squadron_name (Squadron section, with the documented limitation
-that no anonymous API surfaces squadron carrier jump data).
+Carrier tab plots fleet-carrier routes through Spansh, with fuel planning.
+Full carrier detail lives in the Assets block's Carrier tab.
 """
 
 from __future__ import annotations
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from gui.block_base import GuiBlock, RowScroll, _fmt_credits
+from core.ui_helpers import carrier_route_rows, carrier_route_summary
 
 
 def _fmt_ly(d) -> str:
@@ -42,9 +42,13 @@ class NavigationBlock(GuiBlock):
 
     #: Emitted from the plotting worker thread: (prefix, result, is_neutron).
     plot_done = Signal(str, object, bool)
+    #: Emitted from the carrier worker thread: (result,).  Separate signal
+    #: because the carrier result has its own shape and renderer.
+    carrier_plot_done = Signal(object)
 
     def _build_body(self, layout) -> None:
         self.plot_done.connect(self._on_plot_done)
+        self.carrier_plot_done.connect(self._on_carrier_plot_done)
         self._inputs: dict[str, QLineEdit] = {}
         self._status: dict[str, object] = {}
         self._results: dict[str, RowScroll] = {}
@@ -53,18 +57,49 @@ class NavigationBlock(GuiBlock):
         self._tabs.setDocumentMode(True)
         self._tabs.addTab(self._make_plot_tab("fsd", neutron=False), "FSD")
         self._tabs.addTab(self._make_plot_tab("neutron", neutron=True), "Neutron")
-
-        # ── Carrier tab ──────────────────────────────────────────────────────
-        # Carrier ROUTING is deferred with no target release — the Spansh
-        # fleet-carrier API integration doesn't reliably return results from
-        # its accepted POSTs.  This tab continues to surface the live carrier
-        # *status* (balance / fuel / cargo) which is genuinely useful; the
-        # route-plotting form will be added if and when the API issue is
-        # resolved.
-        self._carrier_scroll = RowScroll()
-        self._tabs.addTab(self._carrier_scroll, "Carrier ⚠")
+        self._tabs.addTab(self._make_carrier_tab(), "Carrier")
 
         layout.addWidget(self._tabs, 1)
+
+    def _make_carrier_tab(self) -> QWidget:
+        """Fleet-carrier plot form.
+
+        Same shape as the ship tabs, with carrier-specific fields.  Defaults
+        are filled from the live carrier on refresh; full carrier detail
+        lives in the Assets block's Carrier tab.
+        """
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(6, 6, 6, 6)
+        lay.setSpacing(4)
+
+        self._carrier_info = self.text("", "dim")
+        lay.addWidget(self._carrier_info)
+
+        def _inp(key: str, placeholder: str) -> None:
+            e = QLineEdit()
+            e.setPlaceholderText(placeholder)
+            self._inputs[f"carrier-{key}"] = e
+            lay.addWidget(e)
+
+        _inp("from", "From (carrier's system)")
+        _inp("to", "To (e.g. Colonia)")
+        _inp("used", "Cargo used, t")
+        _inp("fuel", "Tritium in tank, t")
+
+        btn = QPushButton("Plot Carrier")
+        btn.setProperty("role", "primary")
+        btn.clicked.connect(self._launch_carrier_plot)
+        lay.addWidget(btn)
+
+        status = self.text("", "dim")
+        self._status["carrier"] = status
+        lay.addWidget(status)
+
+        results = RowScroll()
+        self._results["carrier"] = results
+        lay.addWidget(results, 1)
+        return page
 
     def _make_plot_tab(self, prefix: str, neutron: bool) -> QWidget:
         page = QWidget()
@@ -215,6 +250,95 @@ class NavigationBlock(GuiBlock):
             rows.append(self.kv(f"{i}. {name}", f"{_fmt_ly(dist)}{note}"))
         results.set_rows(rows)
 
+    # ── Carrier plotting ──────────────────────────────────────────────────────
+
+    def _launch_carrier_plot(self) -> None:
+        """Validate the carrier form, then plot on a background thread.
+
+        Carrier jobs are far heavier server-side than ship routes — a
+        galaxy-crossing route is 40+ jumps — so this can legitimately take
+        a couple of minutes.
+        """
+        def _v(key: str) -> str:
+            e = self._inputs.get(f"carrier-{key}")
+            return e.text().strip() if e is not None else ""
+
+        status = self._status["carrier"]
+        carrier = getattr(self.core.state, "assets_carrier", None) or {}
+
+        src = _v("from") or str(carrier.get("system") or "").strip()
+        dst = _v("to")
+        if not src or not dst:
+            status.set_text("[red]Source and destination required.[/red]")
+            return
+
+        def _int(key: str, fallback: int) -> int | None:
+            raw = _v(key)
+            if not raw:
+                return fallback
+            try:
+                return max(int(float(raw)), 0)
+            except ValueError:
+                return None
+
+        used = _int("used", int(carrier.get("cargo_used") or 0))
+        fuel = _int("fuel", int(carrier.get("fuel") or 0))
+        if used is None or fuel is None:
+            status.set_text("[red]Cargo and tritium must be numbers.[/red]")
+            return
+
+        total_capacity = int(carrier.get("cargo_total") or 25000) or 25000
+
+        self._results["carrier"].set_rows([])
+        status.set_text("Plotting carrier route… (can take a minute or two)")
+
+        def _worker():
+            try:
+                result = self.core.plugin_call(
+                    "spansh", "plot_carrier_route", src, dst, used,
+                    total_capacity, fuel,
+                )
+            except Exception as exc:
+                result = {"_error": f"{type(exc).__name__}: {exc}"}
+            self.carrier_plot_done.emit(result)
+
+        threading.Thread(target=_worker, daemon=True,
+                         name="nav-plot-carrier").start()
+
+    def _on_carrier_plot_done(self, result) -> None:
+        status  = self._status.get("carrier")
+        results = self._results.get("carrier")
+        if status is None or results is None:
+            return
+        results.set_rows([])
+
+        if not result:
+            status.set_text("[yellow]No route returned (timeout or error).[/yellow]")
+            return
+        if isinstance(result, dict) and result.get("_error"):
+            status.set_text(f"[red]Plot failed: {result['_error']}[/red]")
+            return
+        if not (result.get("jumps") or []):
+            status.set_text("[yellow]No jumps in response.[/yellow]")
+            return
+
+        s = carrier_route_summary(result)
+        status.set_text(
+            f"[green]{s['jumps']} jumps · {s['distance_ly']:,.0f} ly · "
+            f"{s['fuel_total']:,} t tritium[/green]"
+        )
+
+        rows = [self.hdr("Route")]
+        if s["restocks"]:
+            rows.append(self.text(
+                f"[yellow]{s['restocks']} restock stop(s)[/yellow] · "
+                f"{s['tritium_sources']} systems with tritium available",
+                "dim",
+            ))
+        for label, value in carrier_route_rows(result):
+            rows.append(self.kv(label, value))
+        results.set_rows(rows)
+
     # ── Refresh (state-driven content) ────────────────────────────────────────
 
     def refresh_data(self) -> None:
@@ -231,42 +355,30 @@ class NavigationBlock(GuiBlock):
         self._refresh_carrier()
 
     def _refresh_carrier(self) -> None:
-        rows: list = []
+        """Keep the carrier form's defaults in step with the live carrier.
 
-        # Carrier routing is deferred (no target release) — keep this notice
-        # visible at the top of the tab so it's obvious why no plot form.
-        rows.append(self.text(
-            "[yellow]⚠ Carrier routing is UNFINISHED — disabled for this "
-            "release. Status display below remains live.[/yellow]"
-        ))
-
-        rows.append(self.hdr("Fleet carrier"))
+        Only empty fields are filled, so anything typed by hand survives a
+        refresh.  Full carrier detail lives in the Assets block's Carrier tab.
+        """
         carrier = getattr(self.core.state, "assets_carrier", None)
         if not carrier:
-            rows.append(self.text("No carrier on file.", "dim"))
-        else:
-            rows.append(self.kv("Name",       str(carrier.get("name", "—"))))
-            rows.append(self.kv("Callsign",   str(carrier.get("callsign", "—"))))
-            rows.append(self.kv("System",     str(carrier.get("system", "—"))))
-            rows.append(self.kv("Fuel",       f"{carrier.get('fuel', 0)} t"))
-            rows.append(self.kv("Cargo",
-                f"{carrier.get('cargo_used', 0)} / "
-                f"{carrier.get('cargo_total', 0)} t"))
-            rows.append(self.kv("Balance",   _fmt_credits(carrier.get("balance"))))
-            rows.append(self.kv("Available", _fmt_credits(carrier.get("available"))))
-            rows.append(self.kv("Docking",   str(carrier.get("docking", "—"))))
+            self._carrier_info.set_text(
+                "[dim]No carrier on file — enter values by hand.[/dim]")
+            return
 
-        rows.append(self.hdr("Squadron carrier"))
-        sq_name = getattr(self.core.state, "pilot_squadron_name", "") or ""
-        if sq_name:
-            rows.append(self.kv("Squadron", sq_name))
-            rows.append(self.text(
-                "Squadron carrier jump-status data is not available "
-                "from the journal or any anonymous API.  This section will "
-                "populate once a squadron-data integration ships.",
-                "dim",
-            ))
-        else:
-            rows.append(self.text("No squadron on file.", "dim"))
+        name = str(carrier.get("name") or "Carrier")
+        sysm = str(carrier.get("system") or "—")
+        fuel = carrier.get("fuel") or 0
+        used = carrier.get("cargo_used") or 0
+        cap  = carrier.get("cargo_total") or 25000
+        self._carrier_info.set_text(
+            f"{name} · {sysm} · {fuel} t tritium · {used}/{cap} t")
 
-        self._carrier_scroll.set_rows(rows)
+        for key, value in (
+            ("from", sysm),
+            ("used", str(int(used))),
+            ("fuel", str(int(fuel))),
+        ):
+            inp = self._inputs.get(f"carrier-{key}")
+            if inp is not None and not inp.text().strip() and value and value != "—":
+                inp.setText(value)
