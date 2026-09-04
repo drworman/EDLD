@@ -308,7 +308,16 @@ class AssetsPlugin(BasePlugin):
             pass
 
     def _parse_carrier_stats_from_capi(self, fc: dict) -> dict | None:
-        """Parse capi_fleetcarrier.json into the assets_carrier state dict."""
+        """Parse capi_fleetcarrier.json into the assets_carrier state dict.
+
+        Key names must match ``_parse_carrier_stats`` (journal CarrierStats)
+        and the CAPI ingest in ``core/data.py``, because whichever source
+        fires last wins and the display reads one set of names.  They used to
+        diverge — this parser emitted ``state`` where the others emit
+        ``carrier_state``, and omitted docking, balances and cargo free space
+        entirely — so a CAPI-sourced carrier rendered with fields missing that
+        a journal-sourced one had.
+        """
         try:
             name_obj  = fc.get("name") or {}
             callsign  = name_obj.get("callsign", "")
@@ -322,27 +331,54 @@ class AssetsPlugin(BasePlugin):
             fin   = fc.get("finance")  or {}
             mkt   = fc.get("market")   or {}
             svcs  = mkt.get("services") or {}
-            space = cap
-            services: dict = {}
-            for svc, status in svcs.items():
-                services[svc] = status
+            tax   = fin.get("service_taxation") or {}
+
+            def _i(v) -> int:
+                try:
+                    return int(v or 0)
+                except (TypeError, ValueError):
+                    return 0
+
+            used = (_i(cap.get("cargoForSale")) +
+                    _i(cap.get("cargoNotForSale")) +
+                    _i(cap.get("cargoSpaceReserved")))
+            free = _i(cap.get("freeSpace"))
+            balance = _i(fin.get("bankBalance"))
+            reserve = _i(fin.get("bankReservedBalance"))
+
             return {
-                "callsign":     callsign,
-                "name":         vanity,
-                "system":       fc.get("currentStarSystem", "—"),
-                "state":        fc.get("state", ""),
-                "theme":        "",
-                "balance":      int(fin.get("bankBalance", 0)),
-                "fuel":         int(fc.get("fuel", 0)),
-                "debt":         0,
-                "cargo_used":   int(cap.get("cargoNotForSale", 0)),
-                "ship_packs":   int(cap.get("shipPacks", 0)),
-                "module_packs": int(cap.get("modulePacks", 0)),
-                "micro_total":  int(cap.get("microresourceCapacityTotal", 0)),
-                "micro_free":   int(cap.get("microresourceCapacityFree", 0)),
-                "micro_used":   int(cap.get("microresourceCapacityUsed", 0)),
-                "services":     services,
-                "carrier_type": "FleetCarrier",  # CAPI does not expose type; assume FC
+                "callsign":      callsign,
+                "name":          vanity or callsign,
+                "system":        fc.get("currentStarSystem", "—"),
+                "theme":         fc.get("theme", "—"),
+                "carrier_state": fc.get("state", "—"),
+                "docking":       fc.get("dockingAccess") or "—",
+                "notorious":     bool(fc.get("notoriousAccess", False)),
+                "balance":       balance,
+                "reserve":       reserve,
+                "available":     max(balance - reserve, 0),
+                "maintenance":     _i(fin.get("maintenance")),
+                "maintenance_wtd": _i(fin.get("maintenanceToDate")),
+                "tax_refuel":    tax.get("refuel", 0),
+                "tax_repair":    tax.get("repair", 0),
+                "tax_rearm":     tax.get("rearm", 0),
+                "tax_pioneer":   tax.get("pioneersupplies", 0),
+                "fuel":          _i(fc.get("fuel")),
+                "debt":          0,
+                "cargo_used":    used,
+                "cargo_free":    free,
+                "cargo_total":   (used + free) or 25_000,
+                "cargo_crew":    _i(cap.get("crew")),
+                "ship_packs":    _i(cap.get("shipPacks")),
+                "module_packs":  _i(cap.get("modulePacks")),
+                "micro_total":   _i(cap.get("microresourceCapacityTotal")),
+                "micro_free":    _i(cap.get("microresourceCapacityFree")),
+                "micro_used":    _i(cap.get("microresourceCapacityUsed")),
+                "services":      dict(svcs),
+                # CAPI does not expose carrier type; a squadron carrier is
+                # rare enough that assuming a fleet carrier is the safer
+                # default, and the journal corrects it when CarrierStats fires.
+                "carrier_type":  "FleetCarrier",
             }
         except Exception:
             return None
@@ -1001,6 +1037,7 @@ class AssetsPlugin(BasePlugin):
             # Identity
             "callsign":      event.get("Callsign", "—"),
             "name":          event.get("Name", "—"),
+            "theme":         event.get("Theme", "—"),
             "system":        event.get("CurrentStarSystem", "—"),
             # Fuel
             "fuel":          event.get("FuelLevel", 0),   # 0–1000 tritium

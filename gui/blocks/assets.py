@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QTabWidget
 
+from core.ui_helpers import carrier_display_sections, normalise_carrier
 from gui.block_base import GuiBlock, RowScroll, _fmt_credits
 
 
@@ -49,26 +50,10 @@ class AssetsBlock(GuiBlock):
         self._tabs.addTab(self._modules, "Modules")
 
         # ── Fleet Carrier ─────────────────────────────────────────────────────
+        # Rebuilt on every refresh rather than a fixed row set: which rows
+        # apply depends on the carrier and on whether CAPI has polled, and
+        # rendering absent data as a column of dashes reads like a bug.
         self._carrier = RowScroll()
-        self._c: dict[str, object] = {}
-
-        def _crow(key, wid):
-            r = self.kv(key)
-            self._c[wid] = r
-            self._carrier.add_row(r)
-
-        _crow("Name", "ac-name")
-        _crow("Callsign", "ac-callsign")
-        _crow("System", "ac-system")
-        _crow("Fuel", "ac-fuel")
-        self._carrier.add_row(self.hdr("Finance"))
-        _crow("Balance", "ac-balance")
-        _crow("Reserve", "ac-reserve")
-        _crow("Upkeep/wk", "ac-upkeep")
-        self._carrier.add_row(self.hdr("Cargo"))
-        _crow("Stored", "ac-stored")
-        _crow("Free", "ac-free")
-        _crow("Market listings", "ac-inv-val")
         self._tabs.addTab(self._carrier, "Fleet Carrier")
 
         layout.addWidget(self._tabs, 1)
@@ -97,8 +82,7 @@ class AssetsBlock(GuiBlock):
         fc_mats  = getattr(s, "assets_fc_materials", None) or []
         carrier_cargo_val = sum(m.get("price", 0) * m.get("stock", 0) for m in fc_mats)
         if carrier:
-            ctype = carrier.get("carrier_type", "FleetCarrier")
-            carrier_hull_val = 24_850_000_000 if "Squadron" in ctype else 4_850_000_000
+            carrier_hull_val = normalise_carrier(carrier)["hull_value"]
             self._kv("aw-carrier-balance", _fmt_credits(carrier.get("balance")) if carrier.get("balance") else "—")
             self._kv("aw-carrier-hull",    _fmt_credits(carrier_hull_val))
             self._kv("aw-carrier-cargo",   _fmt_credits(carrier_cargo_val) if carrier_cargo_val else "—")
@@ -195,37 +179,20 @@ class AssetsBlock(GuiBlock):
         self._modules.set_rows(mod_rows)
 
     def _refresh_carrier(self) -> None:
-        carrier = getattr(self.state, "assets_carrier", None)
-        if not carrier:
-            for wid in ("ac-name", "ac-callsign", "ac-system", "ac-fuel",
-                        "ac-balance", "ac-reserve", "ac-upkeep",
-                        "ac-stored", "ac-free", "ac-inv-val"):
-                self._ckv(wid, "—")
-            return
-
-        fuel = int(carrier.get("fuel", 0) or 0)
-        self._ckv("ac-name",     carrier.get("name",     "—") or "—")
-        self._ckv("ac-callsign", carrier.get("callsign", "—") or "—")
-        self._ckv("ac-system",   carrier.get("system",   "—") or "—")
-        self._ckv("ac-fuel",     f"{fuel}/1000  ({fuel // 10}%)")
-        self._ckv("ac-balance",  _fmt_credits(carrier.get("balance")))
-        self._ckv("ac-reserve",  _fmt_credits(carrier.get("reserve_balance")))
-        self._ckv("ac-upkeep",   _fmt_credits(carrier.get("coreCost")))
-        cap  = carrier.get("capacity", {})
-        used = cap.get("cargo", 0)
-        free = cap.get("freeSpace", 0)
-        self._ckv("ac-stored", str(used) if (used or free) else "—")
-        self._ckv("ac-free",   str(free) if (used or free) else "—")
-        fc_mats = getattr(self.state, "assets_fc_materials", None) or []
-        inv_val = sum(m.get("price", 0) * m.get("stock", 0) for m in fc_mats)
-        self._ckv("ac-inv-val", _fmt_credits(inv_val) if inv_val else "—")
+        rows = []
+        for title, entries in carrier_display_sections(
+            getattr(self.state, "assets_carrier", None),
+            getattr(self.state, "assets_fc_materials", None),
+            getattr(self.state, "assets_carrier_hold", None),
+            getattr(self.state, "pilot_squadron_name", "") or "",
+        ):
+            rows.append(self.hdr(title))
+            for label, value in entries:
+                rows.append(self.kv(label, value))
+        self._carrier.set_rows(rows)
 
     def _kv(self, wid: str, text: str, classes: str = "val") -> None:
         row = self._w.get(wid)
         if row is not None:
             row.set_value(text, classes)
 
-    def _ckv(self, wid: str, text: str, classes: str = "val") -> None:
-        row = self._c.get(wid)
-        if row is not None:
-            row.set_value(text, classes)

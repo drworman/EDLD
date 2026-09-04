@@ -4,6 +4,7 @@ from textual.app        import ComposeResult
 from textual.widgets    import Label, TabbedContent, TabPane
 from textual.containers import VerticalScroll
 from tui.block_base     import TuiBlock, KVRow, SecHdr, _fmt_credits
+from core.ui_helpers    import carrier_display_sections, normalise_carrier
 
 
 class AssetsBlock(TuiBlock):
@@ -41,19 +42,11 @@ class AssetsBlock(TuiBlock):
                     yield Label("No stored modules", id="assets-modules")
 
             with TabPane("Fleet Carrier", id="assets-tab-carrier"):
-                with VerticalScroll():
-                    yield KVRow("Name",      id="ac-name")
-                    yield KVRow("Callsign",  id="ac-callsign")
-                    yield KVRow("System",    id="ac-system")
-                    yield KVRow("Fuel",      id="ac-fuel")
-                    yield SecHdr("Finance")
-                    yield KVRow("Balance",   id="ac-balance")
-                    yield KVRow("Reserve",   id="ac-reserve")
-                    yield KVRow("Upkeep/wk", id="ac-upkeep")
-                    yield SecHdr("Cargo")
-                    yield KVRow("Stored",          id="ac-stored")
-                    yield KVRow("Free",            id="ac-free")
-                    yield KVRow("Market listings", id="ac-inv-val")
+                # Rebuilt on every refresh rather than a fixed row set: which
+                # rows apply depends on the carrier and on whether CAPI has
+                # polled, and rendering absent data as a column of dashes
+                # reads like a bug.
+                yield VerticalScroll(id="assets-carrier-scroll")
 
     def refresh_data(self) -> None:
         self._refresh_wallet()
@@ -79,8 +72,7 @@ class AssetsBlock(TuiBlock):
         fc_mats  = getattr(s, "assets_fc_materials", None) or []
         carrier_cargo_val = sum(m.get("price", 0) * m.get("stock", 0) for m in fc_mats)
         if carrier:
-            ctype = carrier.get("carrier_type", "FleetCarrier")
-            carrier_hull_val = 24_850_000_000 if "Squadron" in ctype else 4_850_000_000
+            carrier_hull_val = normalise_carrier(carrier)["hull_value"]
             self._kv("aw-carrier-balance", _fmt_credits(carrier.get("balance")) if carrier.get("balance") else "—")
             self._kv("aw-carrier-hull",    _fmt_credits(carrier_hull_val))
             self._kv("aw-carrier-cargo",   _fmt_credits(carrier_cargo_val) if carrier_cargo_val else "—")
@@ -193,30 +185,23 @@ class AssetsBlock(TuiBlock):
             self._lbl("assets-modules", "No stored modules")
 
     def _refresh_carrier(self) -> None:
-        carrier = getattr(self.state, "assets_carrier", None)
-        if not carrier:
-            for wid in ("ac-name", "ac-callsign", "ac-system", "ac-fuel",
-                        "ac-balance", "ac-reserve", "ac-upkeep",
-                        "ac-stored", "ac-free", "ac-inv-val"):
-                self._kv(wid, "—")
+        try:
+            scroll = self.query_one("#assets-carrier-scroll", VerticalScroll)
+        except Exception:
             return
+        scroll.remove_children()
 
-        fuel = int(carrier.get("fuel", 0) or 0)
-        self._kv("ac-name",     carrier.get("name",     "—") or "—")
-        self._kv("ac-callsign", carrier.get("callsign", "—") or "—")
-        self._kv("ac-system",   carrier.get("system",   "—") or "—")
-        self._kv("ac-fuel",     f"{fuel}/1000  ({fuel // 10}%)")
-        self._kv("ac-balance",  _fmt_credits(carrier.get("balance")))
-        self._kv("ac-reserve",  _fmt_credits(carrier.get("reserve_balance")))
-        self._kv("ac-upkeep",   _fmt_credits(carrier.get("coreCost")))
-        cap  = carrier.get("capacity", {})
-        used = cap.get("cargo", 0)
-        free = cap.get("freeSpace", 0)
-        self._kv("ac-stored", str(used) if (used or free) else "—")
-        self._kv("ac-free",   str(free) if (used or free) else "—")
-        fc_mats = getattr(self.state, "assets_fc_materials", None) or []
-        inv_val = sum(m.get("price", 0) * m.get("stock", 0) for m in fc_mats)
-        self._kv("ac-inv-val", _fmt_credits(inv_val) if inv_val else "—")
+        rows: list = []
+        for title, entries in carrier_display_sections(
+            getattr(self.state, "assets_carrier", None),
+            getattr(self.state, "assets_fc_materials", None),
+            getattr(self.state, "assets_carrier_hold", None),
+            getattr(self.state, "pilot_squadron_name", "") or "",
+        ):
+            rows.append(SecHdr(title))
+            for label, value in entries:
+                rows.append(KVRow(label, value))
+        scroll.mount(*rows)
 
     def _kv(self, wid: str, text: str, classes: str = "val") -> None:
         try:
