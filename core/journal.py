@@ -1457,22 +1457,66 @@ def monitor_journal(
         try:
             from discord_webhook import DiscordEmbed
             embed = DiscordEmbed(title="▶  Monitoring Active", color="00e5ff")
-            embed.add_embed_field(name="Commander", value=f"CMDR {state.pilot_name}", inline=False)
+
+            # Lead with who and where — the two things that orient a reader
+            # scrolling past in a channel.  Ship, mode and rank are compact
+            # enough to share a row of inline fields underneath.
+            embed.add_embed_field(
+                name="Commander", value=f"CMDR {state.pilot_name}", inline=False)
+
+            if state.pilot_system:
+                # pilot_body doubles as the station name when docked — the
+                # journal's StationName is written into it, so there is no
+                # separate station field to add here.
+                _loc_val = state.pilot_system
+                if state.pilot_body:
+                    _loc_val += f" / {state.pilot_body}"
+                embed.add_embed_field(name="Location", value=_loc_val, inline=False)
+
             embed.add_embed_field(name="Ship",  value=state.pilot_ship  or "Unknown", inline=True)
             embed.add_embed_field(name="Mode",  value=state.pilot_mode  or "Unknown", inline=True)
             embed.add_embed_field(
                 name="Combat Rank",
                 value=f"{state.pilot_rank} +{state.pilot_rank_progress}%", inline=True,
             )
+
+            # Credits on hand and cargo aboard say what shape the commander
+            # is starting in, which the embed never reported before.
+            _balance = getattr(state, "assets_balance", None)
+            if _balance:
+                embed.add_embed_field(
+                    name="Credits", value=fmt_credits(_balance), inline=True)
+
+            _cap = int(getattr(state, "cargo_capacity", 0) or 0)
+            if _cap > 0:
+                _items = getattr(state, "cargo_items", {}) or {}
+                _carried = sum(int((v or {}).get("count", 0) or 0)
+                               for v in _items.values())
+                embed.add_embed_field(
+                    name="Cargo", value=f"{_carried} / {_cap} t", inline=True)
+
+            _fuel = getattr(state, "fuel_current", None)
+            _tank = getattr(state, "fuel_tank_size", None)
+            if _fuel is not None and _tank:
+                embed.add_embed_field(
+                    name="Fuel", value=f"{_fuel / _tank * 100:.0f}%", inline=True)
+
             if state.pp_power:
                 _pp_val = state.pp_power
                 if state.pp_rank:        _pp_val += f" — Rank {state.pp_rank}"
                 if state.pp_merits_total: _pp_val += f" ({state.pp_merits_total:,} merits)"
                 embed.add_embed_field(name="Powerplay", value=_pp_val, inline=False)
-            if state.pilot_system:
-                _loc_val = state.pilot_system
-                if state.pilot_body: _loc_val += f" / {state.pilot_body}"
-                embed.add_embed_field(name="Location", value=_loc_val, inline=False)
+
+            # A carrier parked somewhere else is easy to forget about.
+            _carrier = getattr(state, "assets_carrier", None)
+            if _carrier:
+                _c_name = _carrier.get("name") or _carrier.get("callsign") or "Carrier"
+                _c_val = f"{_c_name} — {_carrier.get('system') or 'unknown system'}"
+                _c_fuel = _carrier.get("fuel")
+                if _c_fuel is not None:
+                    _c_val += f"\n{int(_c_fuel)} t tritium"
+                embed.add_embed_field(name="Fleet Carrier", value=_c_val, inline=False)
+
             if state.stack_value > 0:
                 _done = state.missions_complete; _tot = len(state.active_missions)
                 _rem  = _tot - _done

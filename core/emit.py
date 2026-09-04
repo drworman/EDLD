@@ -293,7 +293,24 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
     # ── Collect all data rows ─────────────────────────────────────────────
     sections: list[tuple[str, list]] = []
 
-    # ── Fuel row — always included when data is available ─────────────────
+    # ── Session block — income then fuel ──────────────────────────────────
+    # These lead because they answer "how much, and can I keep going", which
+    # is what someone reading the channel actually wants to know.  Income was
+    # previously tracked but never reached the summary at all.
+    session_rows: list = []
+
+    core = getattr(session_plugin, "core", None)
+    income_plugin = None
+    if core is not None:
+        income_plugin = getattr(core, "_plugins", {}).get("income")
+    total_income = getattr(income_plugin, "total_income", 0) or 0
+    if total_income:
+        rate = None
+        if dur_s >= 60:
+            cph = total_income / (dur_s / 3600.0)
+            rate = f"{fmt_credits(round(cph))}/hr"
+        session_rows.append(("Income", fmt_credits(total_income), rate))
+
     fuel_current  = getattr(state, "fuel_current",  None)
     fuel_tank     = getattr(state, "fuel_tank_size", None)
     fuel_rate     = getattr(state, "fuel_burn_rate", None)
@@ -307,7 +324,10 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
             m_rem = int((secs_left % 3600) // 60)
             remaining = f"~{h_rem}h {m_rem}m" if h_rem > 0 else f"~{m_rem}m"
             fuel_rate_str = remaining
-        sections.append(("Fuel", [("Fuel", fuel_val, fuel_rate_str)]))
+        session_rows.append(("Fuel", fuel_val, fuel_rate_str))
+
+    if session_rows:
+        sections.append(("Session", session_rows))
 
     for p in sorted(active, key=lambda p: getattr(p, "ACTIVITY_TAB_TITLE", "")):
         raw = p.get_summary_rows()
@@ -329,9 +349,16 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
         return
 
     # ── Compute column widths across ALL data rows + Duration ─────────────
+    # Free-text values (a ring description, a long body name) can be several
+    # times wider than any number here.  Letting them set the column width
+    # right-shifts every figure in the block and wrecks the alignment that
+    # makes the table scannable, so they are excluded from the measurement
+    # and allowed to overflow their column instead.
+    VALUE_WIDTH_CAP = 24
     all_rows = [(l, v, r) for _, rows in sections for l, v, r in rows]
     max_label = max((len(l) for l, v, r in all_rows), default=0)
-    max_value = max((len(v) for l, v, r in all_rows), default=0)
+    max_value = max((len(v) for l, v, r in all_rows
+                     if len(v) <= VALUE_WIDTH_CAP), default=0)
     # Duration value may be wider than any data value
     max_label = max(max_label, len("Duration"))
     max_value = max(max_value, len(duration_str))
@@ -347,7 +374,29 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
     dur_lc   = "Duration:"
     dur_line = f"{dur_lc:<{max_label + 1}}  {duration_str:>{max_value}}"
 
-    lines = ["Session Summary", dur_line]
+    context: list[str] = []
+    cmdr = getattr(state, "pilot_name", None)
+    if cmdr:
+        context.append(f"CMDR {cmdr}")
+    ship = getattr(state, "pilot_ship", None)
+    if ship:
+        context.append(str(ship))
+    mode = getattr(state, "pilot_mode", None)
+    if mode:
+        context.append(str(mode))
+
+    where = getattr(state, "pilot_system", None)
+    body  = getattr(state, "pilot_body", None)
+    location = f"{where} / {body}" if where and body else (where or "")
+
+    lines = ["Session Summary"]
+    if context:
+        lines.append("  ".join(context))
+    if location:
+        lines.append(str(location))
+    if context or location:
+        lines.append("")
+    lines.append(dur_line)
     for title, rows in sections:
         # If a section has exactly one row whose label matches the title,
         # collapse to a single line at section-header indent.
