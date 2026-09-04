@@ -17,14 +17,21 @@ Full carrier detail lives in the Assets block's Carrier tab.
 from __future__ import annotations
 
 import threading
+import time
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QLineEdit, QPushButton, QTabWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QLineEdit, QPushButton, QTabWidget, QVBoxLayout,
+    QWidget,
 )
 
 from gui.block_base import GuiBlock, RowScroll, _fmt_credits
 from core.ui_helpers import carrier_route_rows, carrier_route_summary
+
+
+#: How long a footer click result stays on screen before the standing route
+#: status reclaims the line.
+_FOOTER_MSG_SECONDS = 6.0
 
 
 def _fmt_ly(d) -> str:
@@ -60,6 +67,98 @@ class NavigationBlock(GuiBlock):
         self._tabs.addTab(self._make_carrier_tab(), "Carrier")
 
         layout.addWidget(self._tabs, 1)
+
+        # Footer strip, same one-row budget the Cargo block uses.
+        self._footer_msg = ""
+        self._footer_msg_at = 0.0
+
+        footer = QWidget()
+        fl = QHBoxLayout(footer)
+        fl.setContentsMargins(6, 2, 6, 2)
+        fl.setSpacing(8)
+
+        self._follow_btn = QPushButton("Follow: off")
+        self._follow_btn.setProperty("role", "link")
+        self._follow_btn.clicked.connect(self._on_toggle_follow)
+
+        self._copy_btn = QPushButton("Copy Next")
+        self._copy_btn.setProperty("role", "link")
+        self._copy_btn.clicked.connect(self._on_copy_next)
+
+        self._clear_btn = QPushButton("Clear Route")
+        self._clear_btn.setProperty("role", "link")
+        self._clear_btn.clicked.connect(self._on_clear_route)
+
+        # TextRow rather than a bare QLabel so it picks up the block's
+        # palette and markup handling like every other row in the app.
+        self._follow_lbl = self.text("", "dim")
+        self._follow_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        fl.addWidget(self._follow_btn, 0)
+        fl.addWidget(self._copy_btn, 0)
+        fl.addWidget(self._clear_btn, 0)
+        fl.addWidget(self._follow_lbl, 1)
+        layout.addWidget(footer)
+
+    # ── Route-follower footer ─────────────────────────────────────────────────
+
+    def _nav_plugin(self):
+        return self.core._plugins.get("navigation")
+
+    def _set_follow_msg(self, text: str) -> None:
+        """Show a transient result message; it decays back to route status."""
+        self._footer_msg = text
+        self._footer_msg_at = time.monotonic()
+        self._follow_lbl.set_text(text)
+
+    def _on_toggle_follow(self) -> None:
+        nav = self._nav_plugin()
+        if nav is None:
+            self._set_follow_msg("[red]Navigation component not loaded.[/red]")
+            return
+        on = nav.toggle_follow()
+        self._set_follow_msg(
+            "Following route — next system copies on arrival."
+            if on else "Follow off."
+        )
+        self._refresh_footer()
+
+    def _on_copy_next(self) -> None:
+        nav = self._nav_plugin()
+        if nav is None:
+            self._set_follow_msg("[red]Navigation component not loaded.[/red]")
+            return
+        ok, msg = nav.copy_next()
+        self._set_follow_msg(msg if ok else f"[yellow]{msg}[/yellow]")
+        self._refresh_footer()
+
+    def _on_clear_route(self) -> None:
+        nav = self._nav_plugin()
+        if nav is None:
+            self._set_follow_msg("[red]Navigation component not loaded.[/red]")
+            return
+        self._set_follow_msg(nav.clear_route())
+        self._refresh_footer()
+
+    def _refresh_footer(self) -> None:
+        nav = self._nav_plugin()
+        if nav is None:
+            self._follow_btn.setText("Follow: n/a")
+            self._follow_lbl.set_text(
+                "[dim]Navigation component not loaded.[/dim]")
+            return
+
+        s = self.core.state
+        on = bool(getattr(s, "nav_follow_enabled", False))
+        self._follow_btn.setText(f"Follow: {'ON' if on else 'off'}")
+
+        # A click result stays visible briefly, then the standing route
+        # status takes the line back.
+        if self._footer_msg and (time.monotonic() - self._footer_msg_at) < _FOOTER_MSG_SECONDS:
+            return
+        self._footer_msg = ""
+        self._follow_lbl.set_text(
+            getattr(s, "nav_follow_status", "") or "No route")
 
     def _make_carrier_tab(self) -> QWidget:
         """Fleet-carrier plot form.
@@ -236,6 +335,17 @@ class NavigationBlock(GuiBlock):
                 f"[green]{total_jumps} jumps · {total_distance:,.0f} ly[/green]"
             )
 
+
+        # Persist as the followed route so the footer's Copy Next and the
+        # arrival auto-copy work off what was just plotted.
+        nav = self.core._plugins.get("navigation")
+        if nav is not None:
+            try:
+                nav.store_route(result, "neutron" if is_neutron else "fsd")
+            except Exception as exc:
+                from core import debug as _dbg
+                _dbg.info(f"  [Nav] could not store plotted route: {exc}")
+
         rows = [self.hdr("Waypoints")]
         for i, jump in enumerate(jumps, start=1):
             name = jump.get("system") or jump.get("name") or "—"
@@ -328,6 +438,17 @@ class NavigationBlock(GuiBlock):
             f"{s['fuel_total']:,} t tritium[/green]"
         )
 
+
+        # Persist as the followed route so the footer's Copy Next and the
+        # arrival auto-copy work off what was just plotted.
+        nav = self.core._plugins.get("navigation")
+        if nav is not None:
+            try:
+                nav.store_route(result, "carrier")
+            except Exception as exc:
+                from core import debug as _dbg
+                _dbg.info(f"  [Nav] could not store plotted route: {exc}")
+
         rows = [self.hdr("Route")]
         if s["restocks"]:
             rows.append(self.text(
@@ -353,6 +474,7 @@ class NavigationBlock(GuiBlock):
 
         # Carrier tab is fully state-driven.
         self._refresh_carrier()
+        self._refresh_footer()
 
     def _refresh_carrier(self) -> None:
         """Keep the carrier form's defaults in step with the live carrier.

@@ -16,13 +16,19 @@ Full carrier detail lives in the Assets block's Carrier tab.
 from __future__ import annotations
 
 import threading
+import time
 
 from textual.app        import ComposeResult
-from textual.widgets    import Label, TabbedContent, TabPane, Input, Button
+from textual.widgets    import Label, Static, TabbedContent, TabPane, Input, Button
 from textual.containers import VerticalScroll, Horizontal
 
 from tui.block_base     import TuiBlock, KVRow, SecHdr, _fmt_credits
 from core.ui_helpers    import carrier_route_rows, carrier_route_summary
+
+
+#: How long a footer click result stays on screen before the standing route
+#: status reclaims the line.
+_FOOTER_MSG_SECONDS = 6.0
 
 
 def _fmt_ly(d) -> str:
@@ -37,6 +43,24 @@ def _fmt_ly(d) -> str:
 
 class NavigationBlock(TuiBlock):
     BLOCK_TITLE = "NAVIGATION"
+
+    def __init__(self, core, **kw) -> None:
+        super().__init__(core, **kw)
+        self._footer_msg = ""
+        self._footer_msg_at = 0.0
+
+    def compose(self) -> ComposeResult:
+        yield Label(self.BLOCK_TITLE, classes="block-title")
+        yield from self._compose_body()
+        # Footer strip, same one-row budget the Cargo block uses.
+        with Horizontal(id="nav-footer"):
+            yield Static(">> Follow: off", id="nav-follow-btn",
+                         classes="footer-lbl")
+            yield Static(">> Copy Next", id="nav-copy-btn",
+                         classes="footer-lbl")
+            yield Static(">> Clear Route", id="nav-clear-btn",
+                         classes="footer-lbl")
+            yield Label("", id="nav-follow-lbl", classes="dim")
 
     def _compose_body(self) -> ComposeResult:
         with TabbedContent(id="nav-tabs"):
@@ -185,6 +209,17 @@ class NavigationBlock(TuiBlock):
             f"{s['fuel_total']:,} t tritium[/green]"
         )
 
+
+        # Persist as the followed route so the footer's Copy Next and the
+        # arrival auto-copy work off what was just plotted.
+        nav = self.core._plugins.get("navigation")
+        if nav is not None:
+            try:
+                nav.store_route(result, "carrier")
+            except Exception as exc:
+                from core import debug as _dbg
+                _dbg.info(f"  [Nav] could not store plotted route: {exc}")
+
         rows = [SecHdr("Route")]
         if s["restocks"]:
             rows.append(Label(
@@ -306,6 +341,17 @@ class NavigationBlock(TuiBlock):
                 f"[green]{total_jumps} jumps · {total_distance:,.0f} ly[/green]"
             )
 
+
+        # Persist as the followed route so the footer's Copy Next and the
+        # arrival auto-copy work off what was just plotted.
+        nav = self.core._plugins.get("navigation")
+        if nav is not None:
+            try:
+                nav.store_route(result, "neutron" if is_neutron else "fsd")
+            except Exception as exc:
+                from core import debug as _dbg
+                _dbg.info(f"  [Nav] could not store plotted route: {exc}")
+
         rows = [SecHdr("Waypoints")]
         for i, jump in enumerate(jumps, start=1):
             name = jump.get("system") or jump.get("name") or "—"
@@ -319,6 +365,83 @@ class NavigationBlock(TuiBlock):
                 note = " [cyan]boost[/cyan]"
             rows.append(KVRow(f"{i}. {name}", f"{_fmt_ly(dist)}{note}"))
         results.mount(*rows)
+
+    # ── Route-follower footer ─────────────────────────────────────────────────
+
+    def _nav_plugin(self):
+        return self.core._plugins.get("navigation")
+
+    def on_click(self, event) -> None:
+        btn = str(getattr(event.widget, "id", "") or "")
+        if btn not in ("nav-follow-btn", "nav-copy-btn", "nav-clear-btn"):
+            return
+        event.stop()
+
+        nav = self._nav_plugin()
+        if nav is None:
+            self._set_follow_msg("[red]Navigation component not loaded.[/red]")
+            return
+
+        if btn == "nav-follow-btn":
+            on = nav.toggle_follow()
+            self._set_follow_msg(
+                "Following route — next system copies on arrival."
+                if on else "Follow off."
+            )
+        elif btn == "nav-copy-btn":
+            ok, msg = nav.copy_next()
+            # Over SSH the clipboard lives on the machine running the
+            # terminal, not on this host, so the OS backends above cannot
+            # reach it.  Textual's copy_to_clipboard emits OSC 52, which the
+            # terminal emulator itself honours — the one mechanism that works
+            # remotely.  Belt and braces: both are attempted, and a duplicate
+            # copy of the same string is harmless.
+            system = getattr(self.core.state, "nav_follow_next", "")
+            if system:
+                try:
+                    self.app.copy_to_clipboard(system)
+                    if not ok:
+                        ok, msg = True, f"Copied {system} (terminal)"
+                except Exception:
+                    pass
+            self._set_follow_msg(msg if ok else f"[yellow]{msg}[/yellow]")
+        else:
+            self._set_follow_msg(nav.clear_route())
+
+        self._refresh_footer()
+
+    def _set_follow_msg(self, text: str) -> None:
+        """Show a transient result message; it decays back to route status."""
+        self._footer_msg = text
+        self._footer_msg_at = time.monotonic()
+        try:
+            self.query_one("#nav-follow-lbl", Label).update(text)
+        except Exception:
+            pass
+
+    def _refresh_footer(self) -> None:
+        nav = self._nav_plugin()
+        try:
+            toggle = self.query_one("#nav-follow-btn", Static)
+            label = self.query_one("#nav-follow-lbl", Label)
+        except Exception:
+            return
+
+        if nav is None:
+            toggle.update(">> Follow: n/a")
+            label.update("[dim]Navigation component not loaded.[/dim]")
+            return
+
+        s = self.core.state
+        on = bool(getattr(s, "nav_follow_enabled", False))
+        toggle.update(f">> Follow: {'ON' if on else 'off'}")
+
+        # A click result stays visible briefly, then the standing route
+        # status takes the line back.
+        if self._footer_msg and (time.monotonic() - self._footer_msg_at) < _FOOTER_MSG_SECONDS:
+            return
+        self._footer_msg = ""
+        label.update(getattr(s, "nav_follow_status", "") or "No route")
 
     # ── Refresh (state-driven content) ────────────────────────────────────────
 
@@ -337,6 +460,7 @@ class NavigationBlock(TuiBlock):
 
         # Carrier tab is fully state-driven.
         self._refresh_carrier()
+        self._refresh_footer()
 
     def _refresh_carrier(self) -> None:
         """Keep the carrier form's defaults in step with the live carrier.

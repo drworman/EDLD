@@ -270,10 +270,16 @@ PreferencesScreen Button { height: 3; margin-left: 1; }
 #cargo-title     { width: 1fr; }
 #cargo-price-src { width: auto; text-align: right; }
 
-#cargo-footer, #cmdr-footer {
+#cargo-footer, #cmdr-footer, #nav-footer {
     height: 1;
     background: $title-bg;
 }
+
+/* Navigation footer: three controls then a status label taking the slack */
+#nav-follow-btn { width: auto; }
+#nav-copy-btn   { width: auto; }
+#nav-clear-btn  { width: auto; }
+#nav-follow-lbl { width: 1fr; text-align: right; }
 
 /* ── Search modal ──────────────────────────────────────────────────────────── */
 SearchModal { align: center middle; }
