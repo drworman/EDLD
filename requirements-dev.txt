@@ -1,0 +1,29 @@
+# Build and development requirements for EDLD.
+#
+# Everything in requirements.txt, plus the tooling needed to produce the
+# release binaries.  The release workflow installs this file.
+
+-r requirements.txt
+
+# Packaging.  GPL 2.0 with the bootloader exception — a build tool only, never
+# shipped inside an artefact.  See docs/LICENSING.md.
+pyinstaller>=6.3.0
+
+# Icon generation (scripts/generate_icons.py).
+Pillow>=10.0.0
+
+# psutil is a distro-package install for people running from source, because of
+# its C extensions — which is why it is not in requirements.txt.  A frozen
+# binary has no distro packages to fall back on, so it has to be present in the
+# build environment for PyInstaller to bundle it, or the shipped binary loses
+# game-process detection and session management entirely.
+#
+# Wheels exist for all three release platforms, so pip is fine here.
+psutil>=5.9.0
+
+# The CA bundle shipped inside the binaries. A frozen build carries its own
+# OpenSSL, whose compiled-in certificate paths do not exist on most target
+# machines, so without this every HTTPS call fails verification and CAPI,
+# EDDN, EDSM, EDAstro, Inara and Spansh stop working with no visible error.
+# See core/certs.py.
+certifi>=2024.2.2

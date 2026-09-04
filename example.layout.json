@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "blocks": {
+    "assets": {
+      "col": 0,
+      "row": 0,
+      "width": 11,
+      "height": 43
+    },
+    "engineering": {
+      "col": 0,
+      "row": 43,
+      "width": 11,
+      "height": 35
+    },
+    "colonisation": {
+      "col": 0,
+      "row": 78,
+      "width": 11,
+      "height": 23
+    },
+    "commander": {
+      "col": 11,
+      "row": 0,
+      "width": 10,
+      "height": 32
+    },
+    "crew_slf": {
+      "col": 11,
+      "row": 32,
+      "width": 10,
+      "height": 18
+    },
+    "alerts": {
+      "col": 11,
+      "row": 50,
+      "width": 10,
+      "height": 16
+    },
+    "cargo": {
+      "col": 11,
+      "row": 66,
+      "width": 10,
+      "height": 35
+    },
+    "missions": {
+      "col": 21,
+      "row": 0,
+      "width": 11,
+      "height": 28
+    },
+    "navigation": {
+      "col": 21,
+      "row": 28,
+      "width": 11,
+      "height": 33
+    },
+    "career": {
+      "col": 21,
+      "row": 61,
+      "width": 11,
+      "height": 40
+    }
+  }
+}

@@ -1,0 +1,694 @@
+name: Release
+
+# Builds single-file binaries for Linux, Windows and macOS.
+#
+# No source archive is built here. GitHub attaches its own "Source code"
+# zip and tar.gz to every release, generated from the tag, and that is
+# what the release links to for source.
+#
+# The LGPL relinking requirement for Qt is satisfied under LGPLv3 section
+# 4(d)(1): the complete application source is public, the build spec lives in
+# packaging/, and PySide6 is a pip install away, so anyone can regenerate these
+# binaries against their own build of Qt. The licence texts in licenses/ ship
+# inside every binary and every archive. Read docs/LICENSING.md before changing
+# how these artefacts are produced.
+#
+# Two triggers:
+#
+#   1. push: tags: ['*']
+#      Fires on any tag push or force-push, from any branch.
+#      Use for test builds: git push origin YYYYMMDD
+#      Re-trigger: git push --force origin YYYYMMDD
+#
+#   2. release: types: [published]
+#      Fires when you publish a release in the GitHub UI.
+#
+# Artifacts:
+#   EDLD-{version}-linux-x86_64.tar.gz            binary
+#   EDLD-{version}-windows-x86_64.zip             binary
+#   EDLD-{version}-macos-arm64.zip                binary
+#   EDLD-{version}.sha256                         checksums over all of it
+#   EDLD-{version}.sha256.sig                     signature over the manifest
+#
+# Only the manifest is signed. It lists every artefact above by digest, so one
+# signature check authenticates the whole release; a .sig beside each file
+# would assert nothing the signed manifest does not already assert.
+#
+# Secrets required:
+#   SIGNING_KEY       ed25519 private key, no passphrase
+#   SIGNING_IDENTITY  email matching signing_key.pub
+#
+# Code-signing secrets are optional. Every signing step is skipped when its
+# secret is absent, so a fork builds successfully with no credentials at all.
+
+on:
+  push:
+    # Tags are bare YYYYMMDD datestamps with no "v" prefix, so the filter
+    # matches any tag starting with a digit. The verify job is what actually
+    # rejects a tag that does not match the version file.
+    tags: ["[0-9]*"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build artefacts without publishing a release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  VERSION:    ${{ github.event.release.tag_name || github.ref_name }}
+  SIGNING_NS: edld.release
+  PYTHON_VERSION: "3.12"
+
+jobs:
+
+# -- Job 1: Verify the tag ---------------------------------------------------
+
+  verify:
+    name: Verify tag matches the version file
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
+
+      # Versions are bare YYYYMMDD datestamps. A manual dry-run has no tag, so
+      # the comparison only happens when one is present; the version file is
+      # authoritative either way and is published for the later jobs.
+      - id: read
+        name: Read and check the version
+        shell: bash
+        run: |
+          VERSION="$(tr -d '[:space:]' < version)"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Version file: ${VERSION}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            if [ "${TAG}" != "${VERSION}" ]; then
+              echo "::error::Tag '${TAG}' does not match the version" \
+                   "file ('${VERSION}'). Tags are bare datestamps with no" \
+                   "'v' prefix. Update 'version' or move the tag."
+              exit 1
+            fi
+          fi
+
+      # Everything the build needs must be in the checkout. A file missing here
+      # fails in seconds with a clear message; without this check the same
+      # problem surfaces as a build error three parallel dependency installs
+      # later. packaging/edld.spec has been lost to .gitignore once already.
+      - name: Preflight — required paths are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          MISSING=0
+          for path in packaging/edld.spec packaging/build_common.py \
+                      packaging/icons licenses THIRD-PARTY-NOTICES.md \
+                      requirements.txt requirements-dev.txt \
+                      gui components core tui edld.py version; do
+            if [ ! -e "$path" ]; then
+              echo "::error::Missing from the repository: $path"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -ne 0 ]; then
+            echo "::error::The checkout is incomplete. If a file exists" \
+                 "locally but not here, check .gitignore is not excluding it."
+            exit 1
+          fi
+          echo "All required paths present."
+
+# -- Job 2: Binaries ---------------------------------------------------------
+
+  binaries:
+    name: Binary (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    needs: [verify]
+    # Hoisted to job level on purpose. A step's own `env:` block is NOT visible
+    # to that step's `if:` expression, and the `secrets` context is not
+    # available in a step `if` at all — so `if: env.CERT != ''` next to
+    # `env: CERT: ${{ secrets.… }}` always evaluated false and every signing
+    # step was silently skipped, including on runs where the secrets were
+    # configured. Job-level env is visible to step `if`, so the skip-when-absent
+    # behaviour now works as documented.
+    env:
+      WIN_CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+      MAC_CERT: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: windows-latest
+            platform: windows-x86_64
+          - os: macos-latest
+            platform: macos-arm64
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Install Qt runtime libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-randr0 \
+            libxcb-render-util0 libxcb-xinerama0 xvfb
+
+      - name: Build single-file binary
+        run: pyinstaller packaging/edld.spec --noconfirm --clean
+
+      # ----------------------------------------------------------------- #
+      # Code signing. Every step is skipped when its secret is absent, so
+      # forks build successfully without any credentials configured.
+      # ----------------------------------------------------------------- #
+
+      - name: Sign Windows binary
+        if: runner.os == 'Windows' && env.WIN_CERT != ''
+        env:
+          CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String($env:CERT)
+          $path = Join-Path $env:RUNNER_TEMP "edld-signing.pfx"
+          [IO.File]::WriteAllBytes($path, $bytes)
+          $signtool = Get-ChildItem `
+            "C:/Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe" |
+            Select-Object -Last 1
+          & $signtool.FullName sign /f $path /p $env:CERT_PASSWORD `
+            /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+            "dist/EDLD.exe"
+          & $signtool.FullName verify /pa "dist/EDLD.exe"
+          Remove-Item $path -Force
+
+      - name: Sign and notarise macOS app
+        if: runner.os == 'macOS' && env.MAC_CERT != ''
+        env:
+          CERT: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/edld.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+
+          # Hardened runtime is required for notarisation. Qt loads its
+          # plugins at runtime, so the JIT and unsigned-memory entitlements
+          # must be granted or the app is killed on launch.
+          codesign --force --deep --options runtime --timestamp \
+            --entitlements packaging/entitlements.plist \
+            --sign "$SIGN_IDENTITY" "dist/EDLD.app"
+          codesign --verify --deep --strict --verbose=2 "dist/EDLD.app"
+
+          ditto -c -k --keepParent "dist/EDLD.app" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" \
+            --team-id "$NOTARY_TEAM_ID" --wait
+          xcrun stapler staple "dist/EDLD.app"
+
+          security delete-keychain "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notarize.zip"
+
+      # ----------------------------------------------------------------- #
+      # Smoke test: prove the artefact actually starts. A binary that
+      # builds but cannot import its own components starts fine and shows
+      # an empty dashboard - that is the failure mode this catches, and it
+      # is easy to ship without it. --version answers before any journal or
+      # config work, so it succeeds on a runner that has never seen Elite
+      # Dangerous. The optional-dependency banner may precede the version
+      # on stdout, so the comparison takes the last non-empty line.
+      # ----------------------------------------------------------------- #
+
+      - name: Smoke-test the binary (Linux)
+        if: runner.os == 'Linux'
+        # The binary is run first and its exit status captured, rather than
+        # substituting it straight into an assignment. Under `set -e` with
+        # pipefail, a crashing binary aborts the step at the assignment itself,
+        # so the traceback never reaches the log and the failure is reported as
+        # a bare "exit code 1" with nothing to go on.
+        run: |
+          set -uo pipefail
+          chmod +x "dist/EDLD"
+          set +e
+          OUTPUT="$(xvfb-run -a ./dist/EDLD --version 2>&1)"
+          RC=$?
+          set -e
+          echo "--- binary output (exit $RC) ---"
+          echo "$OUTPUT"
+          echo "--------------------------------"
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::Binary exited with status $RC. Output above."
+            exit 1
+          fi
+          ACTUAL="$(printf '%s\n' "$OUTPUT" | tail -n1 | tr -d '[:space:]')"
+          EXPECTED="${{ env.VERSION }}"
+          echo "reported: '$ACTUAL' / expected: '$EXPECTED'"
+          test -n "$ACTUAL" || { echo "::error::No output from the binary."; exit 1; }
+          test "$ACTUAL" = "$EXPECTED"
+
+          # Both front ends must import. --version only proves the process
+          # starts; a packaged build can start cleanly and still be missing a
+          # lazily-imported Textual widget, which only surfaces when the
+          # dashboard is drawn.
+          echo "--- selftest ---"
+          xvfb-run -a ./dist/EDLD --selftest
+
+      - name: Smoke-test the binary (macOS)
+        if: runner.os == 'macOS'
+        # Same shape as the Linux step, and for the same reason: capture the
+        # binary's output and status before asserting on either, so a crash
+        # shows its traceback instead of dying silently at an assignment.
+        run: |
+          set -uo pipefail
+          chmod +x "dist/EDLD"
+          set +e
+          OUTPUT="$(./dist/EDLD --version 2>&1)"
+          RC=$?
+          set -e
+          echo "--- binary output (exit $RC) ---"
+          echo "$OUTPUT"
+          echo "--------------------------------"
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::Binary exited with status $RC. Output above."
+            exit 1
+          fi
+          ACTUAL="$(printf '%s\n' "$OUTPUT" | tail -n1 | tr -d '[:space:]')"
+          EXPECTED="${{ env.VERSION }}"
+          echo "reported: '$ACTUAL' / expected: '$EXPECTED'"
+          test -n "$ACTUAL" || { echo "::error::No output from the binary."; exit 1; }
+          test "$ACTUAL" = "$EXPECTED"
+
+          echo "--- selftest ---"
+          ./dist/EDLD --selftest
+
+      # The Windows binary is built windowed, so it starts with no console.
+      # core/win_console.py reattaches stdout for --version and --terminal;
+      # this step is what proves it still works.
+      #
+      # Two ways of capturing are tried before giving up. Piping is the
+      # normal path, but it depends on the console attachment behaving, and
+      # that is the part that cannot be tested off Windows. Falling back to
+      # a redirect to a file exercises the inherited-handle path instead, so
+      # a regression in one does not block a release on the other.
+      - name: Smoke-test the binary (Windows)
+        if: runner.os == 'Windows'
+        # Bounded so a hang fails in two minutes instead of occupying the
+        # runner until the job's whole allowance is gone. A windowed build that
+        # raises during startup used to pop a modal traceback dialog and wait
+        # for a click that never comes on CI; the spec now suppresses that
+        # dialog, and this timeout is the backstop for anything else that
+        # blocks - a Qt plugin probe, an antivirus scan, a first-run prompt.
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $expected = "${{ env.VERSION }}"
+          $exe = "dist/EDLD.exe"
+
+          function Invoke-WithTimeout($file, $redirectPath, $arg = "--version") {
+            $psi = [Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = (Resolve-Path $file).Path
+            $psi.Arguments = $arg
+            $psi.UseShellExecute = $false
+            if ($redirectPath) {
+              # Exercise the inherited-handle path: stdout goes to a real file
+              # handle rather than a pipe.
+              $psi.RedirectStandardOutput = $false
+              $p = Start-Process -FilePath $psi.FileName -ArgumentList $arg `
+                     -NoNewWindow -PassThru -Wait:$false `
+                     -RedirectStandardOutput $redirectPath `
+                     -RedirectStandardError "$redirectPath.err"
+            } else {
+              $psi.RedirectStandardOutput = $true
+              $psi.RedirectStandardError = $true
+              $p = [Diagnostics.Process]::Start($psi)
+            }
+
+            if (-not $p.WaitForExit(120000)) {
+              try { $p.Kill($true) } catch { }
+              throw ("The binary did not exit within 120s - it is hanging, not " +
+                     "crashing. A windowed build blocking on a modal dialog is " +
+                     "the usual cause; check disable_windowed_traceback in " +
+                     "packaging/edld.spec.")
+            }
+
+            if ($redirectPath) {
+              $out = ""
+              if (Test-Path $redirectPath)        { $out += (Get-Content $redirectPath -Raw) }
+              if (Test-Path "$redirectPath.err")  { $out += (Get-Content "$redirectPath.err" -Raw) }
+            } else {
+              $out = $p.StandardOutput.ReadToEnd() + $p.StandardError.ReadToEnd()
+            }
+            return @{ Output = $out; Code = $p.ExitCode }
+          }
+
+          # Piping is the normal path, but it depends on the console attachment
+          # behaving, and that is the part that cannot be tested off Windows.
+          # A file redirect exercises the inherited-handle path instead, so a
+          # regression in one does not block a release on the other.
+          $r = Invoke-WithTimeout $exe $null
+          $code = $r.Code
+          Write-Host "--- pipe capture (exit $code) ---"
+          Write-Host $r.Output
+          Write-Host "---------------------------------"
+          $actual = (($r.Output -split "`n" |
+                      Where-Object { $_.Trim() } | Select-Object -Last 1))
+          if ($actual) { $actual = $actual.Trim() }
+
+          if ([string]::IsNullOrWhiteSpace($actual)) {
+            Write-Host "Pipe capture was empty; retrying with a file redirect."
+            $tmp = Join-Path $env:RUNNER_TEMP "edld-version.txt"
+            $r = Invoke-WithTimeout $exe $tmp
+            $code = $r.Code
+            Write-Host "--- file capture (exit $code) ---"
+            Write-Host $r.Output
+            Write-Host "---------------------------------"
+            $actual = (($r.Output -split "`n" |
+                        Where-Object { $_.Trim() } | Select-Object -Last 1))
+            if ($actual) { $actual = $actual.Trim() }
+          }
+
+          if ($code -ne 0) { throw "Binary exited with code $code. Output above." }
+          if ([string]::IsNullOrWhiteSpace($actual)) {
+            throw ("The binary produced no output by either method. A " +
+                   "windowed Windows build cannot write to stdout unless " +
+                   "it attaches to the parent console or picks up an " +
+                   "inherited handle - check enable_console_output() in " +
+                   "core/win_console.py.")
+          }
+          if ($actual -ne $expected) {
+            throw "Version mismatch: got '$actual', expected '$expected'."
+          }
+
+          Write-Host "--- selftest ---"
+          $st = Invoke-WithTimeout $exe (Join-Path $env:RUNNER_TEMP "edld-selftest.txt") "--selftest"
+          Write-Host $st.Output
+          if ($st.Code -ne 0) { throw "Selftest failed with code $($st.Code). Output above." }
+
+          Write-Host "OK"
+
+      - name: Package artefacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ env.VERSION }}"
+          STEM="EDLD-${VERSION}-${{ matrix.platform }}"
+
+          # Every archive carries the licence texts. LGPLv3 section 4(b)
+          # requires a copy to accompany the binary; a link is not enough.
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            7z a "dist/${STEM}.zip" "./dist/EDLD.exe" \
+              ./LICENSE ./THIRD-PARTY-NOTICES.md ./licenses
+          elif [ "${RUNNER_OS}" = "macOS" ]; then
+            ditto -c -k --keepParent "dist/EDLD.app" "dist/${STEM}.zip" \
+              2>/dev/null || \
+              tar -czf "dist/${STEM}.tar.gz" -C dist "EDLD" \
+                -C .. LICENSE THIRD-PARTY-NOTICES.md licenses
+          else
+            tar -czf "dist/${STEM}.tar.gz" -C dist "EDLD" \
+              -C .. LICENSE THIRD-PARTY-NOTICES.md licenses
+          fi
+          ls -la dist/
+
+      # Not signed individually - the signed checksum manifest covers this
+      # archive. Windows Authenticode and Apple notarisation are applied above
+      # and are unaffected; those are platform signatures on the executable
+      # itself, not on the archive.
+
+      - uses: actions/upload-artifact@v6
+        with:
+          # Prefixed so the archive is identifiable once it is sitting in
+          # somebody's downloads folder next to everything else.
+          name: EDLD-binary-${{ matrix.platform }}
+          # dist/ also holds the loose binary this archive was built from.
+          # "EDLD-" matches only the archive: the binary is EDLD, EDLD.exe
+          # or EDLD.app, none of which have the hyphen.
+          path: dist/EDLD-*
+          if-no-files-found: error
+          retention-days: 14
+
+# -- Job 4: Checksums --------------------------------------------------------
+
+  checksums:
+    name: Aggregate checksums
+    runs-on: ubuntu-latest
+    needs: [binaries]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
+
+      - name: Download all artifacts from build jobs
+        uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Remove any stale checksum/sig files before regenerating
+        run: |
+          mkdir -p dist
+          rm -f dist/*.sha256 dist/*.sha256.sig
+          ls -lh dist/
+
+      - name: Generate unified SHA-256 file
+        working-directory: dist
+        run: |
+          sha256sum EDLD-${{ env.VERSION }}* \
+            | grep -v '\.sha256' \
+            | grep -v '\.sig' \
+            > EDLD-${{ env.VERSION }}.sha256
+          echo ""
+          cat EDLD-${{ env.VERSION }}.sha256
+
+      - name: Sign checksum file
+        env:
+          SIGNING_KEY:      ${{ secrets.SIGNING_KEY }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+        run: |
+          KEY=$(mktemp); chmod 600 "$KEY"; echo "$SIGNING_KEY" > "$KEY"
+          ssh-keygen -Y sign -f "$KEY" -n "${{ env.SIGNING_NS }}" \
+            "dist/EDLD-${{ env.VERSION }}.sha256"
+          rm -f "$KEY"
+
+      # Verify exactly what a user will verify: the manifest signature, then
+      # every digest in the manifest. The second half is the part that makes
+      # the first half meaningful - a valid signature over a manifest whose
+      # digests do not match the artefacts would authenticate nothing.
+      - name: Verify the signed manifest and every digest in it
+        working-directory: dist
+        env:
+          SIGNING_KEY:      ${{ secrets.SIGNING_KEY }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          MANIFEST="EDLD-${{ env.VERSION }}.sha256"
+
+          KEY=$(mktemp); chmod 600 "$KEY"; echo "$SIGNING_KEY" > "$KEY"
+          PUB=$(ssh-keygen -y -f "$KEY")
+          rm -f "$KEY"
+          ALLOWED=$(mktemp)
+          echo "${{ env.SIGNING_IDENTITY }} namespaces=\"${{ env.SIGNING_NS }}\" $PUB" > "$ALLOWED"
+
+          echo -n "Verifying signature on $MANIFEST ... "
+          ssh-keygen -Y verify -f "$ALLOWED" -I "${{ env.SIGNING_IDENTITY }}" \
+            -n "${{ env.SIGNING_NS }}" -s "${MANIFEST}.sig" < "$MANIFEST"
+          rm -f "$ALLOWED"
+
+          echo "Checking every digest listed in $MANIFEST:"
+          sha256sum -c "$MANIFEST"
+
+          # The manifest must actually cover all three deliverables. A glob
+          # that silently matched fewer files would still verify cleanly here.
+          COUNT=$(wc -l < "$MANIFEST")
+          echo "Manifest covers $COUNT artefact(s)."
+          [ "$COUNT" -eq 3 ] || {
+            echo "::error::Expected 3 artefacts in the manifest, found $COUNT."
+            exit 1
+          }
+
+      # Only the manifest pair moves on. The three artefacts are already stored
+      # as this run's build artifacts, and the release job collects them from
+      # there - re-uploading them here duplicated roughly 250 MB per run for
+      # no benefit.
+      - name: Save the signed manifest for the release job
+        uses: actions/upload-artifact@v6
+        with:
+          name: EDLD-manifest
+          path: |
+            dist/EDLD-${{ env.VERSION }}.sha256
+            dist/EDLD-${{ env.VERSION }}.sha256.sig
+          if-no-files-found: error
+          retention-days: 14
+
+# -- Job 4: Publish the release ----------------------------------------------
+# Creates the GitHub release itself, so pushing a version tag is the only
+# manual step. Skipped for a manual dry run, and for a run triggered by a
+# release that already exists (the artefacts are attached to it instead).
+
+  release:
+    name: Publish release
+    needs: [verify, binaries, checksums]
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag' && !inputs.dry_run
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
+
+      # merge-multiple flattens the four build artifacts and the manifest into
+      # one directory, which is exactly the set to publish.
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: EDLD-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: List what will be published
+        run: ls -la artifacts/
+
+      # EDLD's changelog uses "## Released in YYYYMMDD" headings rather than
+      # the bracketed form, so the section for this version runs from its
+      # heading to the next one.
+      - name: Extract release notes from the changelog
+        id: notes
+        shell: bash
+        run: |
+          VERSION="${{ needs.verify.outputs.version }}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## Released in " v "[[:space:]]*$" { flag = 1; next }
+            flag && /^## Released in / { exit }
+            flag { print }
+          ' CHANGELOG.md > release-notes.md
+
+          # Trim the leading and trailing blank lines awk leaves behind.
+          sed -i -e '/./,$!d' release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No changelog entry found for ${VERSION}." > release-notes.md
+          fi
+
+          {
+            echo ""
+            echo "---"
+            echo ""
+            echo "### Downloads"
+            echo ""
+            echo "| Platform | File |"
+            echo "|---|---|"
+            echo "| Linux (x86_64) | \`EDLD-${VERSION}-linux-x86_64.tar.gz\` |"
+            echo "| Windows (x86_64) | \`EDLD-${VERSION}-windows-x86_64.zip\` |"
+            echo "| macOS (Apple silicon) | \`EDLD-${VERSION}-macos-arm64.zip\` |"
+            echo ""
+            echo "No Python install is needed for the binaries. Each archive"
+            echo "carries the licence texts required by the LGPL."
+            echo ""
+            echo "\`EDLD-${VERSION}.sha256\` lists every file above by digest"
+            echo "and \`EDLD-${VERSION}.sha256.sig\` signs that list, so one"
+            echo "signature check covers the whole release:"
+            echo ""
+            echo "\`\`\`"
+            echo "bash scripts/verify_release.sh EDLD-${VERSION}-linux-x86_64.tar.gz"
+            echo "\`\`\`"
+            echo ""
+            echo "See [docs/SIGNING.md](docs/SIGNING.md) to verify by hand."
+          } >> release-notes.md
+
+          echo "----- release notes -----"
+          cat release-notes.md
+
+      # Published with the GitHub CLI rather than a third-party action.
+      # This repository restricts Actions to those owned by GitHub or by the
+      # repository owner, which rules out softprops/action-gh-release. `gh` is
+      # preinstalled on every hosted runner and does the same job, so this
+      # needs no change to the repository's Actions policy and adds no
+      # third-party dependency to the release path.
+      #
+      # Re-running a tag is normal here (a force-pushed tag rebuilds), so an
+      # existing release is updated in place rather than treated as an error.
+      - name: Publish the release
+        env:
+          # A release created with GITHUB_TOKEN does not raise a `release:
+          # published` event — GitHub suppresses it to stop workflows
+          # triggering each other in a loop. That is fine for this workflow,
+          # but it means discord-release-notify.yml never fires for an
+          # automatically published release.
+          #
+          # Setting a RELEASE_PAT secret (a fine-grained PAT with Contents:
+          # write on this repository) makes the event fire and the Discord
+          # notification work. Without it everything else behaves normally and
+          # only the notification is skipped, so the secret stays optional.
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.verify.outputs.version }}"
+
+          shopt -s nullglob
+          FILES=(artifacts/*)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::No artefacts to publish — the build jobs produced" \
+                 "nothing. Refusing to create an empty release."
+            exit 1
+          fi
+          echo "Publishing ${#FILES[@]} file(s) for ${VERSION}."
+
+          # A suffix such as 20260810-rc1 marks a prerelease; a bare datestamp
+          # is a full release.
+          FLAGS=()
+          case "$VERSION" in
+            *-*) FLAGS+=(--prerelease) ;;
+            *)   FLAGS+=(--latest) ;;
+          esac
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION exists — updating it."
+            gh release edit "$VERSION" \
+              --notes-file release-notes.md \
+              --draft=false \
+              "${FLAGS[@]}"
+            gh release upload "$VERSION" "${FILES[@]}" --clobber
+          else
+            echo "Creating release $VERSION."
+            gh release create "$VERSION" "${FILES[@]}" \
+              --title "EDLD $VERSION" \
+              --notes-file release-notes.md \
+              "${FLAGS[@]}"
+          fi
+
+          echo "Published: $(gh release view "$VERSION" --json url -q .url)"

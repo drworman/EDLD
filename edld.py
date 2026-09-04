@@ -1,0 +1,691 @@
+#!/usr/bin/env python3
+"""
+edld.py — ED Live Dashboard — entry point
+
+All business logic lives in the packages below:
+  core/       — state, config, emit, journal loop, plugin loader, shared API
+  components/ — all application components
+  plugins/    — user plugin directory
+  tui/        — Textual TUI interface
+"""
+
+import argparse
+import json
+import os
+import sys
+import threading
+import time
+import queue
+from pathlib import Path
+from urllib.request import urlopen
+
+# ── Ensure repo root is on sys.path ───────────────────────────────────────────
+_HERE = Path(__file__).parent.resolve()
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+from core.state  import PROGRAM, VERSION, AUTHOR, GITHUB_REPO, DEBUG_MODE
+
+from core.emit   import Terminal
+from core.config import resolve_config_path, load_config_file, ConfigManager, migrate_config_if_needed
+
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+
+parser = argparse.ArgumentParser(
+    prog=PROGRAM,
+    description="Continuous monitoring of Elite Dangerous AFK sessions.",
+)
+parser.add_argument("-p", "--config_profile",
+                    help="Load a specific config profile")
+parser.add_argument("-t", "--test", action="store_true", default=None,
+                    help="Re-route Discord output to terminal instead of webhook")
+parser.add_argument("-d", "--trace", action="store_true", default=None,
+                    help="Print verbose debug/trace output")
+parser.add_argument("--mode", choices=["terminal", "textual", "gui"],
+                    default=None, metavar="MODE",
+                    help="UI mode: textual (default) | terminal | gui")
+
+# Convenience flags.  --tui and --gui are the two dashboards; --terminal is
+# the scrolling event log.  They are mutually exclusive with each other and
+# are equivalent to the matching --mode value, which stays supported because
+# it is what existing scripts and desktop entries already pass.
+_mode_group = parser.add_mutually_exclusive_group()
+_mode_group.add_argument("--tui", dest="mode_flag", action="store_const",
+                         const="textual",
+                         help="Terminal dashboard (default)")
+_mode_group.add_argument("--gui", dest="mode_flag", action="store_const",
+                         const="gui",
+                         help="Desktop window (PySide6)")
+_mode_group.add_argument("--terminal", dest="mode_flag", action="store_const",
+                         const="terminal",
+                         help="Scrolling terminal event log")
+
+parser.add_argument("--version", action="store_true",
+                    help="Print the version and exit")
+parser.add_argument("--selftest", action="store_true",
+                    help="Verify both front ends can be imported, then exit")
+
+args = parser.parse_args()
+
+# ── Windows: reconnect stdout before anything prints ──────────────────────────
+# The Windows binary is built windowed so the GUI has no console behind it,
+# which leaves stdout unusable until this runs.  A no-op everywhere else.
+try:
+    from core.win_console import enable_console_output
+    enable_console_output()
+except Exception:
+    pass
+
+# ── HTTPS trust store ─────────────────────────────────────────────────────────
+# Must run before anything opens a connection.  A frozen build ships its own
+# OpenSSL, which looks for certificates where the *build* machine kept them, so
+# without this every HTTPS call fails verification and CAPI, EDDN, EDSM,
+# EDAstro, Inara and Spansh all stop working without any of them saying so.
+try:
+    from core import certs as _certs
+    _certs.install()
+except Exception:
+    pass
+
+# --version answers before any config, journal or plugin work, so it succeeds
+# on a machine that has never run Elite Dangerous.  The release workflow uses
+# it to prove the built artefact actually starts.
+if args.version:
+    print(VERSION)
+    sys.exit(0)
+
+# --selftest imports each front end and reports, then exits. It exists because
+# a packaged build can fail at import in ways a source checkout never does:
+# Textual resolves its widgets through a runtime __getattr__, so a frozen
+# binary can be missing a widget module and still start, run, and only die at
+# the moment the dashboard is drawn. Importing both front ends up front turns
+# that into something the release workflow can catch on every platform.
+if args.selftest:
+    import importlib as _il
+    _results, _failed = [], False
+    for _label, _mod in (("terminal dashboard (--tui)", "tui.app"),
+                         ("desktop window (--gui)",     "gui.app")):
+        try:
+            _il.import_module(_mod)
+            _results.append(f"  OK    {_label}")
+        except Exception as _e:
+            _failed = True
+            _results.append(f"  FAIL  {_label}: {type(_e).__name__}: {_e}")
+    print(f"EDLD {VERSION} selftest")
+    print("\n".join(_results))
+    sys.exit(1 if _failed else 0)
+
+# A convenience flag and an explicit --mode should not disagree silently.
+if args.mode_flag and args.mode and args.mode != args.mode_flag:
+    parser.error(
+        f"--mode {args.mode} conflicts with the --{args.mode_flag} flag; "
+        f"pass only one."
+    )
+if args.mode_flag and not args.mode:
+    args.mode = args.mode_flag
+
+
+
+# ── Header ────────────────────────────────────────────────────────────────────
+
+title = f"{PROGRAM} v{VERSION} by {AUTHOR}"
+print(f"{Terminal.CYAN}{'=' * len(title)}\n{title}\n{'=' * len(title)}{Terminal.END}\n")
+
+
+# ── Background update check ───────────────────────────────────────────────────
+# Checks two things in order of severity:
+#   1. New tagged release on GitHub   → "release" notice
+#   2. New commits on origin/main     → "commits" notice (only if git is present
+#      and _HERE is a git working tree)
+#
+# _update_notice  = ("release", version_str)   — a tagged release is available
+# _update_notice  = ("commits", N_str)          — N new commits ahead of local
+# _update_notice  = None                        — nothing new
+#
+# In both cases File → Upgrade runs the same git-pull path.
+
+_update_notice: tuple[str, str] | None = None
+
+def _check_for_update() -> None:
+    global _update_notice
+    import re as _re
+
+    # Check for a newer tagged release via GitHub API.
+    # Compares VERSION against the latest release tag using a (date, suffix) key
+    # so 20260325a < 20260325b < 20260326 all sort correctly.
+    # Commits that land on main after a release do NOT trigger a notice.
+    try:
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        with urlopen(url, timeout=4) as resp:
+            if resp.status == 200:
+                tag = json.loads(resp.read()).get("tag_name", "").lstrip("v").strip()
+                if tag and tag != VERSION:
+                    def _vkey(v):
+                        m = _re.match(r"^(\d+)([a-z]*)$", v)
+                        return (int(m.group(1)), m.group(2)) if m else (0, "")
+                    if _vkey(tag) > _vkey(VERSION):
+                        _update_notice = ("release", tag)
+    except Exception:
+        pass
+
+_update_thread = threading.Thread(target=_check_for_update, daemon=True)
+# Don't start the thread yet — we need to fork first in UI modes so the
+# update check runs in the child rather than the to-be-discarded parent.
+# Started later, after the fork / silence step.
+
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+config_path = resolve_config_path(Path(__file__))
+if config_path is None:
+    # No config found — generate a default one in the user data directory
+    # so EDLD can start immediately.  The user can edit it via Preferences.
+    from core.state import EDLD_DATA_DIR
+    from core.config import (
+        config_to_toml,
+        CFG_DEFAULTS_SETTINGS, CFG_DEFAULTS_EXTRA, CFG_DEFAULTS_UI,
+        CFG_DEFAULTS_DISCORD, CFG_DEFAULTS_EDDN, CFG_DEFAULTS_EDSM,
+        CFG_DEFAULTS_EDASTRO, CFG_DEFAULTS_INARA, CFG_DEFAULTS_NOTIFY,
+    )
+    config_path = EDLD_DATA_DIR / "config.toml"
+    _default_cfg = {
+        "Settings":  {**CFG_DEFAULTS_SETTINGS, **CFG_DEFAULTS_EXTRA},
+        "Discord":   CFG_DEFAULTS_DISCORD,
+        "UI":        CFG_DEFAULTS_UI,
+        "LogLevels": CFG_DEFAULTS_NOTIFY,
+        "EDDN":      CFG_DEFAULTS_EDDN,
+        "EDSM":      CFG_DEFAULTS_EDSM,
+        "EDAstro":   CFG_DEFAULTS_EDASTRO,
+        "Inara":     CFG_DEFAULTS_INARA,
+    }
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(config_to_toml(_default_cfg), encoding="utf-8")
+        print(f"[EDLD] No config found — wrote default config to: {config_path}")
+    except OSError as _e:
+        print(f"{Terminal.WARN}WARNING:{Terminal.END} Could not write default config: {_e}")
+        # Fall through — ConfigManager will use built-in defaults
+
+migrate_config_if_needed(config_path)  # silently rewrite old [GUI]/sub-table format before loading
+config_dict = load_config_file(config_path)
+notify_test = bool(args.test)  if args.test  is not None else False
+trace_mode  = bool(args.trace) if args.trace is not None else DEBUG_MODE
+
+# Preliminary manager — profile may be updated after commander name is known.
+# Debug log facility is initialised LATER (after the commander/profile
+# auto-detection runs), so the per-run log header includes the right
+# profile overrides.
+mgr = ConfigManager(config_dict, config_path, config_profile=args.config_profile)
+
+
+# ── State and session objects ─────────────────────────────────────────────────
+
+from core.state import MonitorState, SessionData, load_session_state
+
+state          = MonitorState()
+active_session = SessionData()
+lifetime       = SessionData()
+gui_queue: queue.Queue = queue.Queue()
+
+
+# ── Find journal ──────────────────────────────────────────────────────────────
+
+from core.journal import find_latest_journal
+
+journal_dir_str = mgr.app_settings.get("JournalFolder", "")
+journal_dir     = Path(journal_dir_str).expanduser() if journal_dir_str else None
+
+if not journal_dir or not journal_dir.is_dir():
+    # Auto-detect the standard Linux (Steam/Proton) journal location as a fallback.
+    # This lets users launch without needing to set JournalFolder up front.
+    _candidates = [
+        Path.home() / ".steam" / "steam" / "steamapps" / "compatdata"
+        / "359320" / "pfx" / "drive_c" / "users" / "steamuser"
+        / "Saved Games" / "Frontier Developments" / "Elite Dangerous",
+        Path.home() / ".local" / "share" / "Steam" / "steamapps"
+        / "compatdata" / "359320" / "pfx" / "drive_c" / "users"
+        / "steamuser" / "Saved Games" / "Frontier Developments"
+        / "Elite Dangerous",
+    ]
+    for _c in _candidates:
+        if _c.is_dir():
+            print(f"[EDLD] JournalFolder not set — auto-detected: {_c}")
+            journal_dir = _c
+            journal_dir_str = str(_c)
+            break
+
+if not journal_dir or not journal_dir.is_dir():
+    _msg = (
+        f"JournalFolder is not set or the directory does not exist.\n\n"
+        f"Configured path: {journal_dir_str!r}\n\n"
+        f"Set JournalFolder in your config.toml to the Elite Dangerous journal directory.\n"
+        f"For Steam/Proton on Linux the default location is:\n"
+        f"  ~/.steam/steam/steamapps/compatdata/359320/pfx/drive_c/users/"
+        f"steamuser/Saved Games/Frontier Developments/Elite Dangerous"
+    )
+    print(f"{Terminal.WARN}ERROR:{Terminal.END} {_msg}")
+    sys.exit(1)
+
+journal_file = find_latest_journal(journal_dir)
+if not journal_file:
+    _msg = (
+        f"No Elite Dangerous journal files found in:\n  {journal_dir}\n\n"
+        f"Launch Elite Dangerous at least once to generate journal files, "
+        f"or check that JournalFolder points to the correct directory."
+    )
+    print(f"{Terminal.WARN}ERROR:{Terminal.END} {_msg}")
+    sys.exit(1)
+
+
+# ── Commander name — for profile auto-detection ───────────────────────────────
+
+try:
+    for _raw in journal_file.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            _j = json.loads(_raw.strip())
+            if _j.get("event") in ("Commander", "LoadGame") and _j.get("Name"):
+                state.pilot_name = _j["Name"]
+                break
+        except ValueError:
+            pass
+except OSError:
+    pass
+
+# ── Commander FID — for per-commander data directory ─────────────────────────
+# Scan backwards through journals to find FID.  The current journal may only
+# contain a Fileheader if the game just created it; prior journals are reliable.
+
+def _scan_fid_from_journals(jdir: Path) -> str:
+    """Return the Frontier account FID from the most recent journal that has one."""
+    for _jp in sorted(jdir.glob("Journal*.log"), reverse=True):
+        try:
+            for _line in reversed(_jp.read_text(encoding="utf-8", errors="replace").splitlines()):
+                try:
+                    _ev = json.loads(_line.strip())
+                    if _ev.get("event") in ("Commander", "LoadGame") and _ev.get("FID"):
+                        return _ev["FID"]
+                except ValueError:
+                    pass
+        except OSError:
+            pass
+    return ""
+
+from core.state import set_active_fid, get_last_fid
+
+_fid = _scan_fid_from_journals(journal_dir) or get_last_fid()
+if _fid:
+    set_active_fid(_fid)
+    state.pilot_fid = _fid
+    print(f"{Terminal.YELL}Commander FID:{Terminal.END} {_fid}")
+else:
+    print(f"{Terminal.YELL}Commander FID:{Terminal.END} (not yet determined)")
+
+print(f"{Terminal.YELL}Commander name:{Terminal.END} {state.pilot_name or '(unknown)'}")
+
+_config_profile = args.config_profile
+_config_info    = ""
+if not _config_profile and state.pilot_name and state.pilot_name in config_dict:
+    _config_profile = state.pilot_name
+    _config_info    = " (auto)"
+    mgr = ConfigManager(config_dict, config_path, config_profile=_config_profile)
+
+print(
+    f"{Terminal.YELL}Config profile:{Terminal.END} "
+    f"{_config_profile or 'Default'}{_config_info}"
+)
+
+
+# ── UI mode ───────────────────────────────────────────────────────────────────
+# Priority: --mode CLI flag > config [UI] Mode value > default (textual).
+# The legacy GTK4 UI has been removed; any "gtk4" left in an old config is
+# treated as "textual" so existing configs keep working.
+
+_cfg_mode = mgr.ui_cfg.get("Mode", "textual").lower().strip()
+if _cfg_mode == "gtk4":
+    _cfg_mode = "textual"
+
+if args.mode:
+    ui_mode = args.mode
+elif _cfg_mode in ("terminal", "textual", "gui"):
+    ui_mode = _cfg_mode
+else:
+    ui_mode = "textual"
+
+
+
+# ── Debug log facility ────────────────────────────────────────────────────────
+# A file-only diagnostic channel separate from stdout.  Standard output stays
+# on the terminal (terminal mode) or routed to /dev/null (textual mode);
+# trace lines, plugin errors, and unhandled exceptions go here instead.
+# The log file lives at <data_dir>/logs/error[_<profile>]_<YYYYMMDD>.log and
+# is opened lazily — runs that never trip --trace or an error path leave no
+# file behind.  Each run's section starts with a header recording version,
+# timestamp, exact launch command, and a fenced copy of the effective config
+# (defaults from config file, plus any active profile's overrides).
+#
+# Initialised here — after profile auto-detection so the header reflects the
+# *effective* profile, and before the fork/silence step so the file is ready
+# to receive output from the post-fork child.
+
+from core.state import EDLD_DATA_DIR
+from core       import debug as _debug
+
+_profile_overrides: dict | None = None
+if _config_profile and isinstance(config_dict, dict):
+    _po = config_dict.get(_config_profile)
+    if isinstance(_po, dict):
+        _profile_overrides = _po
+
+_debug.init(
+    data_dir=EDLD_DATA_DIR,
+    profile=_config_profile or None,
+    version=VERSION,
+    config_dict=config_dict if isinstance(config_dict, dict) else {},
+    profile_overrides=_profile_overrides,
+    trace_echo=trace_mode,
+)
+_debug.install_exception_hooks()
+
+
+# ── Detach / silence for UI modes ─────────────────────────────────────────────
+# This MUST run before any background thread spawns (update check, plugin
+# senders, CAPI poll, monitor thread, Discord webhook).
+#
+#   textual — no fork (Textual needs the foreground process group for TTY
+#             input).  Parent prints "Launching textual — logs: <path>" then
+#             continues in-place; sys.stdout/sys.stderr are swapped for
+#             /dev/null at the Python level so background-thread print()
+#             calls don't punch through Textual's alt-screen rendering.
+#             Textual writes through fd 1 directly and is unaffected.
+#
+#   terminal — neither.  Scrolling event output to the terminal is the whole
+#             point of this mode.
+
+# Record where TLS verification will look. When someone reports that uploads
+# stopped, this line answers it outright instead of after a round of guessing.
+try:
+    _debug.log(_certs.diagnose(), level="INFO")
+except Exception:
+    pass
+
+
+if ui_mode in ("textual", "gui"):
+    log_p = _debug.path()
+    print(
+        f"{Terminal.GOOD}Launching {ui_mode}{Terminal.END}"
+        + (f" — diagnostic logs: {log_p}" if log_p else "")
+    )
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # Python-level only — Textual writes to fd 1 directly and needs fd 0
+    # for TTY input, so we don't touch the underlying file descriptors.
+    #
+    # EDLD_KEEP_STDERR=1 leaves both streams alone. A dashboard that dies
+    # during startup otherwise takes its traceback to /dev/null with it, and
+    # the only symptom is the process vanishing — so there has to be a way to
+    # get the streams back without editing the source, which is impossible in
+    # a shipped binary.
+    if os.environ.get("EDLD_KEEP_STDERR") not in ("1", "true", "yes"):
+        try:
+            sys.stdout = open(os.devnull, "w", encoding="utf-8")
+            sys.stderr = open(os.devnull, "w", encoding="utf-8")
+        except OSError:
+            pass
+
+
+# ── Now safe to start background threads ──────────────────────────────────────
+# Update check spins off here so its result is available by the time we
+# render the update notice in the post-bootstrap section.  In textual mode
+# this runs in the child; in textual/terminal mode it runs in-process.
+
+_update_thread.start()
+
+
+# ── Emitter ───────────────────────────────────────────────────────────────────
+
+from core.emit import Emitter, emit_summary
+
+emitter = Emitter(
+    mgr, state,
+    notify_test=notify_test,
+)
+
+
+# ── CoreAPI + plugins ─────────────────────────────────────────────────────────
+
+from core.core_api      import CoreAPI
+from core.plugin_loader import PluginLoader, PluginStorage
+from core.journal       import build_dispatch_map
+from core.data          import DataProvider
+from core.state         import EDLD_DATA_DIR, cmdr_data_dir
+
+# DataProvider — unified source of truth, instantiated before CoreAPI.
+# Uses the "core" plugin namespace for its CAPI persisted snapshots; under
+# the flat storage layout those land at <cmdr>/data/core.<purpose>.json.
+_dp_storage = PluginStorage("core")
+data_provider = DataProvider(
+    state=state,
+    storage=_dp_storage,
+    gui_queue_fn=lambda: gui_queue,
+    print_fn=lambda m: _debug.info(m),
+)
+
+core = CoreAPI(
+    state=state,
+    active_session=active_session,
+    lifetime=lifetime,
+    cfg_mgr=mgr,
+    emitter=emitter,
+    gui_queue=gui_queue,
+    journal_dir=journal_dir,
+    data_provider=data_provider,
+    launch_argv=sys.argv,
+)
+data_provider._plugin_call = core.plugin_call
+
+loader = PluginLoader(_HERE)
+loader.load_all(core)
+
+# A component that fails to load is otherwise invisible: its events are never
+# dispatched and the windows reading it show their "nothing yet" placeholder,
+# which looks exactly like an ordinary quiet session.  stdout is already
+# /dev/null in both UI modes by this point, so the loader's own warning has
+# nowhere to go — say it on the real stderr, in the diagnostic log, and (once
+# the alerts component is up) in the dashboard itself.
+if loader.failed:
+    _names = ", ".join(f.name for f in loader.failed)
+    _debug.log(
+        "Components that failed to load: "
+        + "; ".join(f"{f.name} ({f.error})" for f in loader.failed),
+        level="ERROR",
+    )
+    try:
+        sys.__stderr__.write(
+            f"\nERROR: {len(loader.failed)} component(s) failed to load: {_names}\n"
+            f"       Their windows will stay empty.  See {_debug.path()}\n"
+        )
+        sys.__stderr__.flush()
+    except Exception:
+        pass
+    _alerts = core._plugins.get("alerts")
+    if _alerts is not None:
+        try:
+            _alerts.push_fault(
+                "⚠", f"Component(s) failed to load: {_names} — data will be missing."
+            )
+        except Exception:
+            pass
+
+plugin_dispatch = build_dispatch_map(list(core._plugins.values()))
+data_provider.start()   # start CAPI poll thread after plugins loaded
+
+
+# ── Bootstrap from journal history ────────────────────────────────────────────
+
+_debug.info("Starting EDLD monitor (Press Ctrl+C to stop)")
+
+from core.journal import bootstrap_fighter_bay, bootstrap_slf, bootstrap_crew, bootstrap_missions, bootstrap_burn_rate
+
+bootstrap_fighter_bay(state, journal_dir)
+bootstrap_slf(state, journal_dir, trace_mode=trace_mode)
+bootstrap_crew(state, journal_dir, trace_mode=trace_mode)
+bootstrap_missions(state, journal_dir, mgr, trace_mode=trace_mode)
+bootstrap_burn_rate(state, journal_dir, active_session, trace_mode=trace_mode)
+
+# ── Update notice ─────────────────────────────────────────────────────────────
+
+_update_thread.join(timeout=2)
+if _update_notice:
+    _kind, _value = _update_notice   # _kind is always "release" now
+    _repo_url = f"https://github.com/{GITHUB_REPO}"
+    _term_msg = (
+        f"{Terminal.YELL}\u26a0 Update available: v{_value}{Terminal.END}"
+        f"  {Terminal.WHITE}{_repo_url}/releases{Terminal.END}\n"
+    )
+    if ui_mode == "terminal":
+        print(_term_msg)
+    else:  # textual / gui — surface it in the dashboard's notice bar
+        gui_queue.put(("update_notice", ("release", _value)))
+    emitter.set_update_notice(_value)
+
+
+# ── Session restore + startup banner ─────────────────────────────────────────
+
+load_session_state(journal_file, active_session)
+state.sessionstart(active_session)
+emit_summary(
+    emitter, state,
+    core.session_providers,
+    core._plugins.get("session_stats"),
+)
+
+
+# ── Monitor + launch ──────────────────────────────────────────────────────────
+
+from core.journal      import run_monitor as _run_monitor, _poll_status_json
+from core.state        import save_session_state
+
+_edld_start_mono = time.monotonic()
+
+def run_monitor() -> None:
+    _run_monitor(
+        journal_file,
+        state, active_session, lifetime,
+        emitter, mgr, gui_queue, journal_dir,
+        _edld_start_mono,
+        trace_mode=trace_mode,
+        plugin_dispatch=plugin_dispatch,
+        data_provider=data_provider,
+        core=core,
+    )
+
+
+def _log_fatal(what: str) -> None:
+    """Record a fatal dashboard error where it can actually be found.
+
+    Called from the launch paths, which run with stdout and stderr pointed at
+    /dev/null so terminal noise cannot corrupt the display. That redirect is
+    correct but it also means an uncaught exception disappears silently, so
+    this writes the traceback to the diagnostic log and to the process's real
+    stderr, which the redirect never replaced.
+    """
+    import traceback as _tb
+    detail = _tb.format_exc()
+    message = f"{what} failed to start:\n{detail}"
+    try:
+        _debug.log(message, level="ERROR")
+    except Exception:
+        pass
+    try:
+        sys.__stderr__.write(f"\nERROR: {message}\n")
+        sys.__stderr__.flush()
+    except Exception:
+        pass
+
+
+def _start_background_threads() -> tuple:
+    """Start the journal monitor and Status.json poller.
+
+    Both dashboards need these running before their event loop takes over the
+    main thread; the terminal mode runs the monitor in the foreground instead.
+    """
+    monitor_thread = threading.Thread(target=run_monitor, daemon=True)
+    monitor_thread.start()
+
+    status_thread = threading.Thread(
+        target=_poll_status_json,
+        args=(journal_dir, state, gui_queue),
+        daemon=True,
+    )
+    status_thread.start()
+    return monitor_thread, status_thread
+
+
+if __name__ == "__main__":
+    if ui_mode == "gui":
+        try:
+            from gui.app import run_gui
+        except ImportError as _gui_err:
+            import traceback as _tb
+            # stdout is /dev/null by this point in GUI mode, so the message
+            # has to go to the debug log as well as the (silenced) terminal.
+            _msg = (
+                f"PySide6 GUI import failed: {_gui_err}\n"
+                f"Traceback:\n{_tb.format_exc()}\n"
+                f"If PySide6 is missing: pip install PySide6"
+            )
+            _debug.log(_msg, level="ERROR")
+            # sys.stderr is /dev/null in GUI mode; sys.__stderr__ is the
+            # real one, so this is the only way the user sees the failure.
+            try:
+                sys.__stderr__.write(f"ERROR: {_msg}\n")
+            except Exception:
+                pass
+            sys.exit(1)
+
+        _gui_theme = mgr.ui_cfg.get("Theme", "default")
+        _start_background_threads()
+        try:
+            sys.exit(run_gui(core, PROGRAM, VERSION, AUTHOR, GITHUB_REPO,
+                             theme=_gui_theme))
+        except SystemExit:
+            raise
+        except Exception:
+            _log_fatal("Desktop window")
+            sys.exit(1)
+
+    elif ui_mode == "textual":
+        try:
+            from tui.app import run_tui
+        except ImportError as _tui_err:
+            import traceback as _tb
+            print(
+                f"{Terminal.WARN}ERROR:{Terminal.END} Textual TUI import failed: {_tui_err}\n"
+                f"sys.path: {sys.path}\n"
+                f"Traceback:\n{_tb.format_exc()}"
+                f"\nIf textual is missing: pip install textual"
+            )
+            sys.exit(1)
+
+        _tui_theme = mgr.ui_cfg.get("Theme", "default")
+
+        # Detach already happened up-front (before plugin loading) so by
+        # this point sys.stdout/sys.stderr are already routed to /dev/null
+        # in textual mode.  Just start the monitor + the TUI.
+
+        _start_background_threads()
+
+        try:
+            run_tui(core, PROGRAM, VERSION, theme=_tui_theme)
+        except Exception:
+            # stdout and stderr are /dev/null by now, so an escaping exception
+            # would leave nothing behind but a non-zero exit. The diagnostic
+            # log is the one channel still open, and it is the file users are
+            # asked for when something goes wrong, so the traceback belongs
+            # there. sys.__stderr__ is the real stream and gets a copy.
+            _log_fatal("Textual dashboard")
+            sys.exit(1)
+
+    else:  # terminal
+        run_monitor()
