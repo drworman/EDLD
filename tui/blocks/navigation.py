@@ -153,7 +153,12 @@ class NavigationBlock(TuiBlock):
                     )
             except Exception as exc:
                 result = {"_error": f"{type(exc).__name__}: {exc}"}
-            self.call_from_thread(self._on_plot_done, prefix, result, is_neutron)
+            # call_from_thread lives on App, not on Widget/MessagePump, so this
+            # must go through self.app.  Calling it on the block raised
+            # AttributeError on the worker's last line — after the route had
+            # already been fetched — killing the daemon thread silently and
+            # leaving the status label stuck on "Plotting…" forever.
+            self.app.call_from_thread(self._on_plot_done, prefix, result, is_neutron)
 
         threading.Thread(target=_worker, daemon=True,
                          name=f"nav-plot-{prefix}").start()
