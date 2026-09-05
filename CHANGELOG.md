@@ -1,6 +1,285 @@
 # EDLD CHANGELOG
 
-Last updated: 20260901
+Last updated: 20260905
+
+---
+
+## Released in 20260905
+
+A consolidation release.  Several windows had grown to restate one another —
+the same body listed twice for its value and its flora, hull and shields shown
+in two places, a mission stack sitting apart from the session it belongs to —
+and the dashboard was paying grid space for the duplication.  This release
+folds each of those into the window it belonged with, and fixes the routing
+and carrier bugs found along the way.
+
+### Fixed: routing worked in the desktop window and never in the terminal
+
+FSD and Neutron plots ran to completion and then vanished.  Both routers were
+returning results the whole time; the worker thread died on its own last line
+marshalling the result back onto the event loop.  `call_from_thread` is defined
+on `App`, not on `Widget`, so calling it on the block raised `AttributeError`
+in a daemon thread — silently — leaving the status label on "Plotting…"
+indefinitely.  The desktop window was unaffected because Qt marshals through a
+signal instead.  `tui/search_modal.py` had been using the correct
+`self.app.call_from_thread` form all along, which is why the Cargo target
+search worked and this did not.
+
+`tests/test_tui_thread_marshalling.py` scans every module under `tui/` for
+App-only methods called on `self`, so this class of bug is caught for windows
+that do not exist yet, and separately pins the premise that `App` has the
+method and `Widget` does not.
+
+### Fixed: fleet-carrier routing
+
+Carrier plots were accepted with `HTTP 202` and then never resolved.  The
+endpoint and every parameter name had been correct all along.  Spansh's own
+front end submits through jQuery with `traditional: true`, which serialises a
+list as repeated bare keys — `destination_systems=6681123623626` — where EDLD
+was sending a JSON string.  The job was queued with a destination list that
+parsed to nothing.  `refuel_destinations` had the same problem in reverse: an
+empty array is omitted entirely under that serialisation, not sent as an empty
+value.
+
+Carrier routes now come back with the fuel planning that makes them worth
+having: tritium burned per jump, tank level on arrival, restock stops and
+amounts, and which systems have a market or a pristine icy ring to mine.  The
+Carrier tab has a real form in both interfaces, prefilled from live carrier
+state.
+
+Expectations in `tests/test_spansh_carrier_params.py` are derived from a
+completed job saved from the site rather than restated by hand, so a future
+list-shaped parameter fails the test instead of being quietly JSON-encoded onto
+the wire.
+
+### Fixed: squadron carriers overwrote fleet carriers
+
+`CarrierStats` reports both kinds of carrier through the same event,
+distinguished by `CarrierType`, and both were being written to the same state
+field.  Whichever event arrived last won, and the other carrier disappeared
+from the display.  They are now tracked separately, with `CarrierID` recorded
+so `CarrierDecommission` can tell which one was sold.
+
+### Fixed: the Assets carrier tab read keys nothing produced
+
+Four of its ten rows could never populate.  Reserve read `reserve_balance`
+where the parsers write `reserve`; Upkeep read `coreCost`, which no parser has
+ever written; and both cargo rows read a `capacity` sub-dict that is read
+*from* the CAPI payload but never written *into* the carrier state.  Meanwhile
+twenty-one parsed fields had nowhere to appear.
+
+Three separate parsers populate that state and they did not agree on key names,
+so the tab's content depended on whether CAPI had polled recently.  They now
+share a vocabulary, and `core/ui_helpers.py` holds the single description of
+what the tab shows so the two interfaces cannot drift.  A test extracts every
+key the display reads and every key the parsers write, and fails if the display
+reads something nobody produces.
+
+### Changed: windows folded into the window they belonged with
+
+| Was | Now |
+|-----|-----|
+| Assets | Wallet / Ships / Modules / Fleet Carrier / Squadron Carrier tabs on **Commander** |
+| Exobiology | nested under each body's row in **Exploration** |
+| Massacre Mission Stack | the Missions tab in **Session** |
+| Colonisation | the Colonisation tab in **Cargo** |
+
+Exobiology is the clearest case: every body carrying biological signals was
+listed twice, once for its cartographic value and again for its flora.  The
+biology now sits indented beneath the body it belongs to, so a body's full
+story is in one place.  Cargo and Colonisation are the same activity from
+opposite ends — what you are carrying against what the depot still needs — and
+Cargo collapses to a couple of rows on a hauling run, which is exactly when a
+construction site is live.
+
+Hull, shields and fuel were shown in both Commander and Ship Health.  They now
+live only in Ship Health, which is also where the ship names itself: its name
+and ident head the window, with the hull type on a second row.  Commander's
+header is the commander alone.
+
+No data was dropped in any of this.  A `windows.json` written before the merges
+still loads: names that no longer exist are dropped, and any window whose saved
+slot has since gone — column A went from three positions to two — is rehomed
+into the first free slot of its class rather than being silently lost.
+
+### Added: every mission type on the board
+
+Mission tracking only ever covered massacres, because that is all the stack
+view needed.  The Session window's Missions tab now shows the massacre stack
+summarised by source faction as before, followed by every other mission the
+commander holds, grouped by type and dropping off as each is completed, failed
+or abandoned.
+
+The massacre-specific bookkeeping moved out of the event match into a method of
+its own so the general handler can record every mission first and then delegate,
+rather than one `case` shadowing the other.
+
+### Added: mining session context
+
+Tonnage and rate figures said nothing about where they were earned — 180 t is
+excellent in a depleted ring and mediocre in a pristine one.  Mining now
+captures the ring's reserve level, its class and its hotspots, alongside the
+two numbers that actually end a run: limpets remaining and how full the hold
+is.  Raw materials collected while mining are recorded too.  Reserve level was
+not captured anywhere in the codebase before this.
+
+### Changed: Discord launch message and periodic summary
+
+The periodic summary had no commander, no ship and no location, so a reader had
+numbers with no idea where they came from — and despite income being tracked,
+it never appeared.  Both are fixed.  Values wider than the numeric columns no
+longer set the column width, which had been right-shifting every figure in the
+block.
+
+The launch embed leads with who and where, then reports credits, cargo, fuel
+and the fleet carrier, all of which were tracked and none of which were shown.
+A carrier parked twenty thousand light years away is easy to forget about.
+
+### Fixed: `--trace` wrote the Discord webhook in cleartext
+
+The trace header dumps the effective config on every launch, and those logs get
+attached to bug reports.  A webhook URL is a bearer credential.  Credential-
+shaped keys are now redacted by substring match — `webhook`, `token`, `secret`,
+`password`, `apikey`, `auth`, `credential` — reporting whether a value is set
+without the value itself, which is the only thing that dump was answering.
+
+**If you have shared a `--trace` log, rotate your webhook.**  The redaction
+only protects logs written from here on.
+
+### Fixed: a new window could silently never refresh
+
+`_all_block_ids()` in the terminal interface was a hand-maintained list.  A
+window absent from it rendered its placeholder rows forever, which is exactly
+what happened during development of this release.  It is now derived from the
+window registry.
+
+### Added: carrier jump notifications
+
+A scheduled jump locks a carrier down for about fifteen minutes — nothing can
+dock, and anyone aboard is going wherever it goes — so all three transitions
+now notify: scheduled (with carrier name, ident, destination and countdown),
+cancelled, and arrived.  Fleet and squadron carriers are tracked separately and
+can have jumps in flight at the same time.  They go out through the alerts
+component, so each lands in the Alerts window and is emitted to the terminal
+and Discord at its own configurable level — `CarrierJumpScheduled`,
+`CarrierJumpCancelled` and `CarrierJumpComplete` under `[LogLevels]`.
+
+The events are thinner than they look.  A jump request names the destination
+and departure time but not the carrier; a cancellation names neither, so the
+pending jump recorded at request time is the only record of where it was going.
+Completion arrives as `CarrierLocation` when the commander is elsewhere and
+`CarrierJump` when aboard — and when aboard, both fire about a minute apart.
+`CarrierLocation` is also a periodic status event, outnumbering real arrivals
+roughly two to one in a real journal, so an arrival is only recognised when it
+names the destination that was requested and the departure time has passed.
+Replaying a 269-journal capture accounts for every request exactly: 178
+scheduled resolve to 170 completed, 3 cancelled, 4 re-targeted and 1 still
+pending at the end of the logs.
+
+### Fixed: riding a carrier through a jump blanked its system
+
+The `CarrierJump` handler read `SystemName`, which that event does not carry —
+it names the arrival system in `StarSystem`.  Every jump the commander rode
+along with set the carrier's recorded system to a dash.
+
+### Fixed: a departure time nobody could read
+
+The carrier jump notification ended with `— departs 05:19`, taken straight
+from the journal's UTC timestamp regardless of the `UseUTC` setting.  For
+anyone not on UTC it was neither their wall clock nor a duration.  It now
+follows `UseUTC` like every other time EDLD prints, is bracketed rather than
+dash-separated so it cannot be misread as part of the countdown, and is
+labelled when it is UTC.
+
+### Changed: config files gain new settings automatically
+
+Every release that adds a setting left existing configs without it.  Nothing
+broke — resolution falls back to the default — but the warned sections printed
+a line per missing key on every launch, and a key absent from the file is one
+the user cannot discover or edit.
+
+New defaults are now appended to the existing `config.toml` on startup, in
+place and by line so the comments in a hand-edited file survive.  Only
+additions, only at the top level, and never keys whose default is empty:
+credentials and paths are the user's to supply, and writing `ApiKey = ""` into
+their file is noise.  Profile sections are untouched.
+
+`example.config.toml` had drifted — missing keys and two whole sections — and
+the config generated for a fresh install omitted `[CAPI]`, `[Colonisation]`
+and `[SessionMgmt]` entirely.  Both are current, and a test now derives what
+must be present from the defaults themselves, so the next setting added fails
+there rather than in someone's log.
+
+### Changed: the Session summary no longer repeats the route
+
+Remaining jumps and next destination were duplicated into the Session window
+from Exploration.  The Navigation window owns the route, including the
+follower's next-system readout in its footer.
+
+### Fixed: a finished route outlived the trip
+
+Arriving at the last waypoint of an EDLD-plotted route left it stored, so
+jumping onward reported being off a route that had already been completed.
+Reaching the final destination now retires the route.  The game's
+`NavRoute.json` is left alone — that one is the game's to manage.
+
+### Fixed: mining recorded surface points of interest as hotspots
+
+A surface scan returns two unrelated families of signal through one event.
+Bare commodity names — Painite, Monazite, Low Temperature Diamonds — are
+mining hotspots.  Everything spelled as a `$SAA_SignalType_*` token is a
+surface point-of-interest category, and `$PlanetaryMiningLocation_Name` marks
+the body itself.  All of them were being counted, which put rows like
+"Human  3 hotspots" and "Planetary Mining Location  28 hotspots" in the mining
+panel next to the real ones.
+
+Only commodities are counted now, localised names are preferred where the
+journal supplies one, and case is normalised — the same commodity appears as
+both `Tritium` and `tritium` across a real journal.
+
+### Added: ring and planetary mining sites, listed separately
+
+Planetary mining locations are new, and a ring and a planetary surface are
+different kinds of place — one has hotspots you fly into, the other has sites
+you land at.  They now get a heading each, with every mineable body scanned
+this session listed under the right one and the body you are currently at
+marked:
+
+    ─── Ring sites ───
+      Ega 3 A Ring          Common · Rocky
+        Serendibite         2 hotspots
+        Musgravite          2 hotspots
+    ─── Planetary sites ───
+      Ega 3 a               20 sites
+    ▸ Ega 3 d               28 sites
+      Ogmar A 1             13 sites
+
+The journal records how many surface sites a body has and nothing about what
+any individual one holds — that detail exists only on the in-game surface map.
+Checked against every body carrying a planetary mining location across a
+269-journal capture: the count is all there is.
+
+Dropping into a ring hotspot from supercruise now marks which one is being
+worked, which overlapping hotspots make ambiguous from the ring's signal list
+alone.
+
+Bodies scanned but with nothing to mine are omitted.
+
+### Changed: the mining section is headed by the body, not "Ring"
+
+Mining happens at planetary locations as well as in rings, so a section headed
+"Ring" with the body demoted to a row inside it was wrong for half the cases.
+The body is now the heading, with reserve level, ring class where there is one,
+and hotspots beneath it.
+
+### Changed: smaller things
+
+- Engineering no longer prints a totals row above every material grade.
+- Navigation's Carrier tab lost its "unfinished" banner.
+- The README badge row is down from ten to six.
+- `example.layout.json` was on a schema the loader has not read for some time
+  and named windows that no longer exist; it now matches `windows.json` and the
+  shipped default.
 
 ---
 

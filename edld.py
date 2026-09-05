@@ -27,7 +27,10 @@ if str(_HERE) not in sys.path:
 from core.state  import PROGRAM, VERSION, AUTHOR, GITHUB_REPO, DEBUG_MODE
 
 from core.emit   import Terminal
-from core.config import resolve_config_path, load_config_file, ConfigManager, migrate_config_if_needed
+from core.config import (
+    resolve_config_path, load_config_file, ConfigManager,
+    migrate_config_if_needed, backfill_config_defaults,
+)
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
@@ -187,7 +190,10 @@ if config_path is None:
         CFG_DEFAULTS_SETTINGS, CFG_DEFAULTS_EXTRA, CFG_DEFAULTS_UI,
         CFG_DEFAULTS_DISCORD, CFG_DEFAULTS_EDDN, CFG_DEFAULTS_EDSM,
         CFG_DEFAULTS_EDASTRO, CFG_DEFAULTS_INARA, CFG_DEFAULTS_NOTIFY,
+        CFG_DEFAULTS_CAPI, CFG_DEFAULTS_COLONISATION,
     )
+    # SessionMgmt's defaults are owned by the component that reads them.
+    from components.ksw import CFG_DEFAULTS as CFG_DEFAULTS_SESSIONMGMT
     config_path = EDLD_DATA_DIR / "config.toml"
     _default_cfg = {
         "Settings":  {**CFG_DEFAULTS_SETTINGS, **CFG_DEFAULTS_EXTRA},
@@ -198,6 +204,13 @@ if config_path is None:
         "EDSM":      CFG_DEFAULTS_EDSM,
         "EDAstro":   CFG_DEFAULTS_EDASTRO,
         "Inara":     CFG_DEFAULTS_INARA,
+        # These three were absent from the generated config, so a new install
+        # got a file that did not mention them at all.  They resolve from
+        # defaults either way, but a config you cannot see is a config you
+        # cannot edit.
+        "CAPI":        CFG_DEFAULTS_CAPI,
+        "Colonisation": CFG_DEFAULTS_COLONISATION,
+        "SessionMgmt": CFG_DEFAULTS_SESSIONMGMT,
     }
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,6 +221,12 @@ if config_path is None:
         # Fall through — ConfigManager will use built-in defaults
 
 migrate_config_if_needed(config_path)  # silently rewrite old [GUI]/sub-table format before loading
+# Settings added since this config was written are appended to it, so they are
+# visible and editable rather than only resolving invisibly from defaults.
+_added_keys = backfill_config_defaults(config_path)
+if _added_keys:
+    print(f"[EDLD] Added {len(_added_keys)} new setting(s) to {config_path}: "
+          + ", ".join(_added_keys))
 config_dict = load_config_file(config_path)
 notify_test = bool(args.test)  if args.test  is not None else False
 trace_mode  = bool(args.trace) if args.trace is not None else DEBUG_MODE

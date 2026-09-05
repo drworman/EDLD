@@ -127,6 +127,110 @@ def _apply_gui_to_ui(gui_dict: dict) -> dict:
     return result
 
 
+def _toml_scalar(value) -> str:
+    """Render a default value as a TOML scalar."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def backfill_config_defaults(config_path: Path) -> list[str]:
+    """Add newly-introduced default keys to an existing config.toml.
+
+    Every release that adds a setting leaves existing configs without it.
+    Resolution already falls back to the default, so nothing breaks — but the
+    sections loaded with warnings print a line per missing key on every
+    launch, and a key that is not in the file is one the user cannot discover
+    or edit.
+
+    The file is edited **in place, by line**, rather than reparsed and
+    rewritten.  ``example.config.toml`` is a heavily commented reference that
+    users copy and edit, and regenerating the file from parsed values would
+    throw all of that away.  Insertions go at the end of the matching
+    top-level section, keeping surrounding comments intact.
+
+    Only *adds*, and only to top-level sections.  Keys whose default is an
+    empty string are skipped — those are credentials and paths the user has to
+    supply, and writing ``ApiKey = ""`` into their file is noise, not help.
+    Profile sections are left alone: a profile is meant to be a sparse
+    override of the global values.
+
+    Returns the ``Section.Key`` names added, for the caller to report.
+    """
+    try:
+        config = load_config_file(config_path)
+    except SystemExit:
+        raise
+    except Exception:
+        return []
+
+    wanted: dict[str, dict] = {
+        "Settings":  {**CFG_DEFAULTS_SETTINGS, **CFG_DEFAULTS_EXTRA},
+        "Discord":   CFG_DEFAULTS_DISCORD,
+        "UI":        CFG_DEFAULTS_UI,
+        "LogLevels": CFG_DEFAULTS_NOTIFY,
+        "CAPI":      CFG_DEFAULTS_CAPI,
+    }
+    # SessionMgmt's defaults are owned by the component that reads them;
+    # imported late to keep core/ from depending on components/ at import time.
+    try:
+        from components.ksw import CFG_DEFAULTS as _SESSION_DEFAULTS
+        wanted["SessionMgmt"] = _SESSION_DEFAULTS
+    except Exception:
+        pass
+
+    missing: dict[str, list[tuple[str, object]]] = {}
+    for section, defaults in wanted.items():
+        existing = config.get(section)
+        if not isinstance(existing, dict):
+            continue                      # section absent — do not invent it
+        gaps = [(k, v) for k, v in defaults.items()
+                if k not in existing and not (isinstance(v, str) and v == "")]
+        if gaps:
+            missing[section] = gaps
+    if not missing:
+        return []
+
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+
+    # Find where each top-level section's body ends, so insertions land inside
+    # it rather than after a later section header.
+    section_end: dict[str, int] = {}
+    current: str | None = None
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            current = stripped[1:-1].strip()
+            if current not in section_end:
+                section_end[current] = index + 1
+        elif current is not None and stripped and not stripped.startswith("#"):
+            section_end[current] = index + 1
+
+    added: list[str] = []
+    # Insert from the bottom up so earlier indices stay valid.
+    for section in sorted(missing, key=lambda s: section_end.get(s, 0), reverse=True):
+        at = section_end.get(section)
+        if at is None:
+            continue
+        block = ["", "# Added automatically — new in this release."]
+        for key, value in missing[section]:
+            block.append(f"{key} = {_toml_scalar(value)}")
+            added.append(f"{section}.{key}")
+        lines[at:at] = block
+
+    try:
+        config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError as exc:
+        print(f"{_WARNING} Could not add new config defaults: {exc}")
+        return []
+    return added
+
+
 def migrate_config_if_needed(config_path: Path) -> bool:
     """Detect old config formats and silently rewrite to canonical format.
 
@@ -290,6 +394,14 @@ CFG_DEFAULTS_NOTIFY = {
     # all CAPI features stop working until the user re-runs the OAuth flow.
     # Default level 3 so it pings Discord and lands in the Alerts pane.
     "CapiAuthRequired": 3,
+    # Fleet / squadron carrier jump lifecycle.  A scheduled jump starts a
+    # 15-minute lockdown during which the carrier cannot be boarded or
+    # docked with, so it matters whether or not the commander is aboard —
+    # level 3 puts it in the Alerts window and on Discord.  Completion is
+    # quieter because by then the carrier has already arrived.
+    "CarrierJumpScheduled": 3,
+    "CarrierJumpCancelled": 3,
+    "CarrierJumpComplete":  2,
 }
 
 

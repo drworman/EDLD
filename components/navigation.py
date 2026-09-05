@@ -245,6 +245,32 @@ class NavigationPlugin(BasePlugin):
         self._notify()
         return True
 
+    def _retire_completed_route(self) -> None:
+        """Drop the EDLD route once its final destination has been reached.
+
+        Without this the route outlives the trip: the commander jumps onward,
+        is no longer on it, and the footer reports being off a route they
+        finished days ago.  Only EDLD's own route is retired — the game's
+        NavRoute.json is the game's to manage.
+        """
+        doc = self._edld_route
+        route = (doc or {}).get("Route") or []
+        if not route:
+            return
+        current = self.effective_current_system()
+        if not current:
+            return
+        if _norm(route[-1].get("StarSystem")) != _norm(current):
+            return
+
+        self._edld_route = None
+        try:
+            self.storage.write_json({}, "route")
+        except Exception as exc:
+            from core import debug as _dbg
+            _dbg.info(f"  [Nav] could not retire completed route: {exc}")
+        self.core.state.nav_last_copied = ""
+
     def clear_route(self) -> str:
         """Wipe the EDLD route and suppress the current NavRoute.json."""
         self._edld_route = None
@@ -313,9 +339,10 @@ class NavigationPlugin(BasePlugin):
 
         idx = self._index_of(route, current)
         if idx is None:
-            return "", f"{current} is not on the {source} route."
+            # Kept short: this renders in a one-row footer that clips.
+            return "", f"Off the {source} route"
         if idx >= len(route) - 1:
-            return "", f"{current} is the final destination."
+            return "", "At final destination"
         return str(route[idx + 1].get("StarSystem") or ""), ""
 
     def copy_next(self) -> tuple[bool, str]:
@@ -390,6 +417,7 @@ class NavigationPlugin(BasePlugin):
 
         if ev in _ARRIVAL_EVENTS:
             state.nav_transit_to = ""
+            self._retire_completed_route()
             self._refresh_status()
 
             # Replaying history at startup must not touch the clipboard.

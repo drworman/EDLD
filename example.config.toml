@@ -120,6 +120,28 @@ PeriodicFaction  = 0   # Faction kill breakdown in the quarter-hour summary
 PeriodicCredits  = 2   # Credits earned in the quarter-hour summary
 PeriodicMerits   = 2   # Merits earned in the quarter-hour summary (powerplay only)
 
+# Fleet / squadron carrier jump lifecycle.  A scheduled jump locks the carrier
+# down for ~15 minutes: nothing can dock, and anyone aboard is going with it.
+CarrierJumpScheduled = 3   # Jump scheduled — carrier, destination, countdown
+CarrierJumpCancelled = 3   # A scheduled jump was cancelled
+CarrierJumpComplete  = 2   # Carrier arrived at its destination
+
+# ── CAPI ─────────────────────────────────────────────────────────────────────
+# Frontier's Companion API.  Enable it from Preferences rather than here: the
+# OAuth flow has to run to obtain a token, and the key below only gates
+# whether EDLD polls once one exists.
+#
+[CAPI]
+Enabled = false
+
+# ── Colonisation ─────────────────────────────────────────────────────────────
+# Local tracking of construction site requirements and delivery progress needs
+# no key.  Supplying a Raven Colonial key additionally syncs your
+# contributions with that community project.  Experimental.
+#
+[Colonisation]
+# ApiKey = ""
+
 # ── UI ───────────────────────────────────────────────────────────────────────
 # The EDLD dashboard.  Three interfaces over the same windows and data:
 #   textual   terminal dashboard (default)
@@ -150,6 +172,9 @@ Theme      = "default"         # built-in: "default", "default-dark",
 # EDDN relay used by EDSM, Inara, and most third-party tools.
 
 [EDDN]
+# Overrides the anonymised uploader id EDLD derives from your commander name.
+# Leave unset unless you have a reason to pin it.
+# UploaderID = ""
 Enabled    = false
 # TestMode   = false   # send to /test schemas only (development use)
 

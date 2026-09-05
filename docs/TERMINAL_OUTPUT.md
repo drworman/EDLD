@@ -25,6 +25,8 @@ Conditional lines appear only when the relevant data is available:
 | Powerplay allegiance | Only when pledge is active |
 | Location | Only when star system is known |
 | Stack | Only when massacre missions are active |
+| Credits / Cargo / Fuel | Only when the value is known at startup |
+| Fleet Carrier | Only when a carrier is on file |
 
 <div align="center">
 <img src="../images/terminal_launch_notice.png" alt="Terminal launch banner" width="660"/>

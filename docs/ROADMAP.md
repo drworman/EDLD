@@ -1,6 +1,6 @@
 # EDLD Roadmap
 
-Last updated: 20260613
+Last updated: 20260905
 
 ---
 
@@ -16,13 +16,30 @@ one layout model and one set of components, so a new dashboard window should be
 added to both rather than to whichever is convenient. `core/summary_model.py`
 and `core/palette.py` exist for the same reason.
 
+**Window consolidation** (20260905) — several windows that duplicated each
+other's rows were folded into the window they belonged with. Assets became
+tabs on Commander, Exobiology nested under the body it describes in
+Exploration, the massacre stack moved beside the session summary it belongs
+to, and Colonisation joined Cargo. Hull, shields and fuel now live only in
+Ship Health, which is also where the ship names itself. No data was dropped;
+an existing `windows.json` naming a removed window is migrated on load.
+
+**Spansh fleet-carrier routing** (20260905) — carrier routing works. The endpoint and parameter names had been correct all
+along; the two list-shaped parameters were being sent as JSON strings where
+Spansh's form parser expects repeated bare keys — jQuery's `traditional`
+serialisation — so a job was accepted with `HTTP 202` and then had no
+destination to route to. Routes come back with full per-jump fuel planning:
+tritium burned, tank level on arrival, restock stops and amounts, and which
+systems have a market or a pristine icy ring to mine.
+
 ---
 
 ## Deferred
 
 ### Exploration / Exobiology module split
-The Exploration and Exobiology dashboard windows and their shared body-data
-layer (`core/explo_*`) have shipped. That layer still mixes Exploration logic
+Exploration and Exobiology now render as one window — the biology for a body
+sits nested under that body's exploration row — but their shared body-data
+layer (`core/explo_*`) still mixes Exploration logic
 (scan / mapping / discovery) with Exobiology logic (flora status, waypoints,
 clonal distance, one-sample-in-progress reset) as a legacy of their shared
 origin. A future refactor will split these into distinct modules so the two
@@ -31,12 +48,3 @@ systems/bodies, so the approach is a module split rather than a separate
 database. Deferred — no target release. Background in
 [EXPLORATION_EXOBIOLOGY_PLAN.md](EXPLORATION_EXOBIOLOGY_PLAN.md).
 
-### Spansh Fleet-Carrier Routing  ⚠ unfinished — deferred, no target release
-The carrier route planner in the Navigation block is non-functional —
-Spansh's `/api/fleetcarrier/*` endpoints respond `HTTP 202` to the
-POST but the resulting job UUID doesn't resolve at any of the
-documented results paths (`/api/results/<id>`, `/api/fleetcarrier/results/<id>`,
-`/api/fleet-carrier/results/<id>`, `/api/fleetcarrier/route/<id>`).
-The form scaffolding remains in place but inputs and the plot button
-are disabled, with an explanatory banner in the tab. FSD and Neutron
-routing are unaffected.

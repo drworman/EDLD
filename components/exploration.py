@@ -268,31 +268,6 @@ class ActivityExplorationPlugin(BasePlugin, ActivityProviderMixin):
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _nav_route_info(self) -> tuple[int, float] | None:
-        """
-        Return (remaining_jumps, total_distance_ly) from state.nav_route,
-        or None if no route is plotted.
-        """
-        route = getattr(self.core.state, "nav_route", [])
-        if not route or len(route) < 2:
-            return None
-        # route is a list of waypoints; remaining = all entries after current position
-        # state.pilot_system gives current system
-        pilot = getattr(self.core.state, "pilot_system", None)
-        if pilot:
-            # Find first waypoint past current system
-            waypoints = [w for w in route if w.get("StarSystem") != pilot]
-        else:
-            waypoints = list(route)
-        remaining = len(waypoints)
-        if remaining == 0:
-            return None
-        # Approximate total plotted distance by summing consecutive jump distances
-        # (we don't have per-hop distances, so just report hop count and next dest)
-        return (remaining, 0.0)
-
-    # ── ActivityProviderMixin ─────────────────────────────────────────────────
-
     def has_activity(self) -> bool:
         return self.jumps > 0 or self.bodies_fss_scanned > 0
 
@@ -373,28 +348,10 @@ class ActivityExplorationPlugin(BasePlugin, ActivityProviderMixin):
                     "rate":  None,
                 })
 
-        # Nav route progress
-        nav_info = self._nav_route_info()
-        if nav_info:
-            remaining, _ = nav_info
-            route = getattr(self.core.state, "nav_route", [])
-            pilot = getattr(self.core.state, "pilot_system", None)
-            next_dest = None
-            for wp in route:
-                if wp.get("StarSystem") != pilot:
-                    next_dest = wp.get("StarSystem")
-                    break
-            rows.append({"label": "─── Nav Route ───", "value": "", "rate": None})
-            rows.append({
-                "label": "  Remaining jumps",
-                "value": str(remaining),
-                "rate":  None,
-            })
-            if next_dest:
-                rows.append({
-                    "label": "  Next",
-                    "value": next_dest,
-                    "rate":  None,
-                })
+        # Nav route progress is deliberately absent here.  The Navigation
+        # window owns the route — including the follower's next-system
+        # readout in its footer — and repeating remaining jumps and next
+        # destination in the Session summary duplicated it in a place nobody
+        # looks for routing.
 
         return rows

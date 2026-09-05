@@ -27,6 +27,36 @@ from core.plugin_loader import BasePlugin
 from core.emit import Terminal, fmt_credits
 
 
+#: Journal mission names look like "Mission_Massacre_Wing_name".  These map
+#: recognisable stems to a category so the Missions tab can group them;
+#: anything unmatched falls back to "Other" rather than guessing.
+_MISSION_CATEGORIES = (
+    ("massacre", "Massacre"), ("assassinat", "Assassination"),
+    ("delivery", "Delivery"), ("collect", "Collection"),
+    ("mining", "Mining"), ("salvage", "Salvage"), ("courier", "Courier"),
+    ("passenger", "Passenger"), ("sightsee", "Passenger"),
+    ("rescue", "Rescue"), ("altruism", "Donation"), ("donation", "Donation"),
+    ("scan", "Scan"), ("onfoot", "On foot"), ("smuggle", "Smuggling"),
+)
+
+
+def _mission_category(raw: str) -> str:
+    low = (raw or "").lower()
+    for stem, label in _MISSION_CATEGORIES:
+        if stem in low:
+            return label
+    return "Other"
+
+
+def _pretty_mission_name(raw: str) -> str:
+    """Best-effort readable name when the journal gives no localised one."""
+    text = (raw or "").strip()
+    for prefix in ("Mission_", "MISSION_"):
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+    return text.split("_name")[0].replace("_", " ").strip() or "Mission"
+
+
 class MissionsPlugin(BasePlugin):
     PLUGIN_NAME    = "missions"
     PLUGIN_DISPLAY = "Massacre Mission Stack"
@@ -113,6 +143,90 @@ class MissionsPlugin(BasePlugin):
                 info["kills_this_session"] = info.get("kills_this_session", 0) + 1
 
     # ── Events ────────────────────────────────────────────────────────────────
+
+    def _on_massacre_accepted(self, event, state, core, gq, notify) -> None:
+        """Massacre-specific bookkeeping for an accepted mission."""
+        mid = int(event["MissionID"])
+        # During preload, only skip if this mission is already fully tracked
+        # (either restored from storage or enriched by backfill).  Missions
+        # accepted after the Missions bulk snapshot, or skeletons that backfill
+        # didn't reach, still need to be processed.
+        if state.in_preload and mid in state.mission_detail_map:
+            return
+        already_active = mid in state.active_missions
+        if not already_active:
+            state.active_missions.append(mid)
+        reward = event.get("Reward", 0)
+        if reward and mid not in state.mission_value_map:
+            state.stack_value += reward
+            state.mission_value_map[mid] = reward
+        target_f = event.get("TargetFaction", "")
+        if target_f:
+            state.mission_target_faction_map[mid] = target_f
+        state.mission_detail_map[mid] = {
+            "faction":        event.get("Faction", ""),
+            "kill_count":     event.get("KillCount", 0),
+            "target_faction": target_f,
+            "target_system":  event.get("DestinationSystem", ""),
+            "target_type":    (event.get("TargetType_Localised")
+                               or event.get("TargetType", "")),
+            "wing":           event.get("Wing", False),
+            "reward":         reward,
+        }
+        self._persist()
+        if not state.in_preload:
+            total_now = len(state.active_missions)
+            core.emitter.emit(
+                msg_term=f"Accepted massacre mission (active: {total_now})",
+                emoji="📋", sigil="*  MISS",
+                timestamp=event.get("_logtime"), loglevel=notify["MissionUpdate"],
+            )
+            full_stack = settings.get("FullStackSize", 20)
+            if total_now == full_stack and state.stack_value > 0:
+                _sl = f"Stack full ({total_now} missions) — {fmt_credits(state.stack_value)}"
+                core.emitter.emit(
+                    msg_term=_sl, msg_discord=f"**{_sl}**",
+                    emoji="🏆", sigil="*  MISS",
+                    timestamp=event.get("_logtime"), loglevel=notify["MissionUpdate"],
+                )
+        if gq: gq.put(("mission_update", None))
+
+
+    def _track_mission(self, state, event) -> None:
+        """Record any accepted mission on the general board.
+
+        Deliberately shallow: mission events vary a lot by type, so this
+        keeps the fields they share and picks up whatever target, count or
+        commodity detail happens to be present.  Anything absent is omitted
+        rather than rendered as a blank row.
+        """
+        mid = event.get("MissionID")
+        if mid is None:
+            return
+
+        raw_name = str(event.get("Name", ""))
+        entry = {
+            "name": (event.get("LocalisedName")
+                     or event.get("Name_Localised")
+                     or _pretty_mission_name(raw_name)),
+            "category":    _mission_category(raw_name),
+            "faction":     event.get("Faction", ""),
+            "reward":      int(event.get("Reward", 0) or 0),
+            "destination": (event.get("DestinationSystem")
+                            or event.get("DestinationStation") or ""),
+            "expiry":      event.get("Expiry", ""),
+            "wing":        bool(event.get("Wing", False)),
+            "status":      "Active",
+        }
+        for src, key in (("KillCount", "count"), ("Count", "count"),
+                         ("TargetFaction", "target_faction"),
+                         ("Target_Localised", "target"), ("Target", "target"),
+                         ("Commodity_Localised", "commodity"),
+                         ("PassengerCount", "passengers")):
+            value = event.get(src)
+            if value not in (None, "", 0) and key not in entry:
+                entry[key] = value
+        state.all_missions[int(mid)] = entry
 
     def on_event(self, event: dict, state) -> None:
         core     = self.core
@@ -232,51 +346,31 @@ class MissionsPlugin(BasePlugin):
                 )
                 if gq: gq.put(("mission_update", None))
 
-            case "MissionAccepted" if "Mission_Massacre" in event.get("Name", ""):
-                mid = int(event["MissionID"])
-                # During preload, only skip if this mission is already fully tracked
-                # (either restored from storage or enriched by backfill).  Missions
-                # accepted after the Missions bulk snapshot, or skeletons that backfill
-                # didn't reach, still need to be processed.
-                if state.in_preload and mid in state.mission_detail_map:
-                    return
-                already_active = mid in state.active_missions
-                if not already_active:
-                    state.active_missions.append(mid)
-                reward = event.get("Reward", 0)
-                if reward and mid not in state.mission_value_map:
-                    state.stack_value += reward
-                    state.mission_value_map[mid] = reward
-                target_f = event.get("TargetFaction", "")
-                if target_f:
-                    state.mission_target_faction_map[mid] = target_f
-                state.mission_detail_map[mid] = {
-                    "faction":        event.get("Faction", ""),
-                    "kill_count":     event.get("KillCount", 0),
-                    "target_faction": target_f,
-                    "target_system":  event.get("DestinationSystem", ""),
-                    "target_type":    (event.get("TargetType_Localised")
-                                       or event.get("TargetType", "")),
-                    "wing":           event.get("Wing", False),
-                    "reward":         reward,
-                }
-                self._persist()
-                if not state.in_preload:
-                    total_now = len(state.active_missions)
-                    core.emitter.emit(
-                        msg_term=f"Accepted massacre mission (active: {total_now})",
-                        emoji="📋", sigil="*  MISS",
-                        timestamp=event.get("_logtime"), loglevel=notify["MissionUpdate"],
-                    )
-                    full_stack = settings.get("FullStackSize", 20)
-                    if total_now == full_stack and state.stack_value > 0:
-                        _sl = f"Stack full ({total_now} missions) — {fmt_credits(state.stack_value)}"
-                        core.emitter.emit(
-                            msg_term=_sl, msg_discord=f"**{_sl}**",
-                            emoji="🏆", sigil="*  MISS",
-                            timestamp=event.get("_logtime"), loglevel=notify["MissionUpdate"],
-                        )
+            case "MissionAccepted":
+                # Every mission type, not just massacres.  The general board
+                # backs the Session window's Missions tab; the massacre
+                # bookkeeping below still runs for those.
+                self._track_mission(state, event)
                 if gq: gq.put(("mission_update", None))
+                if "Mission_Massacre" in event.get("Name", ""):
+                    self._on_massacre_accepted(event, state, core, gq, notify)
+
+            case "MissionCompleted" | "MissionFailed" | "MissionAbandoned":
+                # Off the board however it ended.
+                mid = event.get("MissionID")
+                if mid is not None and int(mid) in state.all_missions:
+                    state.all_missions.pop(int(mid), None)
+                    if gq: gq.put(("mission_update", None))
+
+            case "MissionRedirected":
+                mid = event.get("MissionID")
+                entry = (state.all_missions.get(int(mid))
+                         if mid is not None else None)
+                if entry is not None:
+                    entry["status"] = "Complete — turn in"
+                    entry["destination"] = (event.get("NewDestinationSystem")
+                                            or entry.get("destination", ""))
+                    if gq: gq.put(("mission_update", None))
 
             case "MissionRedirected" if "Mission_Massacre" in event.get("Name", ""):
                 mid = int(event["MissionID"])

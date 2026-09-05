@@ -28,6 +28,7 @@ component.
 
 from __future__ import annotations
 
+from core.state import FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD
 from gui.block_base import GuiBlock, _health_cls
 
 
@@ -49,13 +50,23 @@ class ShipHealthBlock(GuiBlock):
     BLOCK_TITLE = "SHIP HEALTH"
 
     def _build_body(self, layout) -> None:
+        # Two header rows carrying the ship's identity, moved here from the
+        # Commander header: the vessel belongs with its own condition
+        # readout, and Commander's header is now purely about the commander.
+        self._hdr1 = self.text("", "section-hdr")
+        self._hdr2 = self.text("", "section-hdr")
+        layout.addWidget(self._hdr1)
+        layout.addWidget(self._hdr2)
+
         self._hull = self.kv("Hull")
         self._shields = self.kv("Shields")
+        self._fuel = self.kv("Fuel")
         self._modules_hdr = self.hdr("Modules")
         self._scroll = self.scroll()
 
         layout.addWidget(self._hull)
         layout.addWidget(self._shields)
+        layout.addWidget(self._fuel)
         layout.addWidget(self.rule())
         layout.addWidget(self._modules_hdr)
         layout.addWidget(self._scroll, 1)
@@ -69,6 +80,47 @@ class ShipHealthBlock(GuiBlock):
         self._refresh_hull(state)
         self._refresh_shields(state)
         self._refresh_modules(state, plugin)
+        self._refresh_header(state)
+        self._refresh_fuel(state)
+
+    def _refresh_header(self, state) -> None:
+        """Ship name / ident on the first row, hull type on the second.
+
+        Rendered without parentheses: the type gets its own row rather than
+        being bracketed onto the end of the name, which is how it read when
+        this lived in the Commander header.
+        """
+        name  = (getattr(state, "ship_name", "")  or "").upper()
+        ident = (getattr(state, "ship_ident", "") or "").upper()
+        stype = (getattr(state, "pilot_ship", "") or "").upper()
+
+        self._hdr1.set_text(" - ".join(p for p in (name, ident) if p) or "SHIP HEALTH")
+        self._hdr2.set_text(stype)
+        self._hdr2.setVisible(bool(stype))
+
+    def _refresh_fuel(self, state) -> None:
+        """Main-tank percentage, with endurance when the burn rate is known."""
+        current = getattr(state, "fuel_current", None)
+        tank    = getattr(state, "fuel_tank_size", None)
+        if current is None or not tank or tank <= 0:
+            self._fuel.set_value("—", "val dim")
+            return
+
+        text = f"{current / tank * 100:.0f}%"
+        burn = getattr(state, "fuel_burn_rate", None)
+        if burn and burn > 0:
+            secs = (current / burn) * 3600
+            hours, mins = int(secs // 3600), int((secs % 3600) // 60)
+            text += f"  (~{hours}h {mins}m)" if hours else f"  (~{mins}m)"
+
+        if current < tank * FUEL_CRIT_THRESHOLD:
+            cls = "val health-crit"
+        elif current < tank * FUEL_WARN_THRESHOLD:
+            cls = "val health-warn"
+        else:
+            cls = "val health-good"
+        self._fuel.set_value(text, cls)
+
 
     # ── Hull ──────────────────────────────────────────────────────────────────
 

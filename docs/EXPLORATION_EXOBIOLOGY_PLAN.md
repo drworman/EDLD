@@ -1,5 +1,14 @@
 # EDLD — Exploration & Exobiology Plan
 
+> **Status (20260905): historical.** This plan has landed. Read it for the data
+> model, the prediction engine and the size-class tables, which are still
+> current — but not for the layout: Exploration and Exobiology shipped as two
+> windows and were later merged into one, with a body's biology nested under
+> its exploration row. The default layout tables below describe the
+> arrangement at the time and have been superseded by
+> [CONFIGURATION.md](CONFIGURATION.md#window-layout). The `core/explo_*` module
+> split described in [ROADMAP.md](ROADMAP.md) is still outstanding.
+
 **Scope:** Two new dashboard windows (Exploration, Exobiology), a shared body
 data layer fed from the commander's full journal history, and a layout system
 that lets the user choose which windows are shown and where. Multi-session

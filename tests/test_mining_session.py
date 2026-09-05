@@ -128,7 +128,7 @@ def test_reserve_level_captured_from_scan(plugin):
                     plugin.state)
     assert plugin.reserve_level == "Pristine"
     assert plugin.ring_type == "Metallic"
-    assert plugin.ring_name == RING
+    assert plugin.mining_body == RING
 
 
 @pytest.mark.parametrize(
@@ -151,15 +151,16 @@ def test_hotspots_captured_from_surface_scan(plugin):
     assert plugin.hotspots == {"Painite": 2, "Platinum": 1}
 
 
-def test_ring_context_line_leads_with_reserves(plugin):
+def test_context_line_leads_with_the_body(plugin):
     plugin.on_event({"event": "Scan", "ReserveLevel": "PristineResources",
                      "Rings": [{"Name": RING, "RingClass": "eRingClass_Metalic"}]},
                     plugin.state)
     plugin.on_event({"event": "SAASignalsFound", "BodyName": RING, "Signals": [
         {"Type": "Painite", "Count": 2}]}, plugin.state)
     ctx = plugin.ring_context()
-    assert ctx.startswith("Pristine")
-    assert "Metallic" in ctx and "Painite x2" in ctx
+    # The body is the thing being described, so it leads.
+    assert ctx.startswith(RING)
+    assert "Pristine" in ctx and "Metallic" in ctx and "Painite x2" in ctx
 
 
 def test_ring_context_empty_when_unknown(plugin):
@@ -347,3 +348,159 @@ def test_income_reaches_the_summary():
     assert "Income" in captured["text"]
     assert "132.48M" in captured["text"]
     assert "/hr" in captured["text"]
+
+
+# ── Surface signals that are not hotspots ─────────────────────────────────────
+
+def test_surface_poi_signals_are_not_hotspots(plugin):
+    """A planetary surface scan returns two unrelated families of signal.
+
+    Human settlements, biological and geological sites, and the planetary
+    mining location marker all arrive through SAASignalsFound alongside real
+    commodity hotspots.  Counting them produced rows like "Human 3 hotspots"
+    in the mining panel.
+    """
+    plugin.on_event({"event": "SAASignalsFound", "BodyName": "Ega 3 d", "Signals": [
+        {"Type": "$PlanetaryMiningLocation_Name;",
+         "Type_Localised": "Planetary Mining Location", "Count": 28},
+        {"Type": "$SAA_SignalType_Human;", "Type_Localised": "Human", "Count": 3},
+        {"Type": "$SAA_SignalType_Biological;", "Type_Localised": "Biological", "Count": 4},
+        {"Type": "$SAA_SignalType_Geological;", "Type_Localised": "Geological", "Count": 5},
+        {"Type": "Serendibite", "Count": 2},
+    ]}, plugin.state)
+    assert plugin.hotspots == {"Serendibite": 2}
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Painite", "Painite"),
+    ("tritium", "Tritium"),               # the journal uses both cases
+    ("Tritium", "Tritium"),
+    ("$SAA_SignalType_Human;", ""),
+    ("$PlanetaryMiningLocation_Name;", ""),
+    ("", ""),
+])
+def test_hotspot_name_filtering(raw, expected):
+    assert mining._hotspot_name({"Type": raw}) == expected
+
+
+def test_localised_commodity_name_is_preferred():
+    assert mining._hotspot_name(
+        {"Type": "Opal", "Type_Localised": "Void Opal"}) == "Void Opal"
+
+
+def test_camel_case_falls_back_readably():
+    """Most commodities carry no localised name."""
+    assert mining._hotspot_name(
+        {"Type": "LowTemperatureDiamond"}) == "Low Temperature Diamond"
+
+
+def test_ring_and_planetary_sites_are_listed_separately(plugin):
+    """They are different kinds of place and must not share a heading.
+
+    A ring has hotspots you fly into; a planet has surface sites you land at.
+    Merging them made a planetary body look like a ring with no hotspots.
+    """
+    # A planetary body with surface mining sites.
+    plugin.on_event({"event": "SAASignalsFound", "BodyName": "Ega 3 d", "Signals": [
+        {"Type": "$PlanetaryMiningLocation_Name;",
+         "Type_Localised": "Planetary Mining Location", "Count": 28},
+        {"Type": "$SAA_SignalType_Human;", "Type_Localised": "Human", "Count": 3},
+    ]}, plugin.state)
+    # A ring in the same system.
+    plugin.on_event({"event": "SAASignalsFound", "BodyName": "Ega 3 A Ring",
+                     "Signals": [{"Type": "Monazite", "Count": 2}]}, plugin.state)
+    plugin.on_event({"event": "Scan", "BodyName": "Ega 3",
+                     "ReserveLevel": "CommonResources",
+                     "Rings": [{"Name": "Ega 3 A Ring",
+                                "RingClass": "eRingClass_Rocky"}]}, plugin.state)
+
+    rings, planets = plugin.sites_by_kind()
+    assert [b for b, _ in rings] == ["Ega 3 A Ring"]
+    assert [b for b, _ in planets] == ["Ega 3 d"]
+    assert planets[0][1]["planetary_sites"] == 28
+    assert rings[0][1]["hotspots"] == {"Monazite": 2}
+
+    labels = [r["label"] for r in plugin.get_tab_rows()]
+    assert any("Ring sites" in l for l in labels)
+    assert any("Planetary sites" in l for l in labels)
+
+
+def test_planetary_sites_carry_no_caveat_row(plugin):
+    """The journal gives a count and nothing about what a site holds.
+
+    That is worth knowing but not worth a row: the panel is short on width and
+    a caveat is not information.
+    """
+    plugin.on_event({"event": "SAASignalsFound", "BodyName": "Ega 3 d", "Signals": [
+        {"Type": "$PlanetaryMiningLocation_Name;", "Count": 28}]}, plugin.state)
+    rows = plugin.get_tab_rows()
+    labels = " ".join(r["label"] for r in rows)
+    assert "journal" not in labels.lower()
+    # The site count itself is still reported.
+    assert any("28 site" in str(r["value"]) for r in rows)
+
+
+def test_body_with_nothing_mineable_is_not_listed(plugin):
+    """Scanned but empty bodies would pad the panel with useless entries."""
+    plugin.on_event({"event": "Scan", "BodyName": "Ega 4",
+                     "ReserveLevel": "DepletedResources", "Rings": []},
+                    plugin.state)
+    rings, planets = plugin.sites_by_kind()
+    assert rings == [] and planets == []
+
+
+def test_ring_class_and_reserves_attach_to_the_ring(plugin):
+    plugin.on_event({"event": "SAASignalsFound", "BodyName": "Ega 3 A Ring",
+                     "Signals": [{"Type": "Painite", "Count": 1}]}, plugin.state)
+    plugin.on_event({"event": "Scan", "BodyName": "Ega 3",
+                     "ReserveLevel": "PristineResources",
+                     "Rings": [{"Name": "Ega 3 A Ring",
+                                "RingClass": "eRingClass_Metalic"}]}, plugin.state)
+    rings, _ = plugin.sites_by_kind()
+    _body, rec = rings[0]
+    assert rec["reserves"] == "Pristine"
+    assert rec["ring_type"] == "Metallic"
+
+
+@pytest.mark.parametrize("raw,localised,expected", [
+    ("$SAA_RingHotspot:#type=$painite_name;;", "Painite Hotspot", "Painite"),
+    ("$SAA_RingHotspot:#type=$LowTemperatureDiamond_name;;",
+     "Low Temp. Diamonds Hotspot", "Low Temp. Diamonds"),
+    ("$SAA_RingHotspot:#type=$Tritium_name;;", "", "Tritium"),
+    ("Bosch Station", "", ""),
+    ("$MULTIPLAYER_SCENARIO77_TITLE;", "Resource Extraction Site [Low]", ""),
+])
+def test_active_hotspot_from_supercruise_drop(raw, localised, expected):
+    """Overlapping hotspots make the ring's signal list ambiguous.
+
+    Dropping in names the one actually being worked.
+    """
+    ev = {"event": "SupercruiseDestinationDrop", "Type": raw}
+    if localised:
+        ev["Type_Localised"] = localised
+    assert mining._ring_hotspot_name(ev) == expected
+
+
+def test_section_is_headed_by_the_body_not_the_word_ring(plugin):
+    """A planetary mining location is not a ring."""
+    plugin.on_event({"event": "SAASignalsFound", "BodyName": "Ega 3 d",
+                     "Signals": [{"Type": "Monazite", "Count": 2}]}, plugin.state)
+    plugin.on_event({"event": "Scan", "ReserveLevel": "CommonResources",
+                     "Rings": []}, plugin.state)
+    labels = [r["label"] for r in plugin.get_tab_rows()]
+    assert any("Ega 3 d" in l for l in labels)
+    headers = [l for l in labels if "───" in l]
+    assert not any(h.strip("─ ") == "Ring" for h in headers)
+
+
+def test_every_handled_event_is_subscribed():
+    """A handler for an unsubscribed event never runs.
+
+    The hotspot-drop handler was written before its event was added to
+    SUBSCRIBED_EVENTS and was silently dead.
+    """
+    import re as _re
+    source = (ROOT / "components" / "mining.py").read_text(encoding="utf-8")
+    handled = set(_re.findall(r'case "(\w+)"', source))
+    subscribed = set(mining.ActivityMiningPlugin.SUBSCRIBED_EVENTS)
+    assert handled <= subscribed, f"handled but not subscribed: {handled - subscribed}"

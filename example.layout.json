@@ -1,65 +1,34 @@
 {
-  "version": 2,
-  "blocks": {
-    "assets": {
-      "col": 0,
-      "row": 0,
-      "width": 11,
-      "height": 43
-    },
-    "engineering": {
-      "col": 0,
-      "row": 43,
-      "width": 11,
-      "height": 35
-    },
-    "colonisation": {
-      "col": 0,
-      "row": 78,
-      "width": 11,
-      "height": 23
-    },
-    "commander": {
-      "col": 11,
-      "row": 0,
-      "width": 10,
-      "height": 32
-    },
-    "crew_slf": {
-      "col": 11,
-      "row": 32,
-      "width": 10,
-      "height": 18
-    },
-    "alerts": {
-      "col": 11,
-      "row": 50,
-      "width": 10,
-      "height": 16
-    },
-    "cargo": {
-      "col": 11,
-      "row": 66,
-      "width": 10,
-      "height": 35
-    },
-    "missions": {
-      "col": 21,
-      "row": 0,
-      "width": 11,
-      "height": 28
-    },
-    "navigation": {
-      "col": 21,
-      "row": 28,
-      "width": 11,
-      "height": 33
-    },
-    "career": {
-      "col": 21,
-      "row": 61,
-      "width": 11,
-      "height": 40
-    }
+  "_comment": [
+    "Example window arrangement, in the same format as the windows.json EDLD",
+    "writes to your commander's data directory. Copy it there to use it, or",
+    "arrange the windows in Preferences > Display and let EDLD write its own.",
+    "",
+    "Slots are addressed <column><position>: A/B/C left to right, numbered top",
+    "to bottom. A window may only occupy a slot of its own size class -- panel,",
+    "compact or anchor -- so Alerts and Crew/SLF (compact) belong in B2/B3 and",
+    "Commander (anchor) in B1. Anything invalid is dropped on load and the slot",
+    "falls back to its default.",
+    "",
+    "The set below is the shipped default: the left column split evenly between",
+    "Exploration and Navigation, both of which grow large in use.",
+    "",
+    "Several windows no longer exist on their own, having been folded into",
+    "others -- Assets into Commander's tabs, Exobiology into Exploration, the",
+    "massacre stack into Session, and Colonisation into Cargo. Naming one of",
+    "those here does nothing. Windows left unlisted are simply not shown;",
+    "Preferences > Display lists everything available."
+  ],
+  "version": 1,
+  "slots": {
+    "A1": "exploration",
+    "A2": "navigation",
+    "B1": "commander",
+    "B2": "crew_slf",
+    "B3": "alerts",
+    "B4": "session",
+    "C1": "ship_health",
+    "C2": "cargo",
+    "C3": "engineering"
   }
 }

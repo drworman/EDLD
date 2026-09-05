@@ -12,6 +12,7 @@ Tab title: Mining
 """
 
 import time
+import re
 from collections import deque
 
 from core.plugin_loader import BasePlugin
@@ -41,6 +42,55 @@ def _content_label(raw: str) -> str:
     if "medium" in s: return "Medium"
     if "low"    in s: return "Low"
     return "Unknown"
+
+
+#: Surface scans return two unrelated families of signal under one event.
+#: Bare commodity names ("Painite", "LowTemperatureDiamond") are mining
+#: hotspots.  Anything spelled as a ``$SAA_SignalType_*`` token is a surface
+#: point-of-interest category — Human settlements, Biological and Geological
+#: sites — and ``$PlanetaryMiningLocation_Name`` is a marker for the body
+#: itself, not a commodity.  Counting those as hotspots put rows like
+#: "Human  3 hotspots" in the mining panel.
+_NON_HOTSPOT_PREFIXES = ("$saa_signaltype_", "$planetarymininglocation")
+
+
+def _hotspot_name(signal: dict) -> str:
+    """Return the commodity name for a hotspot signal, or "" if it is not one.
+
+    Falls back to the raw type when the journal supplies no localised name,
+    which it does not for most commodities, and normalises case — the same
+    commodity appears as both "Tritium" and "tritium" across a real journal.
+    """
+    raw = str(signal.get("Type", "") or "").strip()
+    if not raw:
+        return ""
+    if raw.lower().startswith(_NON_HOTSPOT_PREFIXES):
+        return ""
+    localised = str(signal.get("Type_Localised", "") or "").strip()
+    if localised:
+        return localised
+    # "LowTemperatureDiamond" -> "Low Temperature Diamond"
+    spaced = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", raw)
+    return spaced[:1].upper() + spaced[1:]
+
+
+def _ring_hotspot_name(event: dict) -> str:
+    """Commodity name from a SupercruiseDestinationDrop onto a ring hotspot.
+
+    The type reads ``$SAA_RingHotspot:#type=$painite_name;;``; the localised
+    form is "Painite Hotspot".  Returns "" for any other drop destination.
+    """
+    raw = str(event.get("Type", "") or "")
+    if "RingHotspot" not in raw:
+        return ""
+    localised = str(event.get("Type_Localised", "") or "").strip()
+    if localised:
+        return re.sub(r"\s*Hotspot$", "", localised)
+    match = re.search(r"\$([A-Za-z]+)_name;", raw)
+    if not match:
+        return ""
+    spaced = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", match.group(1))
+    return spaced[:1].upper() + spaced[1:]
 
 
 def _ring_class(raw: str) -> str:
@@ -94,6 +144,9 @@ class ActivityMiningPlugin(BasePlugin, ActivityProviderMixin):
         # body's Scan; hotspots from the ring's surface scan.
         "Scan",
         "SAASignalsFound",
+        # Names the specific ring hotspot dropped into, which overlapping
+        # hotspots make ambiguous from the ring's signal list alone.
+        "SupercruiseDestinationDrop",
     ]
 
     def on_load(self, core) -> None:
@@ -134,8 +187,21 @@ class ActivityMiningPlugin(BasePlugin, ActivityProviderMixin):
         # Raw materials collected while mining (MaterialCollected)
         self.materials_collected: dict[str, int] = {}
 
-        # Ring context for wherever we are mining
-        self.ring_name:     str = ""
+        # Where we are mining.  This is whatever body the surface scan
+        # covered — a ring, or a planet with a planetary mining location —
+        # so it is named for the body rather than assuming a ring.
+        self.mining_body:   str = ""
+
+        # Every body scanned this session that can be mined, keyed by body
+        # name.  Rings and planetary surfaces are different kinds of site and
+        # are listed separately; see _site() for the record shape.
+        self.mining_sites: dict[str, dict] = {}
+
+        # The specific ring hotspot currently dropped into, when the commander
+        # supercruise-drops onto one.  A ring can carry several overlapping
+        # hotspots, so knowing which one is being worked is worth more than
+        # knowing they exist.
+        self.active_hotspot: str = ""
         self.ring_type:     str = ""
         self.reserve_level: str = ""
         self.hotspots: dict[str, int] = {}
@@ -254,32 +320,71 @@ class ActivityMiningPlugin(BasePlugin, ActivityProviderMixin):
                     self.materials_collected[name] = (
                         self.materials_collected.get(name, 0) + count)
 
+            case "SupercruiseDestinationDrop":
+                # "$SAA_RingHotspot:#type=$painite_name;;" names the hotspot
+                # actually dropped into, which overlapping hotspots make
+                # ambiguous from the ring's signal list alone.
+                self.active_hotspot = _ring_hotspot_name(event)
+
             case "Scan":
-                # The ring we are mining belongs to a body whose Scan carries
-                # the reserve level; the ring's class comes from the matching
-                # entry in that body's Rings list.
+                # A body's Scan carries its reserve level, and its Rings list
+                # names and classes each ring hanging off it.  Both the body
+                # and its rings are recorded, so the site list can show a
+                # planetary surface and its rings as separate entries.
                 reserve = (event.get("ReserveLevel") or "").replace(
                     "Resources", "").strip()
+                scanned = str(event.get("BodyName", "") or "")
                 if reserve:
                     self.reserve_level = reserve
+                    if scanned:
+                        self._site(scanned)["reserves"] = reserve
+
+                for ring in (event.get("Rings") or []):
+                    ring_name = str(ring.get("Name", "") or "")
+                    if not ring_name:
+                        continue
+                    entry = self._site(ring_name)
+                    entry["kind"] = "ring"
+                    entry["ring_type"] = _ring_class(ring.get("RingClass", ""))
+                    if reserve:
+                        entry["reserves"] = reserve
+
                 body = str(getattr(state, "pilot_body", "") or "")
                 for ring in (event.get("Rings") or []):
                     if str(ring.get("Name", "")) == body:
-                        self.ring_name = body
+                        self.mining_body = body
                         self.ring_type = _ring_class(ring.get("RingClass", ""))
                         break
 
             case "SAASignalsFound":
-                # Hotspots in the ring: the reason to be in this ring rather
-                # than the identical-looking one next door.
+                # Hotspots: the reason to work this body rather than the
+                # identical-looking one next door.
                 body = str(event.get("BodyName", "") or "")
                 if body:
-                    self.ring_name = body
+                    self.mining_body = body
+                entry = self._site(body) if body else None
+
                 for sig in (event.get("Signals") or []):
-                    name = (sig.get("Type_Localised")
-                            or sig.get("Type", "")).strip()
-                    if name:
-                        self.hotspots[name] = int(sig.get("Count", 0) or 0)
+                    count = int(sig.get("Count", 0) or 0)
+                    raw = str(sig.get("Type", "") or "")
+
+                    if raw.lower().startswith("$planetarymininglocation"):
+                        # The journal reports how many surface sites the body
+                        # has, and nothing about what any individual one
+                        # holds — that detail is only on the in-game surface
+                        # map.  The count is still the useful signal.
+                        if entry is not None:
+                            entry["kind"] = "planet"
+                            entry["planetary_sites"] = count
+                        continue
+
+                    name = _hotspot_name(sig)
+                    if not name:
+                        continue          # surface POI category, not a commodity
+                    self.hotspots[name] = count
+                    if entry is not None:
+                        entry.setdefault("kind", "ring")
+                        entry["hotspots"][name] = count
 
     # ── ActivityProviderMixin ─────────────────────────────────────────────────
 
@@ -294,13 +399,39 @@ class ActivityMiningPlugin(BasePlugin, ActivityProviderMixin):
             total += price * tonnes
         return total
 
+    def _site(self, body: str) -> dict:
+        """Get or create the record for a mineable body."""
+        return self.mining_sites.setdefault(body, {
+            "kind": "",              # "ring" | "planet"
+            "hotspots": {},          # commodity -> hotspot count (rings)
+            "planetary_sites": 0,    # surface site count (planets)
+            "reserves": "",
+            "ring_type": "",
+        })
+
+    def sites_by_kind(self) -> tuple[list, list]:
+        """Return (ring sites, planetary sites) as (body, record) pairs.
+
+        A body with neither hotspots nor surface sites is dropped: it was
+        scanned but has nothing to mine, and listing it would pad the panel
+        with bodies the commander has no reason to visit.
+        """
+        rings, planets = [], []
+        for body, rec in sorted(self.mining_sites.items()):
+            if rec.get("kind") == "planet" and rec.get("planetary_sites"):
+                planets.append((body, rec))
+            elif rec.get("hotspots"):
+                rings.append((body, rec))
+        return rings, planets
+
     def ring_context(self) -> str:
         """One-line description of where we're mining, or "" if unknown.
 
-        Reserve level is the number that decides whether a ring is worth
-        working, so it leads when present.
+        Leads with the body, because that is the thing being described; then
+        the reserve level, which decides whether it is worth working at all.
         """
-        parts = [p for p in (self.reserve_level, self.ring_type) if p]
+        parts = [p for p in (self.mining_body, self.reserve_level,
+                             self.ring_type) if p]
         if self.hotspots:
             top = sorted(self.hotspots.items(), key=lambda kv: -kv[1])
             parts.append(", ".join(
@@ -371,29 +502,56 @@ class ActivityMiningPlugin(BasePlugin, ActivityProviderMixin):
         # Where this was mined.  Without it the numbers above have no
         # context — 180 t is excellent in a depleted ring and mediocre in a
         # pristine one.
-        ring = self.ring_context()
-        if ring and rows:
-            rows.append({"label": "Ring", "value": ring, "rate": None})
+        site = self.ring_context()
+        if site and rows:
+            rows.append({"label": "Site", "value": site, "rate": None})
         return rows
 
     def get_tab_rows(self) -> list[dict]:
-        rows = self.get_summary_rows()
+        # The condensed "Ring" row exists for the Discord summary, where
+        # there is no room to expand it.  The tab has that room and breaks
+        # the same information out in full below, so showing both would just
+        # print the ring twice.
+        rows = [r for r in self.get_summary_rows() if r["label"] != "Site"]
 
-        # Ring context leads: reserve level and hotspots decide whether the
-        # numbers below are good or bad for where you are.
-        ring = self.ring_context()
-        if ring or self.ring_name:
-            rows.append({"label": "─── Ring ───", "value": "", "rate": None})
-            if self.ring_name:
-                rows.append({"label": "  Body", "value": self.ring_name, "rate": None})
-            if self.reserve_level:
-                rows.append({"label": "  Reserves", "value": self.reserve_level, "rate": None})
-            if self.ring_type:
-                rows.append({"label": "  Type", "value": self.ring_type, "rate": None})
-            for name, n in sorted(self.hotspots.items(), key=lambda kv: -kv[1]):
-                rows.append({"label": f"  {name}",
-                             "value": f"{n} hotspot{'s' if n != 1 else ''}",
+        # Mining sites, ring and planetary under separate headings.  They
+        # are different kinds of place — a ring has hotspots you fly into, a
+        # planet has surface sites you land at — and merging them under one
+        # heading made a planetary body look like a ring with no hotspots.
+        rings, planets = self.sites_by_kind()
+
+        if rings:
+            rows.append({"label": "─── Ring sites ───", "value": "", "rate": None})
+            for body, rec in rings:
+                detail = " · ".join(p for p in (rec.get("reserves"),
+                                                rec.get("ring_type")) if p)
+                marker = "▸ " if body == self.mining_body else "  "
+                rows.append({"label": f"{marker}{body}", "value": detail,
                              "rate": None})
+                for name, n in sorted(rec["hotspots"].items(), key=lambda kv: -kv[1]):
+                    active = "  ◂ here" if name == self.active_hotspot else ""
+                    rows.append({
+                        "label": f"    {name}",
+                        "value": f"{n} hotspot{'s' if n != 1 else ''}{active}",
+                        "rate": None})
+
+        if planets:
+            rows.append({"label": "─── Planetary sites ───", "value": "",
+                         "rate": None})
+            # The journal reports how many surface sites a body has and
+            # nothing about what any one of them holds — that detail is only
+            # on the in-game surface map.  Not worth a row saying so: the
+            # panel is short on width and a caveat is not information.
+            for body, rec in planets:
+                marker = "▸ " if body == self.mining_body else "  "
+                count = rec.get("planetary_sites", 0)
+                rows.append({
+                    "label": f"{marker}{body}",
+                    "value": f"{count} site{'s' if count != 1 else ''}",
+                    "rate": None})
+                if rec.get("reserves"):
+                    rows.append({"label": "    Reserves",
+                                 "value": rec["reserves"], "rate": None})
 
         # Content distribution
         if self.content_counts:

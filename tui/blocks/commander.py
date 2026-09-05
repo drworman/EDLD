@@ -34,7 +34,8 @@ def pp_rank_progress(rank: int, total_merits: int) -> tuple:
     earned = max(0, total_merits - floor)
     fraction = min(1.0, earned / span) if span > 0 else 1.0
     return fraction, earned, span, rank + 1
-from core.state      import FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD, CAPI_RANK_SKILLS
+from core.state      import CAPI_RANK_SKILLS
+from core.ui_helpers import carrier_display_sections, normalise_carrier
 
 
 class CommanderBlock(TuiBlock):
@@ -46,10 +47,6 @@ class CommanderBlock(TuiBlock):
         with TabbedContent(id="cmdr-tabs"):
             with TabPane("Info", id="tab-info"):
                 with VerticalScroll():
-                    yield KVRow("Shields",        id="kv-shields")
-                    yield KVRow("Hull",           id="kv-hull")
-                    yield KVRow("Fuel",           id="kv-fuel")
-                    yield SepRow()
                     yield KVRow("Mode",           id="kv-mode")
                     yield KVRow("Home System",    id="kv-home")
                     yield KVRow("Current System", id="kv-system")
@@ -60,15 +57,68 @@ class CommanderBlock(TuiBlock):
             with TabPane("Ranks", id="tab-ranks"):
                 with VerticalScroll(id="ranks-scroll"):
                     yield Label("Awaiting CAPI data…", id="ranks-placeholder", classes="dim")
+
+            # ── Assets tabs ───────────────────────────────────────────────
+            # Absorbed from the former Assets window.  Everything about the
+            # commander — who they are, what they have ranked, and what they
+            # own — now lives behind one set of tabs instead of two windows
+            # competing for the same grid space.
+            with TabPane("Wallet", id="tab-wallet"):
+                with VerticalScroll():
+                    yield SecHdr("Currencies")
+                    yield KVRow("Credits",             id="aw-credits")
+                    yield SecHdr("Fleet")
+                    yield KVRow("Ships",               id="aw-ships")
+                    yield KVRow("Modules",             id="aw-modules")
+                    yield SecHdr("Fleet Carrier")
+                    yield KVRow("Balance",          id="aw-carrier-balance")
+                    yield KVRow("Hull (decom.)",    id="aw-carrier-hull")
+                    yield KVRow("Market listings",  id="aw-carrier-cargo")
+                    yield SecHdr("Assets at Risk")
+                    yield KVRow("Bounties",            id="aw-bounties")
+                    yield KVRow("Combat bonds",        id="aw-bonds")
+                    yield KVRow("Trade vouchers",      id="aw-trade")
+                    yield KVRow("Cartography (est.)",  id="aw-carto")
+                    yield KVRow("Exobiology (est.)",   id="aw-exobio")
+                    yield SecHdr("Net Worth")
+                    yield KVRow("Total",               id="aw-networth")
+
+            with TabPane("Ships", id="tab-ships"):
+                with VerticalScroll():
+                    yield Label("—", id="assets-ships")
+
+            with TabPane("Modules", id="tab-modules"):
+                with VerticalScroll():
+                    yield Label("No stored modules", id="assets-modules")
+
+            with TabPane("Fleet Carrier", id="tab-carrier"):
+                # Rebuilt on every refresh rather than a fixed row set: which
+                # rows apply depends on the carrier and on whether CAPI has
+                # polled, and rendering absent data as a column of dashes
+                # reads like a bug.
+                yield VerticalScroll(id="assets-carrier-scroll")
+
+            # Squadron carriers are rare, so this pane is hidden unless the
+            # commander actually has one; an empty tab implying a carrier
+            # they do not own would be worse than no tab.
+            with TabPane("Squadron Carrier", id="tab-sqcarrier"):
+                yield VerticalScroll(id="assets-sqcarrier-scroll")
         with Horizontal(id="cmdr-footer"):
             yield Static(">> Set Home", id="cmdr-home-btn", classes="footer-lbl")
             yield Label("", id="cmdr-home-lbl", classes="dim")
 
     def refresh_data(self) -> None:
         s = self.state
+        self._refresh_wallet()
+        self._refresh_ships()
+        self._refresh_modules()
+        self._refresh_carrier()
+        self._refresh_squadron_carrier()
 
         # ── Header ────────────────────────────────────────────────────────────
-        # Line 1: CMDR <NAME> - <VESSEL> (<DETAIL>)
+        # Line 1: CMDR <NAME>, plus what they are currently in when it is not
+        # the ship.  The ship's own name, ident and type moved to the Ship
+        # Health header, so this line no longer restates them.
         # Line 2: <SQUADRON RANK> - <SQUADRON NAME> [<TAG>]
         # Both lines share the accent colour (section-hdr class).
         vessel_mode  = getattr(s, "vessel_mode",  "ship")
@@ -88,17 +138,12 @@ class CommanderBlock(TuiBlock):
                 # CMDR NAME - SRV  (no extra detail)
                 hdr1 = f"CMDR {name} - {srv_type.upper() or 'SRV'}"
             else:
-                # CMDR NAME - CORAX - MXB-10 (MANDALAY)
-                ship_type = (s.pilot_ship or "").upper()
-                parts     = [p.upper() for p in [s.ship_name, s.ship_ident] if p]
-                detail    = " - ".join(parts)
-                suffix    = " [IN FIGHTER]" if s.cmdr_in_slf else ""
-                if detail and ship_type:
-                    hdr1 = f"CMDR {name} - {detail} ({ship_type}){suffix}"
-                elif ship_type:
-                    hdr1 = f"CMDR {name} - {ship_type}{suffix}"
-                else:
-                    hdr1 = f"CMDR {name}{suffix}"
+                # In the ship: the vessel is described by the Ship Health
+                # header, so only note it when the commander is somewhere
+                # other than their own cockpit.
+                hdr1 = f"CMDR {name}"
+                if s.cmdr_in_slf:
+                    hdr1 += " [IN FIGHTER]"
         else:
             hdr1 = "COMMANDER"
 
@@ -115,62 +160,6 @@ class CommanderBlock(TuiBlock):
 
         self._set_label("cmdr-hdr1", hdr1)
         self._set_label("cmdr-hdr2", hdr2)
-
-        # ── Shields ───────────────────────────────────────────────────────────
-        if vessel_mode == "on_foot":
-            sh = "Up" if getattr(s, "suit_shields", True) else "Down"
-            sh_cls = "val health-good" if getattr(s, "suit_shields", True) else "val health-crit"
-        elif vessel_mode == "srv":
-            sh, sh_cls = "—", "val"
-        else:
-            sh = fmt_shield(s.ship_shields, s.ship_shields_recharging)
-            if s.ship_shields is None:
-                sh_cls = "val"
-            elif not s.ship_shields:
-                sh_cls = "val health-warn" if s.ship_shields_recharging else "val health-crit"
-            else:
-                sh_cls = "val health-good"
-        self._kv("kv-shields", sh, sh_cls)
-
-        # ── Hull ──────────────────────────────────────────────────────────────
-        # Rename the key label to match vehicle context (Health on foot, Hull otherwise)
-        try:
-            hull_row = self.query_one("#kv-hull", KVRow)
-            hull_row.set_key("Health" if vessel_mode == "on_foot" else "Hull")
-        except Exception:
-            pass
-        if vessel_mode == "on_foot":
-            self._kv("kv-hull", "—")
-        elif vessel_mode == "srv":
-            hull_pct = getattr(s, "srv_hull", 100)
-            self._kv("kv-hull", f"{hull_pct}%", f"val {_health_cls(hull_pct)}")
-        else:
-            hull_pct = s.ship_hull
-            if hull_pct is not None:
-                self._kv("kv-hull", f"{hull_pct}%", f"val {_health_cls(hull_pct)}")
-            else:
-                self._kv("kv-hull", "—")
-
-        # ── Fuel ─────────────────────────────────────────────────────────────
-        fuel_current = s.fuel_current
-        fuel_tank    = s.fuel_tank_size
-        if fuel_current is not None and fuel_tank and fuel_tank > 0:
-            fuel_pct = fuel_current / fuel_tank * 100
-            fuel_str = f"{fuel_pct:.0f}%"
-            burn = getattr(s, "fuel_burn_rate", None)
-            if burn and burn > 0:
-                secs = (fuel_current / burn) * 3600
-                h, m = int(secs // 3600), int((secs % 3600) // 60)
-                fuel_str += f"  (~{h}h {m}m)" if h > 0 else f"  (~{m}m)"
-            if fuel_current < fuel_tank * FUEL_CRIT_THRESHOLD:
-                fuel_cls = "val health-crit"
-            elif fuel_current < fuel_tank * FUEL_WARN_THRESHOLD:
-                fuel_cls = "val health-warn"
-            else:
-                fuel_cls = "val health-good"
-            self._kv("kv-fuel", fuel_str, fuel_cls)
-        else:
-            self._kv("kv-fuel", "—")
 
         # ── Location ─────────────────────────────────────────────────────────
         self._kv("kv-mode", s.pilot_mode or "—")
@@ -288,6 +277,198 @@ class CommanderBlock(TuiBlock):
         ))
 
     # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _refresh_wallet(self) -> None:
+        s       = self.state
+        bal     = getattr(s, "assets_balance", None)
+        current = getattr(s, "assets_current_ship",  None)
+        stored  = list(getattr(s, "assets_stored_ships", []))
+        cid     = (current or {}).get("ship_id")
+        if cid:
+            stored = [x for x in stored if x.get("ship_id") != cid]
+        all_ships = ([current] if current else []) + stored
+        ships_val = sum(x.get("value", 0) for x in all_ships if x)
+        mods_val  = sum(m.get("value", 0)
+                        for m in getattr(s, "assets_stored_modules", []))
+
+        # Carrier rows — mirror the shared asset logic exactly
+        carrier  = getattr(s, "assets_carrier", None)
+        fc_mats  = getattr(s, "assets_fc_materials", None) or []
+        carrier_cargo_val = sum(m.get("price", 0) * m.get("stock", 0) for m in fc_mats)
+        if carrier:
+            carrier_hull_val = normalise_carrier(carrier)["hull_value"]
+            self._kv("aw-carrier-balance", _fmt_credits(carrier.get("balance")) if carrier.get("balance") else "—")
+            self._kv("aw-carrier-hull",    _fmt_credits(carrier_hull_val))
+            self._kv("aw-carrier-cargo",   _fmt_credits(carrier_cargo_val) if carrier_cargo_val else "—")
+        else:
+            carrier_hull_val = 0
+            self._kv("aw-carrier-balance", "—")
+            self._kv("aw-carrier-hull",    "—")
+            self._kv("aw-carrier-cargo",   "—")
+
+        h = {
+            "bounties": getattr(s, "holdings_bounties",    0),
+            "bonds":    getattr(s, "holdings_bonds",       0),
+            "trade":    getattr(s, "holdings_trade",       0),
+            "carto":    getattr(s, "holdings_cartography", 0),
+            "exobio":   getattr(s, "holdings_exobiology",  0),
+        }
+        risk_total = sum(h.values())
+
+        self._kv("aw-credits",  _fmt_credits(bal))
+        self._kv("aw-ships",    _fmt_credits(ships_val))
+        self._kv("aw-modules",  _fmt_credits(mods_val))
+        self._kv("aw-bounties", _fmt_credits(h["bounties"]))
+        self._kv("aw-bonds",    _fmt_credits(h["bonds"]))
+        self._kv("aw-trade",    _fmt_credits(h["trade"]))
+        self._kv("aw-carto",    _fmt_credits(h["carto"]))
+        self._kv("aw-exobio",   _fmt_credits(h["exobio"]))
+
+        # Net worth: use Statistics-sourced total_wealth + extras if available
+        total_wealth = getattr(s, "assets_total_wealth", None)
+        if total_wealth is not None:
+            nw = int(total_wealth) + carrier_cargo_val + risk_total + carrier_hull_val
+        else:
+            nw = (bal or 0) + ships_val + mods_val + carrier_hull_val + carrier_cargo_val + risk_total
+        self._kv("aw-networth", _fmt_credits(nw) if nw else "—")
+
+    def _refresh_ships(self) -> None:
+        s       = self.state
+        current = getattr(s, "assets_current_ship", None)
+        stored  = list(getattr(s, "assets_stored_ships", []))
+        cid     = (current or {}).get("ship_id")
+        if cid:
+            stored = [x for x in stored if x.get("ship_id") != cid]
+        all_ships = ([current] if current else []) + stored
+
+        if not all_ships:
+            self._label_text("assets-ships", "No ship data")
+            return
+
+        rows: list = []
+        for i, ship in enumerate(all_ships):
+            if ship is None:
+                continue
+            name    = ship.get("type_display") or ship.get("type", "Unknown")
+            ident   = ship.get("name", "")
+            station = ship.get("station") or ""
+            system  = ship.get("system")  or ""
+            tag     = "[green]▶[/green] " if i == 0 else "  "
+            label   = f"{tag}[bold]{name}[/bold]" + (f"  {ident}" if ident else "")
+            if station and system and station != system:
+                loc = f"{station}  ({system})"
+            elif system:
+                loc = system
+            else:
+                loc = "—"
+            rows.append(KVRow(label, f"{loc}"))
+        if rows:
+            try:
+                scroll = self.query_one("#tab-ships VerticalScroll")
+                scroll.remove_children()
+                scroll.mount(*rows)
+                return
+            except Exception:
+                pass
+        self._label_text("assets-ships", "No ships")
+
+    def _refresh_modules(self) -> None:
+        modules = getattr(self.state, "assets_stored_modules", [])
+        if not modules:
+            self._label_text("assets-modules", "No stored modules")
+            return
+
+        by_system: dict[str, list] = {}
+        for m in modules:
+            sys = m.get("system") or "Unknown"
+            by_system.setdefault(sys, []).append(m)
+
+        try:
+            scroll = self.query_one("#tab-modules VerticalScroll")
+        except Exception:
+            scroll = None
+        mod_rows: list = []
+        for sys_name in sorted(by_system):
+            mod_rows.append(SecHdr(sys_name))
+            for m in sorted(by_system[sys_name],
+                            key=lambda x: x.get("name_display", "").lower()):
+                name = m.get("name_display") or m.get("name_internal", "Unknown")
+                val  = m.get("value", 0)
+                eng  = m.get("engineering", {})
+                bp   = eng.get("BlueprintName", "")
+                lv   = eng.get("Level")
+                hot  = m.get("hot", False)
+                hot_tag = "[red]⚠[/red] " if hot else ""
+                eng_tag = f"  G{lv}" if (bp and lv) else ""
+                key_str = f"{hot_tag}{name}{eng_tag}"
+                mod_rows.append(KVRow(key_str, _fmt_credits(val)))
+        if scroll is not None:
+            scroll.remove_children()
+            scroll.mount(*mod_rows)
+        else:
+            self._label_text("assets-modules", "No stored modules")
+
+    def _refresh_carrier(self) -> None:
+        try:
+            scroll = self.query_one("#assets-carrier-scroll", VerticalScroll)
+        except Exception:
+            return
+        scroll.remove_children()
+
+        rows: list = []
+        for title, entries in carrier_display_sections(
+            getattr(self.state, "assets_carrier", None),
+            getattr(self.state, "assets_fc_materials", None),
+            getattr(self.state, "assets_carrier_hold", None),
+            getattr(self.state, "pilot_squadron_name", "") or "",
+        ):
+            rows.append(SecHdr(title))
+            for label, value in entries:
+                rows.append(KVRow(label, value))
+        scroll.mount(*rows)
+
+    def _refresh_squadron_carrier(self) -> None:
+        """Render the squadron carrier, or hide the tab when there is none.
+
+        Uses exactly the same section builder as the fleet carrier, so the
+        two tabs show the same fields from the same code path rather than a
+        second, drifting implementation.
+        """
+        squadron = getattr(self.state, "assets_squadron_carrier", None)
+        try:
+            pane = self.query_one("#tab-sqcarrier", TabPane)
+        except Exception:
+            return
+
+        if not squadron:
+            pane.display = False
+            return
+        pane.display = True
+
+        try:
+            scroll = self.query_one("#assets-sqcarrier-scroll", VerticalScroll)
+        except Exception:
+            return
+        scroll.remove_children()
+
+        rows: list = []
+        for title, entries in carrier_display_sections(
+            squadron,
+            getattr(self.state, "assets_squadron_fc_materials", None),
+            getattr(self.state, "assets_squadron_carrier_hold", None),
+            getattr(self.state, "pilot_squadron_name", "") or "",
+        ):
+            rows.append(SecHdr(title))
+            for label, value in entries:
+                rows.append(KVRow(label, value))
+        scroll.mount(*rows)
+
+    def _label_text(self, widget_id: str, text: str) -> None:
+        """Set a plain Label's text (used by the lifted Assets renderers)."""
+        try:
+            self.query_one(f"#{widget_id}", Label).update(text)
+        except Exception:
+            pass
 
     def _kv(self, widget_id: str, text: str, classes: str = "val") -> None:
         try:

@@ -31,16 +31,12 @@ from tui.blocks.career import CareerBlock
 from tui.blocks.session     import SessionBlock
 from tui.blocks.ship_health import ShipHealthBlock
 from tui.blocks.navigation import NavigationBlock
-from tui.blocks.colonisation  import ColonisationBlock
 from tui.blocks.commander     import CommanderBlock
 from tui.blocks.alerts        import AlertsBlock
-from tui.blocks.missions      import MissionsBlock
 from tui.blocks.cargo         import CargoBlock
 from tui.blocks.crew_slf      import CrewSlfBlock
-from tui.blocks.assets        import AssetsBlock
 from tui.blocks.engineering   import EngineeringBlock
 from tui.blocks.exploration   import ExplorationBlock
-from tui.blocks.exobiology    import ExobiologyBlock
 from tui.theme import build_css, BLOCK_DOM_ID
 from core.layout_model import load_assignment, tui_columns, COLUMNS
 
@@ -56,22 +52,26 @@ _MSG_DISPATCH: dict[str, list[str]] = {
     # Generic state changes — keep Career's wealth rows and the Session
     # window live, plus Navigation's Carrier tab readout.
     "state_update":       ["block-career", "block-session", "block-nav"],
-    "colonisation_update":["block-colon"],
+    # Colonisation now renders in the Cargo window's second tab.
+    "colonisation_update":["block-cargo"],
     "crew_update":        ["block-crew"],
     "slf_update":         ["block-crew"],
     "vessel_update":      ["block-commander", "block-ship-health"],
     "ship_health_update": ["block-ship-health"],
     "location_update":    ["block-commander", "block-nav"],
-    "mission_update":     ["block-missions"],
+    # Missions now render inside the Session window's Missions tab.
+    "mission_update":     ["block-session"],
     "cargo_update":       ["block-cargo"],
-    "assets_update":      ["block-assets"],
+    # Assets folded into the Commander window's tabs.
+    "assets_update":      ["block-commander"],
     "exploration_update": ["block-exploration", "block-session"],
-    "exobiology_update":  ["block-exobiology", "block-session"],
+    # Exobiology nests inside the Exploration window.
+    "exobiology_update":  ["block-exploration", "block-session"],
     "materials_update":   ["block-eng"],
     "alert_update":       ["block-alerts"],
     "pp_update":          ["block-career", "block-session", "block-commander"],
     "cmdr_update":        ["block-commander"],
-    "capi_updated":       ["block-commander", "block-crew", "block-assets",
+    "capi_updated":       ["block-commander", "block-crew",
                            "block-cargo", "block-nav"],
     # update_notice has no block target — handled directly in _poll_queue
 }
@@ -79,12 +79,9 @@ _MSG_DISPATCH: dict[str, list[str]] = {
 _PLUGIN_TO_BLOCK: dict[str, str] = {
     "career":        "block-career",
     "navigation":    "block-nav",
-    "colonisation":  "block-colon",
     "crew_slf":      "block-crew",
     "commander":     "block-commander",
-    "missions":      "block-missions",
     "cargo":         "block-cargo",
-    "assets":        "block-assets",
     "engineering":   "block-eng",
     "alerts":        "block-alerts",
     "session_stats": "block-session",
@@ -94,20 +91,16 @@ _PLUGIN_TO_BLOCK: dict[str, str] = {
 # Window name → TUI block class.  compose() builds the dashboard from the shared
 # layout model, instantiating these by name in the positions the model returns.
 _BLOCK_CLASSES = {
-    "assets":       AssetsBlock,
     "engineering":  EngineeringBlock,
-    "colonisation": ColonisationBlock,
     "commander":    CommanderBlock,
     "crew_slf":     CrewSlfBlock,
     "alerts":       AlertsBlock,
     "cargo":        CargoBlock,
-    "missions":     MissionsBlock,
     "navigation":   NavigationBlock,
     "career":       CareerBlock,
     "session":      SessionBlock,
     "ship_health":  ShipHealthBlock,
     "exploration":  ExplorationBlock,
-    "exobiology":   ExobiologyBlock,
 }
 
 # Layout-model column → Textual column container id.
@@ -249,9 +242,8 @@ class EdldTui(App):
 
     def _all_block_ids(self) -> list[str]:
         return [
-            "block-career", "block-nav", "block-colon",
-            "block-commander", "block-alerts", "block-missions", "block-cargo",
-            "block-crew", "block-assets", "block-eng", "block-exploration", "block-exobiology",
+            "block-career", "block-nav",             "block-commander", "block-alerts", "block-cargo",
+            "block-crew", "block-eng", "block-exploration",
             "block-session", "block-ship-health",
         ]
 

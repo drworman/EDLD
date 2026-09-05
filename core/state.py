@@ -247,6 +247,10 @@ class MonitorState:
         self.last_shutdown_time      = None
         self.mission_value_map       = {}
         self.mission_detail_map      = {}
+        # Every mission the commander currently holds, of any type — the
+        # detail map above only ever covered massacres, because that is all
+        # the stack view needed.  Keyed by MissionID.
+        self.all_missions: dict = {}
         self.stack_value             = 0
         self.has_fighter_bay         = False
         self.mission_target_faction_map = {}
@@ -342,6 +346,14 @@ class MonitorState:
         self.assets_stored_ships:  list        = []
         self.assets_stored_modules:list        = []
         self.assets_carrier:       dict | None = None
+        # A commander may hold a squadron carrier alongside their own fleet
+        # carrier, and the two have separate balances, cargo and services.
+        # CarrierStats reports both through the same event, distinguished by
+        # CarrierType, so they are kept apart here rather than overwriting
+        # each other.
+        self.assets_squadron_carrier: dict | None = None
+        self.assets_squadron_fc_materials: list | None = None
+        self.assets_squadron_carrier_hold: dict | None = None
         self.assets_fc_materials:  list        = []
 
         # At-risk holdings
@@ -400,6 +412,7 @@ class MonitorState:
         self.stack_value                = 0
         self.mission_value_map          = {}
         self.mission_detail_map         = {}
+        self.all_missions               = {}
         self.mission_target_faction_map = {}
 
 

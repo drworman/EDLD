@@ -1,5 +1,11 @@
 # EDLD Mission Bootstrap
 
+EDLD tracks two mission views. The general board records every mission you
+accept, of any type, and drops it when it is completed, failed or abandoned;
+that needs no bootstrap because it is rebuilt from the journal as it replays.
+The massacre stack is the one that does, because it has to know reward values
+to be useful.
+
 When EDLD starts, it needs to know which massacre missions you have active and what they're worth. The game's `Missions` journal event at login contains the active mission list but frequently omits reward values — and if EDLD is launched mid-session, that event may not appear in the current journal at all.
 
 EDLD resolves this by scanning **all available journal files** in chronological order after preload completes, replaying `MissionAccepted`, `MissionCompleted`, `MissionAbandoned`, `MissionFailed`, and `MissionRedirected` events to reconstruct exactly which missions are active, what they're worth, and how many have had their kill quota met. Missions whose `Expiry` timestamp has passed are filtered out automatically.

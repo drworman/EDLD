@@ -36,6 +36,7 @@ from /profile.  The state schema is forward-compatible.
 
 import json
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 from core.plugin_loader import BasePlugin
@@ -85,6 +86,11 @@ class AssetsPlugin(BasePlugin):
         # Fleet carrier
         "CarrierStats",
         "CarrierJump",
+        # Jump lifecycle.  CarrierLocation is how a jump completing is seen
+        # when the commander is not aboard; CarrierJump is the aboard case.
+        "CarrierJumpRequest",
+        "CarrierJumpCancelled",
+        "CarrierLocation",
         "CarrierFinance",
         "FCMaterials",
         "CarrierDecommission",   # carrier sold/decommissioned
@@ -96,6 +102,9 @@ class AssetsPlugin(BasePlugin):
 
 
     def on_load(self, core) -> None:
+        #: CarrierID (as str) -> pending jump, see the carrier
+        #: jump lifecycle section below.
+        self._pending_jumps: dict[str, dict] = {}
         super().on_load(core)
         s = core.state
         if not hasattr(s, "assets_balance"):        s.assets_balance        = None
@@ -1016,6 +1025,224 @@ class AssetsPlugin(BasePlugin):
             })
         return mods
 
+    # ── Carrier jump lifecycle ────────────────────────────────────────────────
+    #
+    # A scheduled jump locks the carrier down for roughly fifteen minutes:
+    # nobody can dock, and anyone aboard is going wherever it goes.  That is
+    # worth a notification whether or not the commander is watching the
+    # carrier's own panel, so all three transitions go out through the alerts
+    # component, which puts them in the Alerts window and emits them to the
+    # terminal and Discord at their configured level.
+    #
+    # The events themselves are thin.  CarrierJumpRequest names the
+    # destination and departure time but not the carrier; CarrierJumpCancelled
+    # names neither; and completion arrives as CarrierLocation when the
+    # commander is elsewhere or CarrierJump when aboard — and when aboard,
+    # both fire, about a minute apart.  So the pending jump is tracked here
+    # and cleared by whichever completion event lands first.
+
+    #: Journal spelling → readable carrier kind.
+    _CARRIER_KIND = {
+        "FleetCarrier":    "Fleet carrier",
+        "SquadronCarrier": "Squadron carrier",
+    }
+
+    def _carrier_by_id(self, carrier_id, state) -> dict | None:
+        """Find the fleet or squadron carrier matching an id, or None."""
+        if carrier_id is None:
+            return None
+        for carrier in (getattr(state, "assets_carrier", None),
+                        getattr(state, "assets_squadron_carrier", None)):
+            if carrier and str(carrier.get("carrier_id", "")) == str(carrier_id):
+                return carrier
+        return None
+
+    def _carrier_label(self, carrier_id, state, carrier_type: str = "") -> str:
+        """"NAME (IDENT)" for a carrier, falling back as data allows.
+
+        A jump can be scheduled before CarrierStats has been seen this
+        session, so this degrades to the kind of carrier rather than
+        rendering an empty name.
+        """
+        carrier = self._carrier_by_id(carrier_id, state)
+        if carrier:
+            name = str(carrier.get("name") or "").strip()
+            ident = str(carrier.get("callsign") or "").strip()
+            if name and ident:
+                return f"{name} ({ident})"
+            if name or ident:
+                return name or ident
+        return self._CARRIER_KIND.get(str(carrier_type), "Carrier")
+
+    @staticmethod
+    def _fmt_countdown(seconds: float) -> str:
+        """Render a departure countdown as "15m 49s" / "1h 12m"."""
+        seconds = max(int(seconds), 0)
+        hours, rem = divmod(seconds, 3600)
+        minutes, secs = divmod(rem, 60)
+        if hours:
+            return f"{hours}h {minutes:02d}m"
+        if minutes:
+            return f"{minutes}m {secs:02d}s"
+        return f"{secs}s"
+
+    def _departure_in(self, event: dict) -> tuple[str, str]:
+        """Return (countdown text, departure clock time) for a jump request.
+
+        Journal timestamps are UTC.  Printing that clock time raw made the
+        figure meaningless to anyone not running on UTC — it read as neither
+        their wall clock nor a duration.  The clock time now follows the same
+        ``UseUTC`` setting as every other time EDLD prints, and is labelled so
+        it cannot be mistaken for part of the countdown.
+        """
+        departure = str(event.get("DepartureTime") or "")
+        stamp = str(event.get("timestamp") or "")
+        if not departure:
+            return "", ""
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        try:
+            dep_dt = datetime.strptime(departure, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            return "", ""
+        try:
+            now_dt = datetime.strptime(stamp, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            now_dt = None
+
+        countdown = (self._fmt_countdown((dep_dt - now_dt).total_seconds())
+                     if now_dt else "")
+
+        use_utc = bool((getattr(self.core, "app_settings", None) or {}).get("UseUTC"))
+        local = dep_dt if use_utc else dep_dt.astimezone()
+        return countdown, local.strftime("%H:%M") + (" UTC" if use_utc else "")
+
+    def _alerts(self):
+        return self.core._plugins.get("alerts")
+
+    def _notify_carrier(self, level_key: str, emoji: str, text: str) -> None:
+        """Route a carrier notification through the alerts component.
+
+        Falls back to a direct emit if alerts is disabled, so turning that
+        component off silences the Alerts window rather than the notification.
+        """
+        alerts = self._alerts()
+        if alerts is not None:
+            try:
+                alerts.push_external(emoji, text, loglevel=level_key,
+                                     sigil="*  CARR")
+                return
+            except Exception:
+                pass
+        try:
+            self.core.emitter.emit(
+                msg_term=text, msg_discord=f"**{text}**", emoji=emoji,
+                sigil="*  CARR",
+                loglevel=int(self.core.notify_levels.get(level_key, 3)),
+            )
+        except Exception:
+            pass
+
+    def _schedule_carrier_jump(self, event: dict, state) -> None:
+        carrier_id = event.get("CarrierID")
+        destination = str(event.get("SystemName") or "—")
+        body = str(event.get("Body") or "")
+        countdown, clock = self._departure_in(event)
+
+        self._pending_jumps[str(carrier_id)] = {
+            "system": destination,
+            "body": body,
+            "departure": event.get("DepartureTime", ""),
+            "carrier_type": event.get("CarrierType", ""),
+        }
+
+        # Replaying history at startup must not fire notifications for jumps
+        # that resolved long ago; the pending entry above is still recorded so
+        # a jump scheduled before launch still reports its arrival.
+        if getattr(state, "in_preload", False):
+            return
+
+        label = self._carrier_label(carrier_id, state, event.get("CarrierType", ""))
+        where = f"{destination} ({body})" if body else destination
+        when = f" in {countdown}" if countdown else ""
+        at = f" (departs {clock})" if clock else ""
+        self._notify_carrier(
+            "CarrierJumpScheduled", "🛰️",
+            f"{label} JUMP SCHEDULED to {where}{when}{at}")
+
+    def _cancel_carrier_jump(self, event: dict, state) -> None:
+        carrier_id = event.get("CarrierID")
+        pending = self._pending_jumps.pop(str(carrier_id), None)
+
+        if getattr(state, "in_preload", False):
+            return
+
+        label = self._carrier_label(carrier_id, state, event.get("CarrierType", ""))
+        destination = (pending or {}).get("system") or ""
+        where = f" to {destination}" if destination else ""
+        self._notify_carrier(
+            "CarrierJumpCancelled", "🛑",
+            f"{label} JUMP CANCELLED{where}")
+
+    def _complete_carrier_jump(self, carrier_id, arrived: str, state,
+                               event: dict) -> None:
+        """Report an arrival, but only for the jump that was actually pending.
+
+        CarrierLocation is a periodic status event as much as an arrival one —
+        in a real journal it outnumbers jumps roughly two to one — so simply
+        taking the next one after a request reports the wrong system whenever
+        a status update lands before departure.  An arrival therefore has to
+        name the destination that was requested.
+
+        The departure-time check covers the other case: a jump to a body in
+        the system the carrier is already in, where the destination matches
+        before it has gone anywhere.
+
+        When the commander is aboard, both CarrierLocation and CarrierJump
+        fire for the same arrival about a minute apart.  Popping the pending
+        entry makes this fire exactly once per scheduled jump.
+        """
+        key = str(carrier_id)
+        pending = self._pending_jumps.get(key)
+        if pending is None:
+            return
+
+        destination = str(pending.get("system") or "")
+        if destination and arrived and arrived != "—":
+            if arrived.strip().casefold() != destination.strip().casefold():
+                return          # a status update from somewhere else
+
+        if not self._past_departure(pending, event):
+            return              # still counting down
+
+        self._pending_jumps.pop(key, None)
+        if getattr(state, "in_preload", False):
+            return
+
+        label = self._carrier_label(carrier_id, state,
+                                    pending.get("carrier_type", ""))
+        final = arrived if arrived and arrived != "—" else destination or "—"
+        self._notify_carrier(
+            "CarrierJumpComplete", "✅",
+            f"{label} JUMP COMPLETE — arrived at {final}")
+
+    @staticmethod
+    def _past_departure(pending: dict, event: dict) -> bool:
+        """Has the scheduled departure time passed?
+
+        Missing or unparseable timestamps resolve to True: a carrier that has
+        reported arriving at its destination has arrived, and refusing to say
+        so because a clock could not be read would be the worse failure.
+        """
+        departure = str(pending.get("departure") or "")
+        stamp = str(event.get("timestamp") or "")
+        if not departure or not stamp:
+            return True
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        try:
+            return datetime.strptime(stamp, fmt) >= datetime.strptime(departure, fmt)
+        except ValueError:
+            return True
+
     def _parse_carrier_stats(self, event: dict) -> dict:
         """Extract display-relevant fields from a CarrierStats journal event."""
         fin   = event.get("Finance", {})
@@ -1035,6 +1262,7 @@ class AssetsPlugin(BasePlugin):
 
         return {
             # Identity
+            "carrier_id":    event.get("CarrierID"),
             "callsign":      event.get("Callsign", "—"),
             "name":          event.get("Name", "—"),
             "theme":         event.get("Theme", "—"),
@@ -1273,7 +1501,15 @@ class AssetsPlugin(BasePlugin):
                 if gq: gq.put(("plugin_refresh", "assets"))
 
             case "CarrierStats":
-                state.assets_carrier = self._parse_carrier_stats(event)
+                # CarrierType distinguishes a personal fleet carrier from a
+                # squadron one.  They were previously written to the same
+                # field, so whichever event arrived last won and the other
+                # carrier vanished from the display.
+                parsed = self._parse_carrier_stats(event)
+                if parsed and "Squadron" in str(parsed.get("carrier_type", "")):
+                    state.assets_squadron_carrier = parsed
+                else:
+                    state.assets_carrier = parsed
                 if gq: gq.put(("plugin_refresh", "assets"))
 
             case "FCMaterials":
@@ -1296,13 +1532,54 @@ class AssetsPlugin(BasePlugin):
 
             case "CarrierDecommission":
                 # Carrier has been sold/decommissioned — clear all carrier state.
+                # CarrierID tells us which one; without it, clear the fleet
+                # carrier, which is the one a lone commander will have.
+                cid = event.get("CarrierID")
+                squadron = state.assets_squadron_carrier or {}
+                if cid and str(squadron.get("carrier_id", "")) == str(cid):
+                    state.assets_squadron_carrier = None
+                    self._save_to_storage()
+                    if gq: gq.put(("plugin_refresh", "assets"))
+                    return
                 state.assets_carrier = None
                 self._save_to_storage()
                 if gq: gq.put(("plugin_refresh", "assets"))
 
             case "CarrierJump":
+                # The arrival event, fired only when the commander is aboard.
+                # It names the system in StarSystem, not SystemName — reading
+                # the wrong key had been blanking the carrier's system to "—"
+                # on every jump the commander rode along with.
+                arrived = (event.get("StarSystem")
+                           or event.get("SystemName") or "—")
                 if state.assets_carrier is not None:
-                    state.assets_carrier["system"] = event.get("SystemName", "—")
+                    state.assets_carrier["system"] = arrived
+                # CarrierJump identifies the carrier by MarketID.
+                self._complete_carrier_jump(
+                    event.get("MarketID"), arrived, state, event)
+                if gq: gq.put(("plugin_refresh", "assets"))
+
+            case "CarrierJumpRequest":
+                self._schedule_carrier_jump(event, state)
+                if gq: gq.put(("plugin_refresh", "assets"))
+
+            case "CarrierJumpCancelled":
+                # Carries only CarrierType and CarrierID — nothing about where
+                # the carrier was headed — so the pending jump recorded at
+                # request time is the only source for that.
+                self._cancel_carrier_jump(event, state)
+                if gq: gq.put(("plugin_refresh", "assets"))
+
+            case "CarrierLocation":
+                # Fires periodically as a status event, not only after a jump,
+                # so it is only treated as an arrival when a jump is actually
+                # pending for that carrier.
+                cid = event.get("CarrierID")
+                arrived = event.get("StarSystem") or "—"
+                carrier = self._carrier_by_id(cid, state)
+                if carrier is not None and arrived != "—":
+                    carrier["system"] = arrived
+                self._complete_carrier_jump(cid, arrived, state, event)
                 if gq: gq.put(("plugin_refresh", "assets"))
 
             case "CarrierFinance":

@@ -58,16 +58,12 @@ from gui.preferences import PreferencesDialog
 from gui.theme import stylesheet
 
 from gui.blocks.alerts       import AlertsBlock
-from gui.blocks.assets       import AssetsBlock
 from gui.blocks.career       import CareerBlock
 from gui.blocks.cargo        import CargoBlock
-from gui.blocks.colonisation import ColonisationBlock
 from gui.blocks.commander    import CommanderBlock
 from gui.blocks.crew_slf     import CrewSlfBlock
 from gui.blocks.engineering  import EngineeringBlock
-from gui.blocks.exobiology   import ExobiologyBlock
 from gui.blocks.exploration  import ExplorationBlock
-from gui.blocks.missions     import MissionsBlock
 from gui.blocks.navigation   import NavigationBlock
 from gui.blocks.session      import SessionBlock
 from gui.blocks.ship_health  import ShipHealthBlock
@@ -85,22 +81,26 @@ _MSG_DISPATCH: dict[str, list[str]] = {
     # Generic state changes — keep Career's wealth rows and the Session
     # window live, plus Navigation's Carrier tab readout.
     "state_update":       ["block-career", "block-session", "block-nav"],
-    "colonisation_update": ["block-colon"],
+    # Colonisation now renders in the Cargo window's second tab.
+    "colonisation_update": ["block-cargo"],
     "crew_update":        ["block-crew"],
     "slf_update":         ["block-crew"],
     "vessel_update":      ["block-commander", "block-ship-health"],
     "ship_health_update": ["block-ship-health"],
     "location_update":    ["block-commander", "block-nav"],
-    "mission_update":     ["block-missions"],
+    # Missions render in the Session window's Missions tab.
+    "mission_update":     ["block-session"],
     "cargo_update":       ["block-cargo"],
-    "assets_update":      ["block-assets"],
+    # Assets folded into the Commander window's tabs.
+    "assets_update":      ["block-commander"],
     "exploration_update": ["block-exploration", "block-session"],
-    "exobiology_update":  ["block-exobiology", "block-session"],
+    # Exobiology nests inside the Exploration window.
+    "exobiology_update":  ["block-exploration", "block-session"],
     "materials_update":   ["block-eng"],
     "alert_update":       ["block-alerts"],
     "pp_update":          ["block-career", "block-session", "block-commander"],
     "cmdr_update":        ["block-commander"],
-    "capi_updated":       ["block-commander", "block-crew", "block-assets",
+    "capi_updated":       ["block-commander", "block-crew",
                            "block-cargo", "block-nav"],
     # update_notice has no block target — handled directly in _poll_queue
 }
@@ -108,12 +108,9 @@ _MSG_DISPATCH: dict[str, list[str]] = {
 _PLUGIN_TO_BLOCK: dict[str, str] = {
     "career":        "block-career",
     "navigation":    "block-nav",
-    "colonisation":  "block-colon",
     "crew_slf":      "block-crew",
     "commander":     "block-commander",
-    "missions":      "block-missions",
     "cargo":         "block-cargo",
-    "assets":        "block-assets",
     "engineering":   "block-eng",
     "alerts":        "block-alerts",
     "session_stats": "block-session",
@@ -122,39 +119,31 @@ _PLUGIN_TO_BLOCK: dict[str, str] = {
 
 # Window name → GUI block class.
 _BLOCK_CLASSES = {
-    "assets":       AssetsBlock,
     "engineering":  EngineeringBlock,
-    "colonisation": ColonisationBlock,
     "commander":    CommanderBlock,
     "crew_slf":     CrewSlfBlock,
     "alerts":       AlertsBlock,
     "cargo":        CargoBlock,
-    "missions":     MissionsBlock,
     "navigation":   NavigationBlock,
     "career":       CareerBlock,
     "session":      SessionBlock,
     "ship_health":  ShipHealthBlock,
     "exploration":  ExplorationBlock,
-    "exobiology":   ExobiologyBlock,
 }
 
 # Window name → block id.  Same ids the TUI uses, so the dispatch table above
 # is a literal copy rather than a translation.
 BLOCK_ID = {
-    "assets":       "block-assets",
     "engineering":  "block-eng",
-    "colonisation": "block-colon",
     "commander":    "block-commander",
     "crew_slf":     "block-crew",
     "alerts":       "block-alerts",
     "cargo":        "block-cargo",
-    "missions":     "block-missions",
     "navigation":   "block-nav",
     "career":       "block-career",
     "session":      "block-session",
     "ship_health":  "block-ship-health",
     "exploration":  "block-exploration",
-    "exobiology":   "block-exobiology",
 }
 
 #: Queue poll interval.  Matches the TUI's 0.25 s so both front ends impose

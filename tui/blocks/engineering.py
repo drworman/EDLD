@@ -55,9 +55,10 @@ class EngineeringBlock(TuiBlock):
                 items.items(),
                 key=lambda kv: kv[1].get("name_local", kv[0]).lower()
             )
-            total = sum(v.get("count", 0) for v in items.values())
-
-            rows: list = [Label(f"Total: {total}")]
+            # No totals row: the sum across a material grade is not a
+            # number anyone acts on, and it cost a line at the top of every
+            # tab.
+            rows: list = []
             for _, data in sorted_items:
                 name  = data.get("name_local", "")
                 count = data.get("count", 0)

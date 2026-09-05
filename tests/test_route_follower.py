@@ -205,7 +205,7 @@ def test_off_route_reports_so(plugin):
     plugin.core.state.pilot_system = "Colonia"
     name, why = plugin.next_system()
     assert name == ""
-    assert "not on the" in why
+    assert "Off the" in why
 
 
 def test_no_route_reports_so(plugin):
@@ -367,3 +367,38 @@ def test_signature_changes_when_the_route_changes():
     assert route_signature(a) != route_signature(c)
     assert route_signature(a) == route_signature(dict(a))
     assert route_signature(None) == ""
+
+
+def test_completed_edld_route_retires_itself(plugin):
+    """A finished route must not outlive the trip.
+
+    Otherwise the commander jumps onward, is no longer on it, and the footer
+    reports being off a route they finished days ago.
+    """
+    st = plugin.core.state
+    plugin.store_route(FSD, "fsd")            # Shana Bei -> Deciat
+    assert plugin.active_route()[1] == "edld"
+
+    st.pilot_system = "Deciat"                # the final waypoint
+    plugin.on_event({"event": "FSDJump", "StarSystem": "Deciat"}, st)
+    assert plugin.active_route() == ([], "")
+
+    st.pilot_system = "Sol"                   # somewhere else entirely
+    assert plugin.next_system() == ("", "No route stored.")
+
+
+def test_route_survives_an_intermediate_waypoint(plugin):
+    st = plugin.core.state
+    plugin.store_route(FSD, "fsd")
+    st.pilot_system = "Shana Bei"             # the first waypoint, not the last
+    plugin.on_event({"event": "FSDJump", "StarSystem": "Shana Bei"}, st)
+    assert plugin.active_route()[1] == "edld"
+
+
+def test_journal_route_is_not_retired(plugin):
+    """The game owns NavRoute.json; EDLD only retires its own route."""
+    write_navroute(plugin.core.journal_dir, ["Sol", "Deciat"])
+    st = plugin.core.state
+    st.pilot_system = "Deciat"
+    plugin.on_event({"event": "FSDJump", "StarSystem": "Deciat"}, st)
+    assert plugin.active_route()[1] == "journal"

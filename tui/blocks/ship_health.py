@@ -6,8 +6,10 @@ Built for neutron hopping, where the question before every leg is simply
 
 Layout, top to bottom:
 
+    Header      ship name and ident, then the hull type
     Hull        integrity percentage
     Shields     up / down / recharging
+    Fuel        percentage, with an endurance estimate when burn rate is known
     ─────────
     MODULES     header, with a count of anything below full health
                 every fitted module, sorted by power priority ascending,
@@ -20,10 +22,14 @@ the middle of a thirty-row list.
 Priority is displayed 1-based to match the in-game power distribution panel;
 the journal reports it 0-based and core/summary data keeps the raw value.
 
-Hull and shields are read from ``state`` where the commander and alerts
+Hull, shields and fuel are read from ``state`` where the commander and alerts
 components maintain them, so this window never becomes a second source of
-truth for either figure.  Per-module health comes from the ship_health
+truth for any of them.  Per-module health comes from the ship_health
 component.
+
+These three used to be duplicated in the Commander window as well.  They now
+live here only: this is the window you look at to answer "is the ship all
+right", and the ship's identity heads it for the same reason.
 """
 from __future__ import annotations
 
@@ -32,6 +38,7 @@ from textual.widgets    import Label
 from textual.containers import VerticalScroll
 
 from tui.block_base     import TuiBlock, KVRow, HRule, SecHdr, _health_cls
+from core.state         import FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD
 
 
 def _fmt_health(fraction: float) -> str:
@@ -51,9 +58,18 @@ def _fmt_health(fraction: float) -> str:
 class ShipHealthBlock(TuiBlock):
     BLOCK_TITLE = "SHIP HEALTH"
 
+    def compose(self) -> ComposeResult:
+        # Two header rows carrying the ship's identity, moved here from the
+        # Commander header: the vessel belongs with its own condition
+        # readout, and Commander's header is now purely about the commander.
+        yield Label("", id="sh-hdr1", classes="block-title")
+        yield Label("", id="sh-hdr2", classes="block-title")
+        yield from self._compose_body()
+
     def _compose_body(self) -> ComposeResult:
         yield KVRow("Hull",    id="sh-hull")
         yield KVRow("Shields", id="sh-shields")
+        yield KVRow("Fuel",    id="sh-fuel")
         yield HRule()
         yield SecHdr("Modules", id="sh-modules-hdr")
         yield VerticalScroll(id="sh-modules")
@@ -64,9 +80,61 @@ class ShipHealthBlock(TuiBlock):
         state  = self.core.state
         plugin = self.core._plugins.get("ship_health")
 
+        self._refresh_header(state)
         self._refresh_hull(state)
         self._refresh_shields(state)
+        self._refresh_fuel(state)
         self._refresh_modules(state, plugin)
+
+    # ── Header ────────────────────────────────────────────────────────────────
+
+    def _refresh_header(self, state) -> None:
+        """Ship name / ident on the first row, hull type on the second.
+
+        Rendered without parentheses: the type gets its own row rather than
+        being bracketed onto the end of the name, which is how it read when
+        this lived in the Commander header.
+        """
+        name  = (getattr(state, "ship_name", "")  or "").upper()
+        ident = (getattr(state, "ship_ident", "") or "").upper()
+        stype = (getattr(state, "pilot_ship", "") or "").upper()
+
+        hdr1 = " - ".join(p for p in (name, ident) if p) or "SHIP HEALTH"
+        self._set_label("sh-hdr1", hdr1)
+        self._set_label("sh-hdr2", stype)
+
+    def _set_label(self, node_id: str, text: str) -> None:
+        try:
+            label = self.query_one(f"#{node_id}", Label)
+            label.update(text)
+            label.display = bool(text)
+        except Exception:
+            pass
+
+    # ── Fuel ──────────────────────────────────────────────────────────────────
+
+    def _refresh_fuel(self, state) -> None:
+        """Main-tank percentage, with endurance when the burn rate is known."""
+        current = getattr(state, "fuel_current", None)
+        tank    = getattr(state, "fuel_tank_size", None)
+        if current is None or not tank or tank <= 0:
+            self._set("sh-fuel", "—", "val dim")
+            return
+
+        text = f"{current / tank * 100:.0f}%"
+        burn = getattr(state, "fuel_burn_rate", None)
+        if burn and burn > 0:
+            secs = (current / burn) * 3600
+            hours, mins = int(secs // 3600), int((secs % 3600) // 60)
+            text += f"  (~{hours}h {mins}m)" if hours else f"  (~{mins}m)"
+
+        if current < tank * FUEL_CRIT_THRESHOLD:
+            cls = "val health-crit"
+        elif current < tank * FUEL_WARN_THRESHOLD:
+            cls = "val health-warn"
+        else:
+            cls = "val health-good"
+        self._set("sh-fuel", text, cls)
 
     # ── Hull ──────────────────────────────────────────────────────────────────
 

@@ -51,6 +51,41 @@ one config, one set of per-commander data, and one window layout, so you can
 switch between them freely. `gui` requires PySide6; see
 [INSTALL.md](../INSTALL.md).
 
+### Window layout
+
+Which window sits where is not part of `config.toml`. It lives in
+`windows.json` in the commander's data directory, and the usual way to change
+it is Preferences > Display, which writes the file for you. `example.layout.json`
+in the repository root shows the format and the shipped default.
+
+Slots are addressed `<column><position>` — `A`/`B`/`C` left to right, numbered
+top to bottom. Each window has a size class and may only occupy a slot of the
+same class:
+
+| Class | Slots | Windows |
+|-------|-------|---------|
+| Anchor | `B1` | Commander |
+| Compact | `B2`, `B3` | Alerts, Crew / SLF |
+| Panel | everything else | Exploration, Navigation, Session, Ship Health, Cargo, Engineering, Career |
+
+Anything invalid — an unknown window, a class mismatch, the same window twice —
+is dropped on load and the slot falls back to its default, so a hand-edited
+file cannot leave the dashboard unable to draw.
+
+Several windows no longer exist in their own right, having been folded into the
+window they belonged with:
+
+| Was | Now |
+|-----|-----|
+| Assets | Wallet / Ships / Modules / Fleet Carrier / Squadron Carrier tabs on **Commander** |
+| Exobiology | nested under each body in **Exploration** |
+| Massacre Mission Stack | the Missions tab in **Session** |
+| Colonisation | the Colonisation tab in **Cargo** |
+
+A `windows.json` written before those merges still loads. Names that no longer
+exist are dropped, and any window whose saved slot has since gone is rehomed
+into the first free slot of its class rather than being lost.
+
 ---
 
 ## `[LogLevels]`
@@ -81,6 +116,9 @@ All entries are hot-reloadable. Controls terminal, Discord, and dashboard output
 | `FuelCritical` | `3` | Fuel level below critical threshold |
 | `MissionUpdate` | `2` | Mission accepted, completed, redirected, or removed |
 | `AllMissionsReady` | `3` | All active massacre missions ready to turn in |
+| `CarrierJumpScheduled` | `3` | Fleet or squadron carrier jump scheduled — carrier, destination and countdown |
+| `CarrierJumpCancelled` | `3` | A scheduled carrier jump was cancelled |
+| `CarrierJumpComplete` | `2` | Carrier arrived at its destination |
 | `MeritEvent` | `0` | Individual merit gain from a kill |
 | `InactiveAlert` | `3` | No kills for the configured time period |
 | `RateAlert` | `3` | Kill rate below the configured threshold |

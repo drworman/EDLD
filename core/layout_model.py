@@ -61,34 +61,27 @@ CLASS_LABEL = {PANEL: "Panel", COMPACT: "Compact", ANCHOR: "Anchor"}
 # can offer them; callers pass an ``available`` set to hide not-yet-built ones.
 
 BLOCK_CLASS = {
-    "assets":       PANEL,
     "engineering":  PANEL,
     "career":       PANEL,
     "session":      PANEL,
     "ship_health":  PANEL,
     "cargo":        PANEL,
     "exploration":  PANEL,
-    "exobiology":   PANEL,
-    "missions":     PANEL,
     "navigation":   PANEL,
-    "colonisation": PANEL,
     "alerts":       COMPACT,
     "crew_slf":     COMPACT,
     "commander":    ANCHOR,
 }
 
 BLOCK_DISPLAY = {
-    "assets":       "Assets",
     "engineering":  "Engineering",
     "career":       "Career",
-    "session":      "Session",
+    "session":      "Session / Missions",
     "ship_health":  "Ship Health",
-    "cargo":        "Cargo",
-    "exploration":  "Exploration",
-    "exobiology":   "Exobiology",
-    "missions":     "Massacre Mission Stack",
+    "cargo":        "Cargo / Colonisation",
+    "exploration":  "Exploration / Exobiology",
+
     "navigation":   "Navigation",
-    "colonisation": "Colonisation",
     "alerts":       "Alerts",
     "crew_slf":     "Crew / SLF",
     "commander":    "Commander",
@@ -104,10 +97,15 @@ COLUMN_TITLE = {"A": "Left", "B": "Centre", "C": "Right"}
 # reproduces the current on-screen layout; Workstreams C/D change A1/A2 to the
 # new windows.
 
+# The left column is split evenly between the combined Exploration /
+# Exobiology window and Navigation: both grow large in use — a full system
+# scan and a 46-jump carrier route respectively — and neither is served by
+# the third of a column it used to get.
 DEFAULT_SLOTS: dict[str, list[tuple[str, Optional[str]]]] = {
-    "A": [(PANEL, "career"), (PANEL, "cargo"), (PANEL, "missions")],
-    "B": [(ANCHOR, "commander"), (COMPACT, "crew_slf"), (COMPACT, "alerts"), (PANEL, "exploration")],
-    "C": [(PANEL, "navigation"), (PANEL, "colonisation"), (PANEL, "exobiology")],
+    "A": [(PANEL, "exploration"), (PANEL, "navigation")],
+    "B": [(ANCHOR, "commander"), (COMPACT, "crew_slf"), (COMPACT, "alerts"),
+          (PANEL, "session")],
+    "C": [(PANEL, "ship_health"), (PANEL, "cargo"), (PANEL, "engineering")],
 }
 
 ASSIGNMENT_VERSION = 1
@@ -194,6 +192,22 @@ def normalize_assignment(raw: dict) -> dict[str, Optional[str]]:
             seen.add(blk)
         else:
             result[sid] = None
+
+    # Windows whose saved position no longer exists must not be silently
+    # lost.  Merging windows changed the slot layout — column A went from
+    # three positions to two — so an assignment written by an earlier version
+    # can name a window in a slot that is now gone.  Rehome any such window
+    # into the first free position of its own class rather than dropping it.
+    orphans = [
+        blk for sid, blk in (raw or {}).items()
+        if blk and blk in BLOCK_CLASS and blk not in seen and sid not in result
+    ]
+    for blk in orphans:
+        for sid in slot_ids():
+            if result.get(sid) is None and slot_class(sid) == BLOCK_CLASS[blk]:
+                result[sid] = blk
+                seen.add(blk)
+                break
     return result
 
 

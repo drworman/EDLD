@@ -245,8 +245,10 @@ def test_display_layer_does_not_read_keys_no_parser_writes(dead_key):
     Comments are stripped before scanning — the module docstring in
     ui_helpers.py names both keys while explaining why they were removed.
     """
-    for path in (ROOT / "tui" / "blocks" / "assets.py",
-                 ROOT / "gui" / "blocks" / "assets.py",
+    # The Assets windows were folded into Commander's tabs, so the carrier
+    # rows now render from there.
+    for path in (ROOT / "tui" / "blocks" / "commander.py",
+                 ROOT / "gui" / "blocks" / "commander.py",
                  ROOT / "core" / "ui_helpers.py"):
         code = _strip_comments_and_docstrings(path)
         assert dead_key not in code, (

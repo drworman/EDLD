@@ -1480,8 +1480,8 @@ def monitor_journal(
                 value=f"{state.pilot_rank} +{state.pilot_rank_progress}%", inline=True,
             )
 
-            # Credits on hand and cargo aboard say what shape the commander
-            # is starting in, which the embed never reported before.
+            # Credits on hand, cargo aboard and fuel say what shape the
+            # commander is starting in; the embed never reported any of it.
             _balance = getattr(state, "assets_balance", None)
             if _balance:
                 embed.add_embed_field(
