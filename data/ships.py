@@ -342,6 +342,29 @@ def normalise_ship_name(raw: str | None) -> str | None:
     return candidate
 
 
+#: Surface vehicles carry Frontier's internal development names in the
+#: journal, and they are not guessable: "testbuggy" is the Scarab, named that
+#: since 2015.  Title-casing the raw id put "Testbuggy" on screen.
+SRV_TYPE_NAMES = {
+    "testbuggy":               "SRV Scarab",
+    "combat_multicrew_srv_01": "SRV Scorpion",
+    "lander01":                "SRV Nomad",
+    "mev_rhino":               "SRV Rhino",
+}
+
+
+def resolve_vehicle_name(raw: str) -> str:
+    """Display name for a surface vehicle, from its journal type id.
+
+    Prefer the journal's own ``*_Localised`` field where one is present; this
+    is for the paths that only see the raw id.
+    """
+    key = (raw or "").lower().strip()
+    if key in SRV_TYPE_NAMES:
+        return SRV_TYPE_NAMES[key]
+    return key.replace("_", " ").title() if key else ""
+
+
 def resolve_fighter_name(fighter_type: str, loadout: str) -> str:
     """Return display name for a fighter given type + loadout key.
 
@@ -362,4 +385,7 @@ def resolve_fighter_name(fighter_type: str, loadout: str) -> str:
             return f"{FIGHTER_LOADOUT_NAMES[base_key]} {grade}"
     if ft in FIGHTER_TYPE_NAMES:
         return FIGHTER_TYPE_NAMES[ft]
+    # A surface vehicle can reach here when its id is the only thing known.
+    if ft in SRV_TYPE_NAMES:
+        return SRV_TYPE_NAMES[ft]
     return ft.replace("_", " ").title() if ft else "SLF"

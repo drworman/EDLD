@@ -1,47 +1,29 @@
-"""gui/blocks/crew_slf.py — NPC Crew and SLF status block (Qt)."""
+"""
+gui/blocks/status.py — Crew / Alerts window (Qt).
 
+Two readouts that are almost never busy at the same time, so they share one
+window rather than each holding a slot of their own.  No tabs — an alert that
+needs a tab change to see is an alert you miss.
+"""
 from __future__ import annotations
-
+from __future__ import annotations
 from datetime import datetime, timezone
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
-
 from gui.block_base import GuiBlock, _health_cls, _fmt_credits
 from gui.markup import to_html
 
-# ── Inline helpers (no UI-framework dependency) ───────────────────────────────
 
-def hull_css(pct: int) -> str:
-    if pct > 75:  return "health-good"
-    if pct >= 25: return "health-warn"
-    return "health-crit"
+#: Alert rows kept on screen.  Sized so a burst during combat does not push
+#: the crew readout out of the window.
+_MAX_ROWS = 5
 
 
-PP_RANK_NAMES = [
-    "Harmless", "Mostly Harmless", "Novice", "Competent", "Expert",
-    "Master", "Dangerous", "Deadly", "Elite",
-    "Elite I", "Elite II", "Elite III", "Elite IV", "Elite V",
-]
-
-
-def fmt_crew_active(delta) -> str:
-    total_days = int(delta.total_seconds() // 86400)
-    if total_days < 1:
-        return "<1d"
-    years,  rem_days = divmod(total_days, 365)
-    months, days     = divmod(rem_days, 30)
-    parts = []
-    if years:  parts.append(f"{years}y")
-    if months: parts.append(f"{months}mo")
-    if days and len(parts) < 2: parts.append(f"{days}d")
-    return " ".join(parts) or "<1d"
-
-
-class CrewSlfBlock(GuiBlock):
-    BLOCK_TITLE = "CREW / SLF"
+class StatusBlock(GuiBlock):
+    BLOCK_TITLE = "CREW / ALERTS"
 
     def _build_body(self, layout) -> None:
+
         # Name row: crew identity left, SLF type right.
         name_row = QWidget()
         nl = QHBoxLayout(name_row)
@@ -77,7 +59,23 @@ class CrewSlfBlock(GuiBlock):
             layout.addWidget(w)
         layout.addStretch(1)
 
+        # The two halves share a window, so they need a visible seam.
+        # Without one, an alert reads as another crew row.
+        layout.addWidget(self.hdr("Alerts"))
+        layout.addWidget(self.rule())
+
+        self._rows: list[TextRow] = []
+        for _ in range(_MAX_ROWS):
+            row = self.text("", "", wrap=False)
+            self._rows.append(row)
+            layout.addWidget(row)
+        layout.addStretch(1)
+
     def refresh_data(self) -> None:
+        self._refresh_crew()
+        self._refresh_alerts()
+
+    def _refresh_crew(self) -> None:
         s = self.state
         has_crew = bool(s.crew_name) and s.crew_active
 
@@ -155,3 +153,22 @@ class CrewSlfBlock(GuiBlock):
             self._kv_paid.set_value(f"{prefix}{_fmt_credits(s.crew_total_paid)}")
         else:
             self._kv_paid.set_value("—")
+
+    def _refresh_alerts(self) -> None:
+        alerts = self.core.plugin_call("alerts", "get_alerts") or []
+        for i, lbl in enumerate(self._rows):
+            if i < len(alerts):
+                a = alerts[i]
+                opacity = self.core.plugin_call("alerts", "opacity_for", a) or 1.0
+                text = f"{a.get('emoji', '')}  {a.get('text', '')}"
+                # The TUI dims an ageing alert through its own opacity handling;
+                # Qt has no equivalent on a stylesheet label, so the same
+                # threshold switches the row to the dim role instead.
+                lbl.set_text(text)
+                lbl.setProperty("role", "dim" if opacity < 0.7 else "val")
+            else:
+                lbl.set_text("")
+                lbl.setProperty("role", "val")
+            style = lbl.style()
+            style.unpolish(lbl)
+            style.polish(lbl)

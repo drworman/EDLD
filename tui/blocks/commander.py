@@ -34,7 +34,9 @@ def pp_rank_progress(rank: int, total_merits: int) -> tuple:
     earned = max(0, total_merits - floor)
     fraction = min(1.0, earned / span) if span > 0 else 1.0
     return fraction, earned, span, rank + 1
-from core.state      import CAPI_RANK_SKILLS
+from core.state      import (
+    CAPI_RANK_SKILLS, FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD,
+)
 from core.ui_helpers import carrier_display_sections, normalise_carrier
 
 
@@ -54,6 +56,13 @@ class CommanderBlock(TuiBlock):
                     yield SepRow()
                     yield KVRow("Power",          id="kv-pp")
                     yield KVRow("PP Rank",        id="kv-pprank")
+                    # Ship condition sits with the commander again: it is the
+                    # first thing looked at and the Info tab is the default
+                    # view, so it should not need a window change to see.
+                    yield SepRow()
+                    yield KVRow("Shields",        id="kv-shields")
+                    yield KVRow("Hull",           id="kv-hull")
+                    yield KVRow("Fuel",           id="kv-fuel")
             with TabPane("Ranks", id="tab-ranks"):
                 with VerticalScroll(id="ranks-scroll"):
                     yield Label("Awaiting CAPI data…", id="ranks-placeholder", classes="dim")
@@ -91,7 +100,7 @@ class CommanderBlock(TuiBlock):
                 with VerticalScroll():
                     yield Label("No stored modules", id="assets-modules")
 
-            with TabPane("Fleet Carrier", id="tab-carrier"):
+            with TabPane("Carrier", id="tab-carrier"):
                 # Rebuilt on every refresh rather than a fixed row set: which
                 # rows apply depends on the carrier and on whether CAPI has
                 # polled, and rendering absent data as a column of dashes
@@ -101,10 +110,10 @@ class CommanderBlock(TuiBlock):
             # Squadron carriers are rare, so this pane is hidden unless the
             # commander actually has one; an empty tab implying a carrier
             # they do not own would be worse than no tab.
-            with TabPane("Squadron Carrier", id="tab-sqcarrier"):
+            with TabPane("S. Carrier", id="tab-sqcarrier"):
                 yield VerticalScroll(id="assets-sqcarrier-scroll")
         with Horizontal(id="cmdr-footer"):
-            yield Static(">> Set Home", id="cmdr-home-btn", classes="footer-lbl")
+            yield Static(">> Set Home System", id="cmdr-home-btn", classes="footer-lbl")
             yield Label("", id="cmdr-home-lbl", classes="dim")
 
     def refresh_data(self) -> None:
@@ -163,6 +172,9 @@ class CommanderBlock(TuiBlock):
 
         # ── Location ─────────────────────────────────────────────────────────
         self._kv("kv-mode", s.pilot_mode or "—")
+        self._refresh_shields(s)
+        self._refresh_hull(s)
+        self._refresh_fuel(s)
         self._kv("kv-system", s.pilot_system or "—")
 
         # Home
@@ -409,6 +421,23 @@ class CommanderBlock(TuiBlock):
             self._label_text("assets-modules", "No stored modules")
 
     def _refresh_carrier(self) -> None:
+        """Render the fleet carrier, or hide the tab when there is none.
+
+        A commander who owns no carrier has no use for an empty tab implying
+        one; the same rule already applied to the squadron carrier.
+        """
+        carrier = getattr(self.state, "assets_carrier", None)
+        try:
+            pane = self.query_one("#tab-carrier", TabPane)
+        except Exception:
+            pane = None
+        if pane is not None:
+            pane.display = bool(carrier)
+        if not carrier:
+            return
+        self._render_carrier()
+
+    def _render_carrier(self) -> None:
         try:
             scroll = self.query_one("#assets-carrier-scroll", VerticalScroll)
         except Exception:
@@ -469,6 +498,62 @@ class CommanderBlock(TuiBlock):
             self.query_one(f"#{widget_id}", Label).update(text)
         except Exception:
             pass
+
+    def _refresh_fuel(self, state) -> None:
+        """Main-tank percentage, with endurance when the burn rate is known."""
+        current = getattr(state, "fuel_current", None)
+        tank    = getattr(state, "fuel_tank_size", None)
+        if current is None or not tank or tank <= 0:
+            self._kv("kv-fuel", "—", "val dim")
+            return
+
+        text = f"{current / tank * 100:.0f}%"
+        burn = getattr(state, "fuel_burn_rate", None)
+        if burn and burn > 0:
+            secs = (current / burn) * 3600
+            hours, mins = int(secs // 3600), int((secs % 3600) // 60)
+            text += f"  (~{hours}h {mins}m)" if hours else f"  (~{mins}m)"
+
+        if current < tank * FUEL_CRIT_THRESHOLD:
+            cls = "val health-crit"
+        elif current < tank * FUEL_WARN_THRESHOLD:
+            cls = "val health-warn"
+        else:
+            cls = "val health-good"
+        self._kv("kv-fuel", text, cls)
+
+    # ── Hull ──────────────────────────────────────────────────────────────────
+
+    def _refresh_hull(self, state) -> None:
+        # ship_hull_exact carries full precision from Loadout/HullDamage;
+        # ship_hull is the rounded integer the commander component keeps.
+        exact = getattr(state, "ship_hull_exact", None)
+        if exact is not None:
+            text = _fmt_health(exact)
+            pct  = int(exact * 100)
+        else:
+            pct = getattr(state, "ship_hull", None)
+            if pct is None:
+                self._kv("kv-hull", "—", "val dim")
+                return
+            text = f"{pct}%"
+        self._kv("kv-hull", text, f"val {_health_cls(pct)}")
+
+    # ── Shields ───────────────────────────────────────────────────────────────
+
+    def _refresh_shields(self, state) -> None:
+        up         = getattr(state, "ship_shields", None)
+        recharging = getattr(state, "ship_shields_recharging", False)
+        if up is None:
+            self._kv("kv-shields", "—", "val dim")
+        elif up:
+            self._kv("kv-shields", "Up", "val health-good")
+        elif recharging:
+            self._kv("kv-shields", "Recharging", "val health-warn")
+        else:
+            self._kv("kv-shields", "Down", "val health-crit")
+
+    # ── Modules ───────────────────────────────────────────────────────────────
 
     def _kv(self, widget_id: str, text: str, classes: str = "val") -> None:
         try:

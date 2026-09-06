@@ -9,7 +9,9 @@ from PySide6.QtWidgets import (
 
 from gui.block_base import GuiBlock, RowScroll, _health_cls
 from gui.markup import to_html
-from core.state import CAPI_RANK_SKILLS
+from core.state import (
+    CAPI_RANK_SKILLS, FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD,
+)
 from core.ui_helpers import carrier_display_sections, normalise_carrier
 from gui.block_base import _fmt_credits
 
@@ -81,6 +83,12 @@ class CommanderBlock(GuiBlock):
         info.add_row(self.rule())
         _row("Power", "kv-pp")
         _row("PP Rank", "kv-pprank")
+        # Ship condition sits with the commander again: it is the first thing
+        # looked at and the Info tab is the default view.
+        info.add_row(self.rule())
+        _row("Shields", "kv-shields")
+        _row("Hull", "kv-hull")
+        _row("Fuel", "kv-fuel")
         self._tabs.addTab(info, "Info")
 
         self._ranks = RowScroll()
@@ -129,7 +137,8 @@ class CommanderBlock(GuiBlock):
         # apply depends on the carrier and on whether CAPI has polled, and
         # rendering absent data as a column of dashes reads like a bug.
         self._carrier = RowScroll()
-        self._tabs.addTab(self._carrier, "Fleet Carrier")
+        # Added on refresh only when a carrier is actually owned.
+        self._carrier_added = False
 
 
         # Squadron carriers are rare, so this tab is only added when the
@@ -327,10 +336,85 @@ class CommanderBlock(GuiBlock):
                 rows.append(self.kv(label, value))
         self._carrier.set_rows(rows)
 
+    def _refresh_fuel(self, state) -> None:
+        """Main-tank percentage, with endurance when the burn rate is known."""
+        current = getattr(state, "fuel_current", None)
+        tank    = getattr(state, "fuel_tank_size", None)
+        if current is None or not tank or tank <= 0:
+            self._kv("kv-fuel", "—", "val dim")
+            return
+
+        text = f"{current / tank * 100:.0f}%"
+        burn = getattr(state, "fuel_burn_rate", None)
+        if burn and burn > 0:
+            secs = (current / burn) * 3600
+            hours, mins = int(secs // 3600), int((secs % 3600) // 60)
+            text += f"  (~{hours}h {mins}m)" if hours else f"  (~{mins}m)"
+
+        if current < tank * FUEL_CRIT_THRESHOLD:
+            cls = "val health-crit"
+        elif current < tank * FUEL_WARN_THRESHOLD:
+            cls = "val health-warn"
+        else:
+            cls = "val health-good"
+        self._kv("kv-fuel", text, cls)
+
+
+    # ── Hull ──────────────────────────────────────────────────────────────────
+
+    def _refresh_hull(self, state) -> None:
+        # ship_hull_exact carries full precision from Loadout/HullDamage;
+        # ship_hull is the rounded integer the commander component keeps.
+        exact = getattr(state, "ship_hull_exact", None)
+        if exact is not None:
+            text = _fmt_health(exact)
+            pct = int(exact * 100)
+        else:
+            pct = getattr(state, "ship_hull", None)
+            if pct is None:
+                self._kv("kv-hull", "—", "val dim")
+                return
+            text = f"{pct}%"
+        self._kv("kv-hull", text, f"val {_health_cls(pct)}")
+
+    # ── Shields ───────────────────────────────────────────────────────────────
+
+    def _refresh_shields(self, state) -> None:
+        up = getattr(state, "ship_shields", None)
+        recharging = getattr(state, "ship_shields_recharging", False)
+        if up is None:
+            self._kv("kv-shields", "—", "val dim")
+        elif up:
+            self._kv("kv-shields", "Up", "val health-good")
+        elif recharging:
+            self._kv("kv-shields", "Recharging", "val health-warn")
+        else:
+            self._kv("kv-shields", "Down", "val health-crit")
+
+    # ── Modules ───────────────────────────────────────────────────────────────
+
     def _kv(self, wid: str, text: str, classes: str = "val") -> None:
         row = self._w.get(wid)
         if row is not None:
             row.set_value(text, classes)
+
+    def _refresh_carrier_tab(self) -> None:
+        """Add or remove the Carrier tab with ownership.
+
+        An empty tab implying a carrier the commander does not own is worse
+        than no tab; the squadron carrier already worked this way.
+        """
+        carrier = getattr(self.state, "assets_carrier", None)
+        if not carrier:
+            if self._carrier_added:
+                index = self._tabs.indexOf(self._carrier)
+                if index >= 0:
+                    self._tabs.removeTab(index)
+                self._carrier_added = False
+            return
+        if not self._carrier_added:
+            self._tabs.insertTab(self._tabs.count(), self._carrier, "Carrier")
+            self._carrier_added = True
 
     def _refresh_squadron_carrier(self) -> None:
         """Render the squadron carrier, adding or removing its tab.
@@ -349,7 +433,7 @@ class CommanderBlock(GuiBlock):
             return
 
         if not self._sqcarrier_added:
-            self._tabs.addTab(self._sqcarrier, "Squadron Carrier")
+            self._tabs.addTab(self._sqcarrier, "S. Carrier")
             self._sqcarrier_added = True
 
         rows: list = []
@@ -367,6 +451,7 @@ class CommanderBlock(GuiBlock):
     def refresh_data(self) -> None:
         s = self.state
         self._refresh_assets()
+        self._refresh_carrier_tab()
         self._refresh_squadron_carrier()
 
         # ── Header ────────────────────────────────────────────────────────────
@@ -417,6 +502,9 @@ class CommanderBlock(GuiBlock):
 
         # ── Location ─────────────────────────────────────────────────────────
         self._kv("kv-mode", s.pilot_mode or "—")
+        self._refresh_shields(s)
+        self._refresh_hull(s)
+        self._refresh_fuel(s)
         self._kv("kv-system", s.pilot_system or "—")
 
         # Home

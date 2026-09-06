@@ -28,14 +28,11 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from tui.preferences   import PreferencesScreen
 from tui.confirm_modal import ConfirmModal
 from tui.blocks.career import CareerBlock
-from tui.blocks.session     import SessionBlock
-from tui.blocks.ship_health import ShipHealthBlock
+from tui.blocks.ship_info   import ShipInfoBlock
+from tui.blocks.objectives  import ObjectivesBlock
+from tui.blocks.status      import StatusBlock
 from tui.blocks.navigation import NavigationBlock
 from tui.blocks.commander     import CommanderBlock
-from tui.blocks.alerts        import AlertsBlock
-from tui.blocks.cargo         import CargoBlock
-from tui.blocks.crew_slf      import CrewSlfBlock
-from tui.blocks.engineering   import EngineeringBlock
 from tui.blocks.exploration   import ExplorationBlock
 from tui.theme import build_css, BLOCK_DOM_ID
 from core.layout_model import load_assignment, tui_columns, COLUMNS
@@ -48,58 +45,52 @@ if TYPE_CHECKING:
 _MSG_DISPATCH: dict[str, list[str]] = {
     "career_update":      ["block-career"],
     # Session counter / reset events repaint the Session window.
-    "stats_update":       ["block-session"],
+    "stats_update":       ["block-career"],
     # Generic state changes — keep Career's wealth rows and the Session
     # window live, plus Navigation's Carrier tab readout.
-    "state_update":       ["block-career", "block-session", "block-nav"],
+    "state_update":       ["block-career", "block-career", "block-nav"],
     # Colonisation now renders in the Cargo window's second tab.
-    "colonisation_update":["block-cargo"],
-    "crew_update":        ["block-crew"],
-    "slf_update":         ["block-crew"],
-    "vessel_update":      ["block-commander", "block-ship-health"],
-    "ship_health_update": ["block-ship-health"],
+    "colonisation_update":["block-objectives"],
+    "crew_update":        ["block-status"],
+    "slf_update":         ["block-status"],
+    "vessel_update":      ["block-commander", "block-ship"],
+    "ship_health_update": ["block-ship"],
     "location_update":    ["block-commander", "block-nav"],
     # Missions now render inside the Session window's Missions tab.
-    "mission_update":     ["block-session"],
-    "cargo_update":       ["block-cargo"],
+    "mission_update":     ["block-objectives"],
+    "cargo_update":       ["block-ship"],
     # Assets folded into the Commander window's tabs.
     "assets_update":      ["block-commander"],
-    "exploration_update": ["block-exploration", "block-session"],
+    "exploration_update": ["block-exploration", "block-career"],
     # Exobiology nests inside the Exploration window.
-    "exobiology_update":  ["block-exploration", "block-session"],
-    "materials_update":   ["block-eng"],
-    "alert_update":       ["block-alerts"],
-    "pp_update":          ["block-career", "block-session", "block-commander"],
+    "exobiology_update":  ["block-exploration", "block-career"],
+    "materials_update":   ["block-ship"],
+    "alert_update":       ["block-status"],
+    "pp_update":          ["block-career", "block-career", "block-commander"],
     "cmdr_update":        ["block-commander"],
-    "capi_updated":       ["block-commander", "block-crew",
-                           "block-cargo", "block-nav"],
+    "capi_updated":       ["block-commander", "block-status",
+                           "block-ship", "block-nav"],
     # update_notice has no block target — handled directly in _poll_queue
 }
 
 _PLUGIN_TO_BLOCK: dict[str, str] = {
     "career":        "block-career",
     "navigation":    "block-nav",
-    "crew_slf":      "block-crew",
+    "status":       "block-status",
     "commander":     "block-commander",
-    "cargo":         "block-cargo",
-    "engineering":   "block-eng",
-    "alerts":        "block-alerts",
-    "session_stats": "block-session",
-    "ship_health":   "block-ship-health",
+    "session_stats": "block-career",
+    "ship_info":     "block-ship",
 }
 
 # Window name → TUI block class.  compose() builds the dashboard from the shared
 # layout model, instantiating these by name in the positions the model returns.
 _BLOCK_CLASSES = {
-    "engineering":  EngineeringBlock,
     "commander":    CommanderBlock,
-    "crew_slf":     CrewSlfBlock,
-    "alerts":       AlertsBlock,
-    "cargo":        CargoBlock,
+    "status":       StatusBlock,
     "navigation":   NavigationBlock,
     "career":       CareerBlock,
-    "session":      SessionBlock,
-    "ship_health":  ShipHealthBlock,
+    "ship_info":    ShipInfoBlock,
+    "objectives":   ObjectivesBlock,
     "exploration":  ExplorationBlock,
 }
 
@@ -242,9 +233,9 @@ class EdldTui(App):
 
     def _all_block_ids(self) -> list[str]:
         return [
-            "block-career", "block-nav",             "block-commander", "block-alerts", "block-cargo",
-            "block-crew", "block-eng", "block-exploration",
-            "block-session", "block-ship-health",
+            "block-career", "block-nav", "block-commander", "block-status",
+            "block-ship", "block-objectives", "block-status", "block-exploration",
+            "block-career", "block-ship-health",
         ]
 
     # ── Actions ───────────────────────────────────────────────────────────────
@@ -254,7 +245,7 @@ class EdldTui(App):
 
     def action_reset_session(self) -> None:
         self._core.plugin_call("session_stats", "on_new_session", 0)
-        self._refresh_block("block-session")
+        self._refresh_block("block-career")
 
     def action_clear_alerts(self) -> None:
         self._core.plugin_call("alerts", "clear_alerts")

@@ -93,6 +93,16 @@ class ActivityTradePlugin(BasePlugin, ActivityProviderMixin):
     def has_activity(self) -> bool:
         return self.trade_profit != 0 or self.mined_income > 0
 
+    def get_session_rows(self) -> list[dict]:
+        """Trade profit only.
+
+        Mining income is revenue, and revenue is accounted for once in the
+        Income section — filing it under Trade counted it twice and made a
+        mining session read as a trade run.
+        """
+        return [r for r in self.get_summary_rows()
+                if r["label"] != "Mining income"]
+
     def get_summary_rows(self) -> list[dict]:
         dur  = self._duration_seconds()
         rows = []

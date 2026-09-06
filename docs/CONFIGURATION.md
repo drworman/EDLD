@@ -64,9 +64,15 @@ same class:
 
 | Class | Slots | Windows |
 |-------|-------|---------|
-| Anchor | `B1` | Commander |
-| Compact | `B2`, `B3` | Alerts, Crew / SLF |
-| Panel | everything else | Exploration, Navigation, Session, Ship Health, Cargo, Engineering, Career |
+| Large | `A1`, `A2`, `C1`, `C2` | Exploration / Exobiology, Navigation, Ship, Session / Career |
+| Centre | `B1`, `B2`, `B3` | Commander, Crew / Alerts, Objectives |
+
+There are seven windows and seven slots, so every window is on screen at
+once; rearranging swaps two windows rather than hiding one.
+
+Left and right columns mirror each other — two large windows apiece — and the
+centre column is three equal windows. Any window may occupy any slot of its
+own class.
 
 Anything invalid — an unknown window, a class mismatch, the same window twice —
 is dropped on load and the slot falls back to its default, so a hand-edited
@@ -77,14 +83,20 @@ window they belonged with:
 
 | Was | Now |
 |-----|-----|
-| Assets | Wallet / Ships / Modules / Fleet Carrier / Squadron Carrier tabs on **Commander** |
+| Assets | Wallet / Ships / Modules / Carrier / S. Carrier tabs on **Commander** |
 | Exobiology | nested under each body in **Exploration** |
-| Massacre Mission Stack | the Missions tab in **Session** |
-| Colonisation | the Colonisation tab in **Cargo** |
+| Massacre Mission Stack | the Missions tab in **Objectives** |
+| Colonisation | the Colonisation tab in **Objectives** |
+| Cargo | the Cargo tab in **Ship** |
+| Engineering | the Engineering tab in **Ship** |
+| Ship Health | renamed **Ship**; hull, shields and fuel moved to Commander's Info tab |
+| Alerts, Crew / SLF | merged into **Crew / Alerts** |
+| Session | the Session tab in **Session / Career** |
 
-A `windows.json` written before those merges still loads. Names that no longer
-exist are dropped, and any window whose saved slot has since gone is rehomed
-into the first free slot of its class rather than being lost.
+A `windows.json` written before version 2 describes a window set that no longer
+exists, and the slot grid changed shape with it. Rather than leave a
+half-populated grid, such a file is replaced with the current defaults and
+rewritten once, on the next launch.
 
 ---
 

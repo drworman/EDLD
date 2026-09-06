@@ -45,7 +45,7 @@ import json
 from pathlib import Path
 
 from core.plugin_loader import BasePlugin
-from data.modules import normalise_module_name
+from data.modules import is_cosmetic_module, normalise_module_name
 
 
 # Slot prefixes that are purely cosmetic — never damaged, never actionable.
@@ -60,13 +60,19 @@ _SCAN_JOURNALS = 6
 
 
 def _is_cosmetic(slot: str, item: str) -> bool:
-    s = (slot or "").lower()
-    if s.startswith(_COSMETIC_PREFIXES):
+    """True for a Loadout entry that is decoration rather than equipment.
+
+    The item test was a prefix match, so anything whose id begins with the
+    ship rather than the item type slipped through —
+    ``mediumtransport01_shipkita_bumper2``, ``smallcombat01_nx_cockpit`` — and
+    those turned up in the module list with nothing to report.  Matching on
+    substrings catches them whatever the ship prefix.
+    """
+    if (slot or "").lower().startswith(_COSMETIC_PREFIXES):
         return True
     i = (item or "").lower()
-    return i.startswith(("paintjob_", "decal_", "nameplate_",
-                         "weaponcustomisation_", "enginecustomisation_",
-                         "voicepack_", "bobble_", "string_lights"))
+    return (is_cosmetic_module(i)
+            or i.startswith(("bobble_", "string_lights")))
 
 
 def _clean_module_token(token: str) -> str:

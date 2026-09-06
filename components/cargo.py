@@ -187,6 +187,15 @@ class CargoPlugin(BasePlugin):
                 # For Count:0 with no Inventory the hold is definitively empty.
                 # For Count:N with no Inventory we read Cargo.json — by the time
                 # this event fires the file is current (CargoTransfer precedes it).
+                # Cargo also fires for the SRV, and those events name only a
+                # count — never an Inventory.  Untangled, an SRV event with
+                # Count > 0 sent the ship's hold off to re-read Cargo.json,
+                # and an SRV Count:0 emptied the ship's hold outright.
+                if str(event.get("Vessel", "Ship")) == "SRV":
+                    state.srv_cargo_count = max(int(event.get("Count", 0) or 0), 0)
+                    if gq: gq.put(("cargo_update", None))
+                    return
+
                 inventory = event.get("Inventory")
                 count     = event.get("Count", -1)
                 if inventory is not None:

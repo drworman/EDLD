@@ -152,6 +152,20 @@ MODULE_TYPES: dict[str, str] = {
     # ── Optional internals ────────────────────────────────────────────────────
     "fuelscoop":                    "Fuel Scoop",
     "cargorack":                    "Cargo Rack",
+    # Modules the fallback used to mangle into run-together ids —
+    # "Largecargorack", "Mkii Passengercabin", "Fighterbaymk2".
+    "largecargorack":               "Cargo Rack",
+    "mkii_passengercabin":          "Passenger Cabin",
+    "mkiilargebuggybay":            "Planetary Vehicle Hangar",
+    "mkiiagileboost_engine":        "Thrusters",
+    "fighterbaymk2":                "Fighter Hangar",
+    "multidronecontrol_miningv2":   "Mining Multi-Limpet Controller",
+    "dronecontrol_unkvesselresearch": "Research Limpet Controller",
+    "miningtoolv2":                 "Abrasion Blaster",
+    "chafflauncher":                "Chaff Launcher",
+    "electroniccountermeasure":     "Electronic Countermeasure",
+    "modularcargobaydoor":          "Modular Cargo Bay Door",
+    "modularcargobaydoorfdl":       "Modular Cargo Bay Door",
     "corrosionproofcargorack":      "Corrosion Resistant Cargo Rack",
     "dockingcomputer":              "Docking Computer",
     "dockingcomputer_advanced":     "Advanced Docking Computer",
@@ -220,6 +234,24 @@ MODULE_TYPES: dict[str, str] = {
 }
 
 
+#: Cosmetic items ride in the same Loadout list as real modules — paint jobs,
+#: decals, ship kits, cockpit skins, voice packs.  They have no health, no
+#: power priority and nothing to repair, so listing them among the modules is
+#: noise.  Matched on substrings because the id schemes vary by ship.
+_COSMETIC_MARKERS = (
+    "paintjob", "decal_", "nameplate", "voicepack", "shipkit",
+    "customisation", "holograma", "hologramb",
+    "_bumper", "_spoiler", "_wings", "_tail", "_cockpit",
+    "enginecustomisation", "weaponcustomisation",
+)
+
+
+def is_cosmetic_module(internal: str) -> bool:
+    """True for a Loadout entry that is decoration rather than equipment."""
+    key = (internal or "").lower()
+    return any(marker in key for marker in _COSMETIC_MARKERS)
+
+
 def normalise_module_name(internal: str) -> str:
     """Convert an internal module name to a human-readable display string.
 
@@ -266,9 +298,24 @@ def normalise_module_name(internal: str) -> str:
             size_str   = MODULE_SIZE_MAP.get(size_key, size_key.title())
             mount_str  = MODULE_MOUNT_MAP.get(mount, mount.title())
             if type_name:
+                # Utility mounts ("tiny") carry no size in game, so prefixing
+                # a 0 produced names like "0 Point Defence (Turret)".
+                prefix = "" if size_key == "tiny" else f"{size_str} "
                 if mount == "basic":
-                    return f"{size_str} {type_name}"
-                return f"{size_str} {type_name} ({mount_str})"
+                    return f"{prefix}{type_name}".strip()
+                return f"{prefix}{type_name} ({mount_str})".strip()
+        # Some utility mounts carry no mount type in the id at all —
+        # "hpt_chafflauncher_tiny" — so the pattern above cannot match and
+        # they fell through to a title-cased id.
+        sz_m = _re.match(r"^(.+?)_(tiny|small|medium|large|huge)$", body)
+        if sz_m:
+            base_name = MODULE_TYPES.get(sz_m.group(1))
+            if base_name:
+                size_key = sz_m.group(2)
+                if size_key == "tiny":
+                    return base_name
+                return f"{MODULE_SIZE_MAP.get(size_key, size_key)} {base_name}"
+
         # Fallback for hardpoints
         type_name = MODULE_TYPES.get(body)
         if type_name:

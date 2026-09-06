@@ -7,6 +7,7 @@ Dashboard block: commander.
 
 from core.plugin_loader import BasePlugin
 from core.state import RANK_NAMES
+from data.ships import resolve_vehicle_name
 from core.emit import Terminal
 
 
@@ -325,7 +326,9 @@ class CommanderPlugin(BasePlugin):
 
             case "LaunchSRV":
                 state.vessel_mode = "srv"
-                state.srv_type    = event.get("SRVType_Localised") or event.get("SRVType", "SRV")
+                state.srv_type    = (event.get("SRVType_Localised")
+                                     or resolve_vehicle_name(event.get("SRVType", ""))
+                                     or "SRV")
                 state.srv_hull    = 100
                 if gq: gq.put(("vessel_update", None))
 

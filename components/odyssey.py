@@ -8,8 +8,6 @@ on-foot material collection, and suit loadout used.
 Event mapping:
   Disembark          — on-foot deployment (planet or station); suit type captured
   Embark             — back to ship; clears on-foot state
-  LaunchSRV          — SRV deployment
-  DockSRV            — SRV recalled
   SuitLoadout        — current suit name on Disembark
   ApproachSettlement — categorised as engineer / guardian / regular
   BookTaxi           — taxi booked (cost tracked)
@@ -51,8 +49,6 @@ class ActivityOdysseyPlugin(BasePlugin, ActivityProviderMixin):
     SUBSCRIBED_EVENTS = [
         "Disembark",
         "Embark",
-        "LaunchSRV",
-        "DockSRV",
         "SuitLoadout",
         "ApproachSettlement",
         "BookTaxi",
@@ -71,7 +67,6 @@ class ActivityOdysseyPlugin(BasePlugin, ActivityProviderMixin):
         self.station_deployments: int   = 0   # Disembark at station
         self.current_suit:        str   = ""  # display name of current suit
         # SRV
-        self.srv_deployments:     int   = 0
         # Settlements
         self.settlements_visited: int   = 0
         self.engineer_visits:     int   = 0
@@ -114,15 +109,9 @@ class ActivityOdysseyPlugin(BasePlugin, ActivityProviderMixin):
                 if not event.get("SRV") and not event.get("Taxi"):
                     self.current_suit = ""
 
-            case "LaunchSRV":
-                if event.get("PlayerControlled", True):
-                    if self.session_start_time is None:
-                        self.session_start_time = logtime
-                    self.srv_deployments += 1
-                    if gq: gq.put(("stats_update", None))
-
-            case "DockSRV":
-                pass   # counted on launch; dock is just the close of the loop
+            # LaunchSRV / DockSRV are deliberately not counted.  How many
+            # times a vehicle was deployed says nothing about what a session
+            # produced; losing one would, and that arrives as SRVDestroyed.
 
             case "ApproachSettlement":
                 name = event.get("Name", "")
@@ -158,7 +147,6 @@ class ActivityOdysseyPlugin(BasePlugin, ActivityProviderMixin):
         return (
             self.surface_deployments > 0
             or self.station_deployments > 0
-            or self.srv_deployments > 0
             or self.settlements_visited > 0
             or self.engineer_visits > 0
             or self.guardian_sites > 0
@@ -174,16 +162,32 @@ class ActivityOdysseyPlugin(BasePlugin, ActivityProviderMixin):
                 "value": str(self.surface_deployments),
                 "rate":  suit.strip() or None,
             })
-        if self.srv_deployments > 0:
-            rows.append({
-                "label": "SRV deployments",
-                "value": str(self.srv_deployments),
-                "rate":  None,
-            })
         if self.settlements_visited > 0:
             rows.append({
                 "label": "Settlements",
                 "value": str(self.settlements_visited),
+                "rate":  None,
+            })
+        return rows
+
+    def get_session_rows(self) -> list[dict]:
+        """Places visited and materials gathered — not deployment counts.
+
+        How many times the commander stepped outside says nothing about what
+        the session produced, the same objection that retired the SRV
+        deployment counter.
+        """
+        """What this session produced, for the Session view.
+
+        A line per material category is a breakdown, not a session figure;
+        the Session view wants the total picked up.
+        """
+        rows = [r for r in self.get_summary_rows()
+                if r["label"] != "Surface deployments"]
+        if self.materials_collected:
+            rows.append({
+                "label": "Raw materials",
+                "value": str(sum(self.materials_collected.values())),
                 "rate":  None,
             })
         return rows

@@ -41,19 +41,27 @@ from typing import Optional
 
 # ── Size classes ──────────────────────────────────────────────────────────────
 
-PANEL   = "panel"
-COMPACT = "compact"
-ANCHOR  = "anchor"
+PANEL  = "panel"    # the large left/right windows
+CENTRE = "centre"   # the three equal centre windows
 
-SIZE_CLASSES = (PANEL, COMPACT, ANCHOR)
+SIZE_CLASSES = (PANEL, CENTRE)
 
-# Relative height weight per class.  Every interchangeable window is PANEL.
-# The three fixed centre blocks are sized so Commander spans one Panel and
-# Crew + Alerts together span one Panel (two equal COMPACT halves), keeping all
-# three columns three Panel-heights tall so rows line up across columns.
-CLASS_WEIGHT = {PANEL: 30, COMPACT: 15, ANCHOR: 30}
+# Retained so an older windows.json or an out-of-tree caller naming the
+# previous three-class scheme still resolves instead of raising.
+COMPACT = CENTRE
+ANCHOR  = CENTRE
 
-CLASS_LABEL = {PANEL: "Panel", COMPACT: "Compact", ANCHOR: "Anchor"}
+# Relative height weight per class.  Two classes, and every column adds up to
+# the same height so rows line up across all three:
+#
+#   left / right   PANEL  + PANEL                   = 50 + 50           = 100
+#   centre         CENTRE + CENTRE + CENTRE         = 33 + 33 + 33      = 100
+#
+# Every window is interchangeable with every other window of its class: four
+# positions for PANEL (A1, A2, C1, C2) and three for CENTRE (B1, B2, B3).
+CLASS_WEIGHT = {PANEL: 50, CENTRE: 33}
+
+CLASS_LABEL = {PANEL: "Large", CENTRE: "Centre"}
 
 # ── Window registry ─────────────────────────────────────────────────────────
 # Every dashboard window, its size class, and its display title.  Exploration
@@ -61,30 +69,25 @@ CLASS_LABEL = {PANEL: "Panel", COMPACT: "Compact", ANCHOR: "Anchor"}
 # can offer them; callers pass an ``available`` set to hide not-yet-built ones.
 
 BLOCK_CLASS = {
-    "engineering":  PANEL,
-    "career":       PANEL,
-    "session":      PANEL,
-    "ship_health":  PANEL,
-    "cargo":        PANEL,
+    # Large left/right windows — interchangeable across A1, A2, C1 and C2.
     "exploration":  PANEL,
     "navigation":   PANEL,
-    "alerts":       COMPACT,
-    "crew_slf":     COMPACT,
-    "commander":    ANCHOR,
+    "ship_info":    PANEL,
+    "career":       PANEL,
+    # Centre column: three equal windows, freely interchangeable.
+    "commander":    CENTRE,
+    "objectives":   CENTRE,
+    "status":       CENTRE,
 }
 
 BLOCK_DISPLAY = {
-    "engineering":  "Engineering",
-    "career":       "Career",
-    "session":      "Session / Missions",
-    "ship_health":  "Ship Health",
-    "cargo":        "Cargo / Colonisation",
     "exploration":  "Exploration / Exobiology",
-
     "navigation":   "Navigation",
-    "alerts":       "Alerts",
-    "crew_slf":     "Crew / SLF",
+    "ship_info":    "Ship",
+    "career":       "Session / Career",
+    "objectives":   "Objectives",
     "commander":    "Commander",
+    "status":       "Crew / Alerts",
 }
 
 # ── Columns ───────────────────────────────────────────────────────────────────
@@ -97,18 +100,17 @@ COLUMN_TITLE = {"A": "Left", "B": "Centre", "C": "Right"}
 # reproduces the current on-screen layout; Workstreams C/D change A1/A2 to the
 # new windows.
 
-# The left column is split evenly between the combined Exploration /
-# Exobiology window and Navigation: both grow large in use — a full system
-# scan and a 46-jump carrier route respectively — and neither is served by
-# the third of a column it used to get.
+# Left and right columns mirror each other: two large windows apiece.  All
+# four of those positions take the same class, so any large window can live in
+# any of them.  The centre column is the tall pair with the short pair
+# between them.
 DEFAULT_SLOTS: dict[str, list[tuple[str, Optional[str]]]] = {
     "A": [(PANEL, "exploration"), (PANEL, "navigation")],
-    "B": [(ANCHOR, "commander"), (COMPACT, "crew_slf"), (COMPACT, "alerts"),
-          (PANEL, "session")],
-    "C": [(PANEL, "ship_health"), (PANEL, "cargo"), (PANEL, "engineering")],
+    "B": [(CENTRE, "commander"), (CENTRE, "status"), (CENTRE, "objectives")],
+    "C": [(PANEL, "ship_info"), (PANEL, "career")],
 }
 
-ASSIGNMENT_VERSION = 1
+ASSIGNMENT_VERSION = 2
 
 
 # ── Slot helpers ────────────────────────────────────────────────────────────
@@ -277,13 +279,36 @@ def assignment_path() -> Path:
 
 
 def load_assignment(path: Optional[Path] = None) -> dict[str, Optional[str]]:
-    """Load the saved assignment, or the default arrangement when none exists."""
+    """Load the saved assignment, or the default arrangement when none exists.
+
+    An assignment written before version 2 describes a window set that no
+    longer exists — Cargo, Engineering, Alerts, Crew / SLF and Session were
+    folded into other windows, and the slot grid itself changed shape.
+    Salvaging what survives would leave a half-populated grid, so a pre-v2
+    file is replaced wholesale with the current defaults and rewritten.  This
+    happens once; afterwards the file carries the new version and is loaded
+    normally.
+    """
     p = path or assignment_path()
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-        return normalize_assignment(data.get("slots", {}))
     except Exception:
         return default_assignment()
+
+    try:
+        version = int(data.get("version", 1))
+    except (TypeError, ValueError):
+        version = 1
+
+    if version < ASSIGNMENT_VERSION:
+        fresh = default_assignment()
+        try:
+            save_assignment(fresh, p)
+        except Exception:
+            pass          # read-only home is not a reason to refuse to draw
+        return fresh
+
+    return normalize_assignment(data.get("slots", {}))
 
 
 def save_assignment(assignment: dict, path: Optional[Path] = None) -> None:

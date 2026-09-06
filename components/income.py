@@ -96,7 +96,12 @@ class ActivityIncomePlugin(BasePlugin, ActivityProviderMixin):
                 self._add(logtime, total, "Exobiology")
 
             case "MarketSell":
-                self._add(logtime, int(event.get("TotalSale", 0)), "Trade")
+                # Mined ore was never bought, so it has no average paid price.
+                # Selling it is mining revenue, not trade profit, and filing
+                # it under Trade made a mining session look like a trade run.
+                mined = int(event.get("AvgPricePaid", 0) or 0) == 0
+                self._add(logtime, int(event.get("TotalSale", 0)),
+                          "Mining" if mined else "Trade")
 
     # ── ActivityProviderMixin ─────────────────────────────────────────────────
 
@@ -118,6 +123,33 @@ class ActivityIncomePlugin(BasePlugin, ActivityProviderMixin):
             "value": fmt_credits(self.total_income),
             "rate":  self._cph(),
         }]
+
+    def get_session_rows(self) -> list[dict]:
+        """Every earning stream, then the total and the rate.
+
+        Income was previously reported three times over — twice in the
+        Overview and again here — while the individual streams that make it
+        up were scattered across the sections of the activity that produced
+        them.  This is the one place income is accounted for.
+
+        Only *redeemed* vouchers count.  A bounty that has been earned but
+        not cashed in can still be lost by dying, so counting it as income
+        would be counting money that is not yours yet.
+        """
+        if not self.total_income:
+            return []
+
+        rows = [
+            {"label": label, "value": fmt_credits(amount), "rate": None}
+            for label, amount in sorted(self.by_source.items(),
+                                        key=lambda kv: -kv[1])
+        ]
+        rows.append({"label": "Total earned",
+                     "value": fmt_credits(self.total_income), "rate": None})
+        rate = self._cph()
+        if rate:
+            rows.append({"label": "Rate", "value": rate, "rate": None})
+        return rows
 
     def get_tab_rows(self) -> list[dict]:
         rows = self.get_summary_rows()

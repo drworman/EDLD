@@ -1,8 +1,243 @@
 # EDLD CHANGELOG
 
-Last updated: 20260905
+Last updated: 20260906
 
 ---
+
+## Released in 20260906
+
+A layout release.  The window set had accumulated more panels than a screen
+holds, several of them near-empty most of the time, and three size classes to
+arrange them in.  This reduces the set by merging windows with their natural
+neighbours and reduces the classes to two, which makes far more of the layout
+interchangeable.
+
+### Changed: two size classes, and columns that mirror
+
+Every window is now either **Large** or **Centre**, and every column adds up
+to the same height so rows line up across all three:
+
+    left / right   PANEL  + PANEL                   = 50 + 50      = 100
+    centre         CENTRE + CENTRE + CENTRE         = 33 + 33 + 33 = 100
+
+The right column mirrors the left: two large windows apiece, four such
+positions in total, and any large window may occupy any of them.  The centre
+column is three equal windows, freely interchangeable.  Preferences > Display
+already filtered its options by class and now offers five large windows for
+the four large slots and three centre windows for the three centre slots.
+
+``COMPACT`` and ``ANCHOR`` are retained as aliases of ``CENTRE`` so a
+``windows.json`` written against the previous three-class scheme still loads.
+
+### Changed: Crew / SLF and Alerts merged
+
+They are almost never busy at the same time — crew and fighter status is a
+short fixed set of rows, empty unless a fighter is deployed or crew is hired,
+and alerts are empty until something fires — so they share one window instead
+of each holding a slot.  No tabs: an alert that needs a tab change to see is
+an alert you miss.  Crew above, alerts flowing beneath.
+
+This is what makes the centre column three equal windows rather than a tall
+pair with a short pair wedged between them.
+
+### Changed: the Ship window
+
+Ship Health became **Ship**, because the ship rather than its health is the
+subject.  One header line — name, ident and type — over three tabs:
+
+    Cargo         the hold, leading because it changes constantly
+    Modules       every fitted module, worst-first within each power group
+    Engineering   the material store by grade
+
+Cargo and Engineering had windows of their own; both are about the vessel's
+contents and neither filled a slot on its own.
+
+### Changed: a new Objectives window
+
+Work with an end state, as distinct from the running totals in Session and
+the ship's contents:
+
+    Missions      the massacre stack, then every other mission held
+    Colonisation  construction sites and their outstanding requirements
+
+Missions came out of Session and Colonisation out of Cargo.  Neither belonged
+where it was: a mission stack is not a session statistic, and a depot's
+shopping list is not the hold.
+
+### Changed: ship condition is back in Commander
+
+Shields, hull and fuel return to the Commander window's Info tab, under
+Powerplay rank and separated by a rule.  Info is the default view, so that is
+the one place they cost nothing to reach.  They are no longer duplicated in
+the Ship window.
+
+"Set Home" now reads "Set Home System", and the carrier tabs are "Carrier" and
+"S. Carrier".  Both appear only when the commander actually owns a carrier of
+that class — an empty tab implying one they do not own is worse than no tab.
+
+### Changed: every window fits on screen at once
+
+Objectives moved to the centre column and Session merged into Career as its
+first tab, leaving seven windows for seven slots.  Rearranging now swaps two
+windows rather than hiding one.
+
+Session and lifetime figures are the same question over two spans of time, so
+they share one tab bar — Session, then Summary, Combat, Explore and the rest —
+rather than two slots.  An Operations tab and a Career statistics panel are
+planned once there is data to build them from.
+
+### Changed: saved layouts are migrated once
+
+A `windows.json` from before this release names windows that no longer exist —
+Cargo, Engineering, Alerts, Crew / SLF and Session were all folded into other
+windows — and the slot grid changed shape with them.  Salvaging what survived
+would leave a half-populated grid, so a pre-version-2 file is replaced with the
+current defaults and rewritten once.  A read-only home does not stop the
+dashboard drawing.
+
+### Changed: seams between sections that share a window
+
+Crew / Alerts now carries an "Alerts" heading and a rule between the two
+halves.  Sharing a window without a visible seam meant an alert read as
+another crew row.
+
+The Ship window's Cargo tab is likewise headed "Ship", and gains an "SRV"
+section while a surface vehicle is out.
+
+### Changed: the Session view stops repeating activity detail
+
+Each provider fed its **full tab rows** into the Session view, which is a
+different question from what the session produced.  A breakdown of the body
+you are mining and a line per commodity describe the *place*; they belong in
+the window that is about the place.  That is how ring hotspots, planetary
+site counts and a row per refined commodity ended up in a session summary.
+
+Providers now supply ``get_session_rows()`` for this view, falling back to
+their condensed summary rows.  Removed from it:
+
+- **Cargo currently held** — a state of the hold, not something the session
+  produced, and already on the Ship window.
+- **Ring and planetary sites** — the place, not the session.
+- **The ship in use** — named in the Ship window's header and in Commander.
+- **A line per refined commodity** — now one Refined total, with a count of
+  how many kinds when there is more than one.
+- **A line per raw material category** — now one Raw materials total.
+- **Limpet stock and yield distribution** — states of the hold and of the
+  ring rather than session output.  Both stay on the Mining tab, where the
+  question is "how is this run going" and running dry ends it.
+
+The Mining tab keeps every bit of that detail; only the Session view is
+narrower.
+
+### Changed: income is accounted for once, in its own section
+
+The session total appeared twice in the Overview and again as a Credits row,
+while the streams that make it up were scattered across the sections of
+whichever activity produced them — and mined ore was filed under Trade, so a
+mining session read as a trade run.
+
+There is now one Income section, last because it tallies everything above it:
+every earning stream largest-first, then Total earned and the hourly rate.
+Mined sales are told apart from trade by `AvgPricePaid` — ore was never
+bought, so it has no average paid price.
+
+Only **redeemed** vouchers count.  Bounties accrued from `Bounty` events are
+money earned that is still lost on death, so counting them as session income
+counts credits that are not the commander's yet.  Bounties, combat bonds and
+trade vouchers are all recorded when cashed in.
+
+### Changed: further Session view corrections
+
+- **Mining** — the commodity-kinds count and materials-collected total both
+  proved uninteresting and are gone; Refined and Prospected remain.
+- **Exploration** — "Distance" reported a jump count with light-years in the
+  rate column, and its value repeated its own unit: now "Jumps  14  |  812 ly".
+- **On foot** — surface deployment counting removed, same objection as the SRV
+  counter.  Settlements visited and raw materials remain.
+- **Exobiology** — "Bodies with bio" describes where you were rather than what
+  you produced; Samples remains.
+- **Missions** — "Failed" appears only when something failed, rather than
+  standing at a permanent zero.
+
+Every one of these stays in full on the activity's own window.
+
+### Removed: SRV deployment counting
+
+How many times a vehicle was deployed says nothing about what a session
+produced.  Losing one would, and that already arrives as ``SRVDestroyed``.
+The counter, its row and its ``LaunchSRV``/``DockSRV`` subscriptions are gone.
+
+### Changed: the cargo manifest is sorted for jettisoning
+
+Freight is ordered by value per unit, cheapest first.  With a full hold the
+question is what to throw out, and that is answered by whatever is worth least
+per tonne — which was previously buried in the middle of an alphabetical list.
+Prices follow the chosen source: the target station's when one is set,
+galactic average otherwise.
+
+Each row now carries three columns — units, price per unit, line value — at
+fixed widths so the separators line up down the manifest and under the totals.
+
+Limpets are consumables, not freight: never sold, and their count is what says
+whether the run can continue.  They sit below a blank line, immediately above
+the totals, and are excluded from the value sort — at around 100 cr a tonne
+they would otherwise permanently head the jettison list.
+
+### Fixed: SRV cargo was applied to the ship's hold
+
+``Cargo`` fires for the SRV as well, and those events name only a count —
+never an inventory.  Untangled from the ship's, an SRV event with a count
+above zero sent the hold off to re-read ``Cargo.json``, and an SRV ``Count: 0``
+emptied the ship's manifest outright.  In a real journal that is 149 SRV
+events against 12,815 for the ship, so it fired rarely and looked like cargo
+mysteriously vanishing.
+
+SRV tonnage is tracked separately and shown in its own section.  The journal
+gives no inventory for it, so tonnage is all that section can show.
+
+### Fixed: module names read like internal ids
+
+The module list showed "Largecargorack", "Panthermkii Cockpit", "Mkii
+Passengercabin" and "0 Point Defence (Turret)".  Three separate causes:
+
+- Modules with no mapping fell through to title-casing their raw id.  The
+  ones a real 299-module capture turns up are now named — cargo racks,
+  passenger cabins, fighter hangars, vehicle hangars, limpet controllers,
+  abrasion blasters, cargo bay doors.
+- Utility mounts carry no size in game, so prefixing the size digit produced
+  "0 Point Defence".  The prefix is dropped for them, and utility mounts whose
+  id omits the mount type entirely — `hpt_chafflauncher_tiny` — are handled
+  rather than falling through.
+- Cosmetics ride in the same Loadout list as real modules.  The filter matched
+  id prefixes, so anything whose id begins with the ship rather than the item
+  type got through: ship kits, bumpers, spoilers, cockpit skins.  Matching on
+  substrings catches them whatever the ship prefix.  A real 51-entry loadout
+  now yields 39 modules and filters 12 decorations.
+
+### Fixed: the SRV that called itself Testbuggy
+
+Surface vehicles carry Frontier's internal development names in the journal,
+and they are not guessable: ``testbuggy`` is the Scarab and has been since
+2015.  The fallback title-cased the raw id, so "Testbuggy" reached the screen.
+All four are now mapped — Scarab, Scorpion, Nomad and Rhino — with the
+journal's own localised field preferred wherever it supplies one.
+
+---
+
+### Added: a guard against window-registry drift
+
+Windows are declared in four places that have to stay in step — the layout
+model's class registry and display names, the slot grid, and each front end's
+DOM-id and block-class maps.  Every merge in this release left one of those
+behind at least once, and every such failure is silent: the window simply
+never appears, or never refreshes.
+
+`tests/test_layout_windows.py` derives what must line up from the registries
+themselves.  Adding a window without wiring it now fails four tests
+immediately rather than going missing on someone's dashboard.  It also checks
+that every column sums to a full height, that every window has a slot of its
+class, that Preferences > Display offers only class-matching windows, and that
+every repaint target names a live DOM id.
 
 ## Released in 20260905
 

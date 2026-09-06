@@ -33,10 +33,13 @@ from textual.widgets    import Label, TabbedContent, TabPane
 from textual.containers import VerticalScroll
 
 from tui.block_base     import TuiBlock, KVRow, SecHdr, _fmt, _fmt_credits
-from core.summary_model import career_sections
+from core.summary_model import career_sections, session_sections
 
 
+#: Session leads: it is the tab you want on a glance mid-flight, where the
+#: lifetime figures below it change on a scale of weeks.
 _ALL_TABS = [
+    ("Session", "car-tab-session"),
     ("Summary", "car-tab-summary"),
     ("Combat",  "car-tab-combat"),
     ("Explore", "car-tab-explore"),
@@ -95,6 +98,7 @@ class CareerBlock(TuiBlock):
     def refresh_data(self) -> None:
         state = getattr(self.core, "state", None)
 
+        self._refresh_session()
         self._refresh_summary()
 
         # ── Lifetime activity tabs ────────────────────────────────────────────
@@ -103,7 +107,7 @@ class CareerBlock(TuiBlock):
             placeholder = Label("Lifetime scan in progress…",
                                 classes="dim")
             for _title, pane_id in _ALL_TABS:
-                if pane_id == "car-tab-summary":
+                if pane_id in ("car-tab-summary", "car-tab-session"):
                     continue
                 self._repopulate(pane_id, [placeholder])
             return
@@ -566,6 +570,32 @@ class CareerBlock(TuiBlock):
         self._repopulate("car-tab-powerplay", rows)
 
     # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _refresh_session(self) -> None:
+        """This session's running totals, rendered into the Session tab.
+
+        Absorbed from the Session window: session and lifetime figures are
+        the same question over two spans of time, so they share one window
+        and one tab bar rather than two slots.
+        """
+        rows: list = []
+        try:
+            sections = session_sections(self.core)
+        except Exception:
+            sections = []
+        for section in sections:
+            rows.append(SecHdr(section["title"]))
+            for row in section["rows"]:
+                if row["kind"] == "sub":
+                    rows.append(Label(row["label"], classes="dim"))
+                    continue
+                value = row["value"]
+                if row.get("rate"):
+                    value = f"{value}  {row['rate']}"
+                rows.append(KVRow(row["label"], value))
+        if not rows:
+            rows = [Label("No session activity yet", classes="dim")]
+        self._repopulate("car-tab-session", rows)
 
     def _repopulate(self, pane_id: str, rows: list) -> None:
         try:

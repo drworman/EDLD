@@ -19,16 +19,14 @@
     "those here does nothing. Windows left unlisted are simply not shown;",
     "Preferences > Display lists everything available."
   ],
-  "version": 1,
+  "version": 2,
   "slots": {
     "A1": "exploration",
     "A2": "navigation",
     "B1": "commander",
-    "B2": "crew_slf",
-    "B3": "alerts",
-    "B4": "session",
-    "C1": "ship_health",
-    "C2": "cargo",
-    "C3": "engineering"
+    "B2": "status",
+    "B3": "objectives",
+    "C1": "ship_info",
+    "C2": "career"
   }
 }

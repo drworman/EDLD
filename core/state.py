@@ -222,6 +222,9 @@ class MonitorState:
         self.pilot_fid               = ""
         self.pilot_squadron_name     = ""
         self.cargo_target_market     = {}
+        # SRV hold.  The journal reports a count for it and never an
+        # inventory, so this is a tonnage only.
+        self.srv_cargo_count: int    = 0
         self.cargo_target_market_name= ""
         self.cargo_target_market_ts  = 0.0
         self.slf_capi_type           = None

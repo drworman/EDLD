@@ -26,9 +26,12 @@ from __future__ import annotations
 from PySide6.QtWidgets import QTabWidget
 
 from gui.block_base import GuiBlock, RowScroll, _fmt, _fmt_credits
-from core.summary_model import career_sections
+from core.summary_model import career_sections, session_sections
 
+#: Session leads: it is the tab you want at a glance mid-flight, where the
+#: lifetime figures below it change on a scale of weeks.
 _ALL_TABS = [
+    ("Session", "session"),
     ("Summary", "summary"),
     ("Combat",  "combat"),
     ("Explore", "explore"),
@@ -91,13 +94,14 @@ class CareerBlock(GuiBlock):
     def refresh_data(self) -> None:
         state = getattr(self.core, "state", None)
 
+        self._refresh_session()
         self._refresh_summary()
 
         # ── Lifetime activity tabs ────────────────────────────────────────────
         hist = self.core._plugins.get("journal_history")
         if hist is None or not hist.scan_done.is_set():
             for _title, key in _ALL_TABS:
-                if key == "summary":
+                if key in ("summary", "session"):
                     continue
                 self._repopulate(key, [self.text("Lifetime scan in progress…", "dim")])
             return
@@ -533,6 +537,33 @@ class CareerBlock(GuiBlock):
         self._repopulate("powerplay", rows)
 
     # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _refresh_session(self) -> None:
+        """This session's running totals, rendered into the Session tab.
+
+        Absorbed from the Session window: session and lifetime figures are
+        the same question over two spans of time, so they share one window
+        and one tab bar rather than two slots.
+        """
+        try:
+            sections = session_sections(self.core)
+        except Exception:
+            sections = []
+
+        rows: list = []
+        for section in sections:
+            rows.append(self.hdr(section["title"]))
+            for row in section["rows"]:
+                if row["kind"] == "sub":
+                    rows.append(self.text(row["label"], "dim"))
+                    continue
+                value = row["value"]
+                if row.get("rate"):
+                    value = f"{value}  {row['rate']}"
+                rows.append(self.kv(row["label"], value))
+        if not rows:
+            rows = [self.text("No session activity yet", "dim")]
+        self._repopulate("session", rows)
 
     def _repopulate(self, key: str, rows: list) -> None:
         scroll = self._panes.get(key)

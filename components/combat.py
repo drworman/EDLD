@@ -252,6 +252,17 @@ class CombatPlugin(BasePlugin, ActivityProviderMixin):
     def has_activity(self) -> bool:
         return self.kills > 0 or self.deaths > 0 or self.fighter_losses > 0
 
+    def get_session_rows(self) -> list[dict]:
+        """Kills only.
+
+        Bounties accrue here from ``Bounty`` events — money *earned*, which
+        is still lost if the commander dies before cashing it in.  The Income
+        section counts vouchers when they are redeemed, which is the point at
+        which the credits are actually the commander's.
+        """
+        return [r for r in self.get_summary_rows()
+                if r["label"] != "Bounties"]
+
     def get_summary_rows(self) -> list[dict]:
         if not self.has_activity():
             return []

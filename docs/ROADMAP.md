@@ -1,6 +1,6 @@
 # EDLD Roadmap
 
-Last updated: 20260905
+Last updated: 20260906
 
 ---
 
@@ -16,13 +16,21 @@ one layout model and one set of components, so a new dashboard window should be
 added to both rather than to whichever is convenient. `core/summary_model.py`
 and `core/palette.py` exist for the same reason.
 
-**Window consolidation** (20260905) — several windows that duplicated each
-other's rows were folded into the window they belonged with. Assets became
-tabs on Commander, Exobiology nested under the body it describes in
-Exploration, the massacre stack moved beside the session summary it belongs
-to, and Colonisation joined Cargo. Hull, shields and fuel now live only in
-Ship Health, which is also where the ship names itself. No data was dropped;
-an existing `windows.json` naming a removed window is migrated on load.
+**Window consolidation** (20260905–06) — windows that duplicated each other's
+rows were folded into the window they belonged with, and the size classes cut
+from three to two. The set is now seven windows in seven slots, so everything
+is on screen at once and rearranging swaps two windows rather than hiding one.
+
+Assets became tabs on Commander, Exobiology nested under the body it describes
+in Exploration, Cargo and Engineering became tabs on Ship, missions and
+colonisation became the Objectives window, Session became Career's first tab,
+and Crew / SLF merged with Alerts. Hull, shields and fuel live on Commander's
+Info tab, which is the default view and therefore the one place they cost
+nothing to reach.
+
+No data was dropped. A `windows.json` from before this release describes a
+window set and a slot grid that no longer exist, so it is replaced with the
+current defaults and rewritten once, on the next launch.
 
 **Spansh fleet-carrier routing** (20260905) — carrier routing works. The endpoint and parameter names had been correct all
 along; the two list-shaped parameters were being sent as JSON strings where

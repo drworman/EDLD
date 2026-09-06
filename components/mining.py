@@ -487,7 +487,62 @@ class ActivityMiningPlugin(BasePlugin, ActivityProviderMixin):
                 "rate":  f"{carried / cap * 100:.0f}% full" if cap else None,
             })
 
-        # Limpets remaining — the other thing that ends a run.
+        # Limpet stock and yield distribution are states of the hold and of
+        # the ring, not things the session produced.  They stay on the Mining
+        # tab, where the question is "how is this run going".
+
+        # Where this was mined.  Without it the numbers above have no
+        # context — 180 t is excellent in a depleted ring and mediocre in a
+        # pristine one.
+        site = self.ring_context()
+        if site and rows:
+            rows.append({"label": "Site", "value": site, "rate": None})
+        return rows
+
+    def get_session_rows(self) -> list[dict]:
+        """What this session produced, for the Session view.
+
+        Deliberately narrower than the Mining tab.  Where the ore came from —
+        the body, its reserve level, its hotspots — and a line per commodity
+        describe the *place*, not the session, and belong in the window that
+        is about the place.  Cargo currently held is a state of the hold, not
+        something the session produced, and it is already on the Ship window.
+        """
+        rows: list[dict] = []
+        tph = self._tph()
+        if self.tonnes_refined > 0:
+            value_est = self._refined_value_est()
+            rate_parts = []
+            if tph is not None:
+                rate_parts.append(f"{tph:.1f} t/hr")
+            if value_est:
+                rate_parts.append(f"{fmt_credits(value_est)} est.")
+            rows.append({
+                "label": "Refined",
+                "value": f"{self.tonnes_refined:,.0f} t",
+                "rate":  "  ".join(rate_parts) or None,
+            })
+
+        if self.asteroids_prospected > 0:
+            high = self.content_counts.get("High", 0)
+            rows.append({
+                "label": "Prospected",
+                "value": str(self.asteroids_prospected),
+                "rate":  f"{high / self.asteroids_prospected * 100:.0f}% high",
+            })
+
+        return rows
+
+    def get_tab_rows(self) -> list[dict]:
+        # The condensed "Ring" row exists for the Discord summary, where
+        # there is no room to expand it.  The tab has that room and breaks
+        # the same information out in full below, so showing both would just
+        # print the ring twice.
+        rows = [r for r in self.get_summary_rows() if r["label"] != "Site"]
+
+        # Limpet stock belongs here rather than in either summary: on the
+        # Mining tab the question is "how is this run going", and running dry
+        # ends it.
         if self.limpets_remaining is not None and (
                 self.limpets_prospector or self.limpets_collection):
             used = None
@@ -498,21 +553,6 @@ class ActivityMiningPlugin(BasePlugin, ActivityProviderMixin):
                 "value": str(self.limpets_remaining),
                 "rate":  f"{used} used" if used else None,
             })
-
-        # Where this was mined.  Without it the numbers above have no
-        # context — 180 t is excellent in a depleted ring and mediocre in a
-        # pristine one.
-        site = self.ring_context()
-        if site and rows:
-            rows.append({"label": "Site", "value": site, "rate": None})
-        return rows
-
-    def get_tab_rows(self) -> list[dict]:
-        # The condensed "Ring" row exists for the Discord summary, where
-        # there is no room to expand it.  The tab has that room and breaks
-        # the same information out in full below, so showing both would just
-        # print the ring twice.
-        rows = [r for r in self.get_summary_rows() if r["label"] != "Site"]
 
         # Mining sites, ring and planetary under separate headings.  They
         # are different kinds of place — a ring has hotspots you fly into, a

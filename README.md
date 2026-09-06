@@ -41,7 +41,7 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | | |
 |--|--|
 | 💥 **Combat Tracking** | Kills, bounties, combat bonds, deaths, and fighter losses with per-kill timing and faction tally |
-| 🎯 **Mission Board** | Every accepted mission, grouped by type, in the Session window's Missions tab — with the massacre stack summarised by source faction, its stack value and completion status, and full bootstrap on start |
+| 🎯 **Objectives Window** | The mission board and colonisation in one place — every accepted mission grouped by type, the massacre stack summarised by source faction with its value and completion status, and construction sites with their outstanding requirements |
 | 📊 **Session Statistics** | Tabbed activity dashboard — Combat, Trade, Mining, Exploration, Missions, Exobiology, PowerPlay — showing totals and /hr rates |
 | 🖵 **Terminal Dashboard** | Full terminal dashboard with all panels. Runs on any machine with Python and a modern terminal |
 | 🖥️ **Desktop Window** | The same dashboard as a native PySide6 window on Linux, Windows and macOS, with resizable columns, real menus, and full platform window controls |
@@ -51,21 +51,21 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | ⚠️ **Inactivity Warnings** | Alerts on kill rate drop or extended period without kills |
 | ✕ **Session Management** | Optional, opt-in auto-quit of the game on configured triggers — SLF destroyed, low fuel, or low hull. **Solo mode only**; runtime toggle with Ctrl+K |
 | 💵 **Lifetime Financial Ledger** | Journal-derived earnings and spending by category, voucher reconciliation (issued vs redeemed), and carrier-bank flow — built from 27 credit-moving event types because in-game Statistics fields like `Trading.Goods_Sold` are unreliable |
-| 📦 **Cargo Window** | Live ship hold with tonnage gauge, per-item list, stolen-goods flagging and Spansh target-market price comparison — plus a Colonisation tab, so what you are carrying sits beside what the depot still needs |
-| ⚗️ **Engineering Block** | Engineering materials inventory across Raw, Manufactured, and Encoded categories, plus Odyssey ShipLocker contents |
-| 🚀 **Assets Tabs** | Full fleet overview in the Commander window — wallet with At-Risk holdings and net worth, stored ships with loadouts, stored modules, and a tab each for your fleet carrier and squadron carrier |
-| 🧑 **Commander Window** | Commander identity, squadron, home location and PowerPlay standing, with rank progression and the full asset tabs alongside. Adapts to SRV, on-foot and fighter states |
+| 📦 **Cargo** | The Ship window's first tab: the hold sorted cheapest-per-tonne first so the jettison candidate leads, with units, unit price and line value in three columns. Stolen goods flagged, limpets set apart, Spansh target-market price comparison, and the SRV's tonnage alongside when one is out |
+| ⚗️ **Engineering** | The Ship window's third tab: materials across Raw, Manufactured and Encoded categories, plus Odyssey ShipLocker contents |
+| 🚀 **Assets Tabs** | Full fleet overview in the Commander window — wallet with At-Risk holdings and net worth, stored ships with loadouts, stored modules, and a tab each for a fleet carrier and a squadron carrier, shown only when you own one |
+| 🧑 **Commander Window** | Identity, squadron, home location, PowerPlay standing and ship condition — hull, shields and fuel on the default Info tab — with rank progression and the full asset tabs alongside. Adapts to SRV, on-foot and fighter states |
 | 🪪 **Career Block** | Combat / Trade / Exploration / Mercenary / Exobiology rank progression with detail tabs |
-| 📊 **Session Window** | Current-session activity in full detail across combat, exploration, exobiology, mining, trade, missions, on-foot and PowerPlay. Reset with Ctrl+R |
-| 📈 **Career Summary** | Lifetime counterpart to the Session window — the headline figures from every Career tab in one place, built from the same shared model so both read identically at their own scope |
-| 🔧 **Ship Health Window** | The ship's name, ident and type heading its own condition readout: hull, shields, fuel, and every fitted module sorted by power priority then by health ascending, so modules needing repair surface first. Built for neutron hopping |
+| 📊 **Session / Career Window** | This session's output on the first tab — what each activity produced, with every earning stream tallied in one Income section — then lifetime figures across Combat, Explore, Exobio, Mining, Trade, Credits, Carrier and PowerPlay. Reset the session with Ctrl+R |
+| 📈 **Career Summary** | Lifetime headline figures from every Career tab in one place, built from the same shared model as the session view so both read identically at their own scope |
+| 🔧 **Ship Window** | The vessel's name, ident and type heading three tabs — Cargo, Modules and Engineering. Modules are sorted by power priority then by health ascending, so anything needing repair surfaces first. Built for neutron hopping |
 | 🔭 **Exploration Window** | Honk / scan / map state and each body's current and max-if-mapped cartographic value, with that body's exobiology — signals, sampled flora, clonal-distance aid and predicted genera — nested directly beneath it |
-| 👥 **Crew / SLF Block** | NPC crew roster and ship-launched fighter status with correct variant identification |
+| 👥 **Crew / Alerts Window** | NPC crew roster and ship-launched fighter status with correct variant identification, sharing a window with the alert feed beneath it — the two are rarely busy at once |
 | 💰 **At-Risk Holdings Tracker** | Persistent cross-session tracker for unredeemed bounties, combat bonds, trade vouchers, cartography, and exobiology. Survives session resets, zeroed on death |
 | 🛡️ **Unified Data Provider** | Single source of truth for all game state — CAPI › journal › Status.json |
 | 🔐 **CAPI Authentication** | OAuth2 to Frontier's Companion API for authoritative fleet roster, market prices, fleet carrier finance, and squadron identity |
 | 🌐 **Data Contributions** | Opt-in journal uploading to EDDN, EDSM, EDAstro, and Inara |
-| 🏗️ **Colonisation Tracking** | Construction site resource requirements, delivery progress, and Raven Colonial integration (experimental) — in the Cargo window's second tab |
+| 🏗️ **Colonisation Tracking** | Construction site resource requirements, delivery progress, and Raven Colonial integration (experimental) — in the Objectives window's second tab |
 | 🎨 **Themes** | Eight built-in colour themes (default-orange, green, blue, purple, red, yellow, dark, light) plus a documented template for custom themes — all render in both the terminal and desktop interfaces |
 | 🔌 **Plugin Architecture** | Three-tier plugin loader with per-commander data isolation, named config profiles, plugins dialog with enable/disable controls, and a `plugins/` directory for user plugins |
 | 📚 **Native Documentation Viewer** | In-app viewer for all bundled documentation |

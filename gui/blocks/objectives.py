@@ -1,26 +1,17 @@
 """
-gui/blocks/session.py — Session window (Qt).
+gui/blocks/objectives.py — Objectives window (Qt).
 
-Current-session activity, rendered from ``core.summary_model.session_sections()``
-— the same model the Career block's Summary tab renders at lifetime scope, and
-the same one the Textual Session window uses.  Three renderers, one model: a
-section added to the model appears in all of them without any of them changing.
-
-A second tab carries the mission board: the massacre stack exactly as the
-former Massacre Mission Stack window rendered it, followed by every other
-mission the commander is holding, grouped by type.  That window is gone —
-missions are session-scoped work, so they belong beside the session summary
-rather than occupying a panel of their own.
-
-Reset with Ctrl+R, which routes to ``session_stats.on_new_session(0)``.
+What the commander has taken on and has yet to finish: the mission board, and
+colonisation construction sites awaiting deliveries.  Both are work with an
+end state, which is what separates them from the running totals in the Session
+window and from the ship's own contents.
 """
-
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTabWidget
 
-from gui.block_base import GuiBlock, RowScroll
-from core.summary_model import session_sections
+from gui.block_base import GuiBlock, RowScroll, SecHdr
 
 
 def _fmt_rew(v: int) -> str:
@@ -41,47 +32,27 @@ def _strip_target_type(raw: str) -> str:
     return s.strip()
 
 
-
-class SessionBlock(GuiBlock):
-    BLOCK_TITLE = "SESSION"
+class ObjectivesBlock(GuiBlock):
+    BLOCK_TITLE = "OBJECTIVES"
 
     def _build_body(self, layout) -> None:
         self._tabs = QTabWidget()
         self._tabs.setDocumentMode(True)
 
-        self._scroll = RowScroll()
-        self._tabs.addTab(self._scroll, "Session")
-
         self._missions = RowScroll()
         self._tabs.addTab(self._missions, "Missions")
+
+        # Collapse state carried over from the Colonisation window.
+        self._expanded: dict[int, bool] = {}
+        self._expanded_sys: dict[str, bool] = {}
+        self._colon_scroll = RowScroll()
+        self._tabs.addTab(self._colon_scroll, "Colonisation")
 
         layout.addWidget(self._tabs, 1)
 
     def refresh_data(self) -> None:
-        self._refresh_summary()
         self._refresh_massacre()
-
-    def _refresh_summary(self) -> None:
-        try:
-            sections = session_sections(self.core)
-        except Exception:
-            sections = []
-
-        rows: list = []
-        for section in sections:
-            rows.append(self.hdr(section["title"]))
-            for row in section["rows"]:
-                if row["kind"] == "sub":
-                    rows.append(self.text(row["label"], "dim"))
-                    continue
-                value = row["value"]
-                if row.get("rate"):
-                    value = f"{value}  {row['rate']}"
-                rows.append(self.kv(row["label"], value))
-
-        if not rows:
-            rows = [self.text("No session activity yet", "dim")]
-        self._scroll.set_rows(rows)
+        self._refresh_colonisation()
 
     def _refresh_massacre(self) -> None:
         s = self.state
@@ -204,3 +175,108 @@ class SessionBlock(GuiBlock):
                 if detail:
                     rows.append(self.text("      " + "  ·  ".join(detail), "dim"))
         return rows
+
+    def _refresh_colonisation(self) -> None:
+        s       = self.state
+        sites   = getattr(s, "colonisation_sites",              [])
+        cargo   = getattr(s, "cargo_items",                     {})
+        docked  = getattr(s, "colonisation_docked",             False)
+        cur_mid = getattr(s, "_colonisation_current_market_id", None)
+
+        if not sites:
+            self._colon_scroll.set_rows([self.text(
+                "No construction sites tracked.\nDock at a depot to begin.", "dim")])
+            return
+
+        rows: list = []
+
+        active = [s_ for s_ in sites if not s_.get("complete") and not s_.get("failed")]
+        done   = [s_ for s_ in sites if s_.get("complete")]
+        failed = [s_ for s_ in sites if s_.get("failed")]
+
+        # Group active sites by system name
+        sys_order: list[str] = []
+        sys_sites: dict[str, list] = {}
+        for site in active:
+            sys_name = site.get("system") or "Unknown"
+            if sys_name not in sys_sites:
+                sys_order.append(sys_name)
+                sys_sites[sys_name] = []
+            sys_sites[sys_name].append(site)
+
+        for sys_name in sys_order:
+            if sys_name not in self._expanded_sys:
+                self._expanded_sys[sys_name] = True
+            sys_exp = self._expanded_sys[sys_name]
+
+            sys_arrow = "▼" if sys_exp else "▶"
+            rows.append(ClickableHdr(
+                f"{sys_arrow} {sys_name}", self.palette_map,
+                self._on_hdr_click, system_name=sys_name))
+
+            if not sys_exp:
+                continue
+
+            for site in sys_sites[sys_name]:
+                mid        = site.get("market_id")
+                is_current = docked and mid == cur_mid
+                name       = site.get("station") or site.get("system", "Unknown")
+                pct        = round(site.get("progress", 0.0) * 100)
+
+                if mid not in self._expanded:
+                    self._expanded[mid] = True
+                expanded = self._expanded.get(mid, True)
+
+                arrow   = "▼" if expanded else "▶"
+                cur_pfx = "[bold cyan]▶ [/bold cyan]" if is_current else ""
+                hdr_txt = f"  {arrow} {cur_pfx}[bold cyan]{name}[/bold cyan]  {pct}%"
+                rows.append(ClickableHdr(
+                    hdr_txt, self.palette_map, self._on_hdr_click, market_id=mid))
+
+                if not expanded:
+                    continue
+
+                resources  = site.get("resources", {})
+                site_cargo = cargo if is_current else {}
+                if not resources:
+                    rows.append(self.text("     (dock to load requirements)"))
+                    continue
+
+                remaining = [
+                    (k, inf) for k, inf in resources.items()
+                    if inf["provided"] < inf["required"]
+                ]
+                if not remaining:
+                    rows.append(self.text("     [green]All resources delivered![/green]"))
+                    continue
+
+                remaining.sort(key=lambda x: -(x[1]["required"] - x[1]["provided"]))
+                total_rem = 0
+                for key, info in remaining:
+                    display  = info.get("name") or key
+                    needed   = info["required"] - info["provided"]
+                    total_rem += needed
+                    c        = site_cargo.get(key, {})
+                    in_cargo = c.get("count", 0) if isinstance(c, dict) else int(c)
+                    need_str = f"{needed:,} needed"
+                    if in_cargo > 0:
+                        can = min(in_cargo, needed)
+                        need_str += f" ({can:,} in hold)"
+                    if in_cargo >= needed:
+                        kv = self.kv(f"   {display}", f"[green]{need_str}[/green]")
+                    elif in_cargo > 0:
+                        kv = self.kv(f"   {display}", f"[yellow]{need_str}[/yellow]")
+                    else:
+                        kv = self.kv(f"   {display}", need_str)
+                    rows.append(kv)
+                rows.append(self.kv("   Total remaining", f"{total_rem:,} t"))
+
+        for site in done:
+            name = site.get("station") or site.get("system", "Unknown")
+            rows.append(self.text(f"[green]✓ {name} — complete[/green]"))
+
+        for site in failed:
+            name = site.get("station") or site.get("system", "Unknown")
+            rows.append(self.text(f"[red]✗ {name} — failed[/red]"))
+
+        self._colon_scroll.set_rows(rows)

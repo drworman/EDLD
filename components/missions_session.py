@@ -183,6 +183,14 @@ class ActivityMissionsPlugin(BasePlugin, ActivityProviderMixin):
     def has_activity(self) -> bool:
         return self.completed > 0 or self.failed > 0 or self.accepted > 0
 
+    def get_session_rows(self) -> list[dict]:
+        """Accepted and Completed, plus Failed only when it happened.
+
+        A permanent "Failed  0" is a row that never says anything.
+        """
+        return [r for r in self.get_summary_rows()
+                if r["label"] != "Failed" or self.failed]
+
     def get_summary_rows(self) -> list[dict]:
         rows = []
         if self.accepted > 0:

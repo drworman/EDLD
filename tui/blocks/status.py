@@ -1,10 +1,23 @@
-"""tui/blocks/crew_slf.py — NPC Crew and SLF status block."""
+"""
+tui/blocks/status.py — Crew / Alerts window (Textual).
+
+Two readouts that are almost never busy at the same time, so they share one
+window rather than each holding a slot of their own.  Crew and fighter status
+is a short fixed set of rows, empty unless a fighter is deployed or crew is
+hired; alerts are empty until something fires.  No tabs — an alert that needs
+a tab change to see is an alert you miss.
+
+Crew above, alerts flowing beneath.
+"""
 from __future__ import annotations
 from datetime import datetime, timezone
 from textual.app       import ComposeResult
 from textual.widgets   import Label
-from textual.containers import VerticalScroll, Horizontal
-from tui.block_base    import TuiBlock, KVRow, _health_cls, _fmt_credits
+from textual.containers import VerticalScroll, Horizontal, Vertical
+from tui.block_base    import (
+    TuiBlock, KVRow, HRule, SecHdr, _health_cls, _fmt_credits,
+)
+
 # ── Inline helpers (no UI-framework dependency) ───────────────────────────────────────
 
 def hull_css(pct: int) -> str:
@@ -30,9 +43,13 @@ def fmt_crew_active(delta) -> str:
     if days and len(parts) < 2: parts.append(f"{days}d")
     return " ".join(parts) or "<1d"
 
+#: Alert rows kept on screen.  Sized so a burst during combat does not push
+#: the crew readout out of the window.
+_MAX_ROWS = 5
 
-class CrewSlfBlock(TuiBlock):
-    BLOCK_TITLE = "CREW / SLF"
+
+class StatusBlock(TuiBlock):
+    BLOCK_TITLE = "CREW / ALERTS"
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="crew-name-row"):
@@ -44,8 +61,20 @@ class CrewSlfBlock(TuiBlock):
             yield KVRow("Hired",  id="kv-hired")
             yield KVRow("Active", id="kv-active")
             yield KVRow("Paid",   id="kv-paid")
+            # The two halves share a window, so they need a visible seam.
+            # Without one, an alert reads as another crew row.
+            yield KVRow("", "")
+            yield SecHdr("Alerts")
+            yield HRule()
+            with Vertical(id="status-alerts"):
+                for i in range(_MAX_ROWS):
+                    yield Label("", id=f"alert-{i}", classes="alert-entry")
 
     def refresh_data(self) -> None:
+        self._refresh_crew()
+        self._refresh_alerts()
+
+    def _refresh_crew(self) -> None:
         s        = self.state
         has_crew = bool(s.crew_name) and s.crew_active
 
@@ -142,3 +171,18 @@ class CrewSlfBlock(TuiBlock):
             self.query_one(f"#{wid}", Label).update(text)
         except Exception:
             pass
+
+    def _refresh_alerts(self) -> None:
+        alerts = self.core.plugin_call("alerts", "get_alerts") or []
+        for i in range(_MAX_ROWS):
+            try:
+                lbl = self.query_one(f"#alert-{i}", Label)
+            except Exception:
+                continue
+            if i < len(alerts):
+                a       = alerts[i]
+                opacity = self.core.plugin_call("alerts", "opacity_for", a) or 1.0
+                text    = f"{a.get('emoji', '')}  {a.get('text', '')}"
+                lbl.update(f"{text}" if opacity < 0.7 else text)
+            else:
+                lbl.update("")

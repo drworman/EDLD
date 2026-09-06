@@ -90,7 +90,8 @@ def test_limpet_consumption_tracked_across_cargo_updates(plugin):
             {"Name": "drones", "Count": count}]}, plugin.state)
     plugin.on_event({"event": "LaunchDrone", "Type": "Prospector"}, plugin.state)
 
-    row = _rows_by_label(plugin.get_summary_rows())["Limpets left"]
+    # Limpet stock lives on the Mining tab, not in either summary.
+    row = _rows_by_label(plugin.get_tab_rows())["Limpets left"]
     assert row["value"] == "140"
     assert "260 used" in row["rate"]
 
@@ -101,7 +102,7 @@ def test_restocking_does_not_make_consumption_negative(plugin):
         plugin.on_event({"event": "Cargo", "Inventory": [
             {"Name": "drones", "Count": count}]}, plugin.state)
     plugin.on_event({"event": "LaunchDrone", "Type": "Prospector"}, plugin.state)
-    row = _rows_by_label(plugin.get_summary_rows())["Limpets left"]
+    row = _rows_by_label(plugin.get_tab_rows())["Limpets left"]
     assert row["value"] == "600"
     assert row["rate"] is None or "-" not in row["rate"]
 
@@ -117,7 +118,7 @@ def test_cargo_event_without_inventory_is_ignored(plugin):
 def test_no_limpet_row_before_any_mining(plugin):
     plugin.on_event({"event": "Cargo", "Inventory": [
         {"Name": "drones", "Count": 400}]}, plugin.state)
-    assert "Limpets left" not in _rows_by_label(plugin.get_summary_rows())
+    assert "Limpets left" not in _rows_by_label(plugin.get_tab_rows())
 
 
 # ── Ring context ──────────────────────────────────────────────────────────────

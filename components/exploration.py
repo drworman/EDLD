@@ -275,8 +275,10 @@ class ActivityExplorationPlugin(BasePlugin, ActivityProviderMixin):
         rows = []
         if self.jumps > 0:
             rows.append({
-                "label": "Distance",
-                "value": f"{self.jumps} jumps",
+                "label": "Jumps",
+                # The unit is the label now, so repeating it in the value
+                # gave "Jumps  1 jumps".
+                "value": f"{self.jumps:,}",
                 "rate":  f"{self.distance_ly:,.0f} ly",
             })
         if self.bodies_fss_scanned > 0:

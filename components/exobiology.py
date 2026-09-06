@@ -178,6 +178,15 @@ class ActivityExobiologyPlugin(BasePlugin, ActivityProviderMixin):
     def has_activity(self) -> bool:
         return self.samples_analysed > 0 or self.credits_earned > 0
 
+    def get_session_rows(self) -> list[dict]:
+        """Samples analysed — the session's output.
+
+        How many bodies carried biology describes where you were, not what
+        you produced, and it stays on the Exobiology window.
+        """
+        return [r for r in self.get_summary_rows()
+                if r["label"] != "Bodies with bio"]
+
     def get_summary_rows(self) -> list[dict]:
         rows = []
         if self.samples_analysed > 0 or self.credits_earned > 0:

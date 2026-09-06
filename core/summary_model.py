@@ -79,7 +79,8 @@ SECTION_ORDER = (
     "On foot",
     "PowerPlay",
     "Fleet carrier",
-    "Credits",
+    # Income last: it is the tally of everything above it.
+    "Income",
 )
 
 # Activity provider tab title → section title.  The providers were named
@@ -94,7 +95,7 @@ PROVIDER_SECTION = {
     "Missions":    "Missions",
     "Odyssey":     "On foot",
     "PowerPlay":   "PowerPlay",
-    "Income":      "Credits",
+    "Income":      "Income",
 }
 
 
@@ -225,10 +226,15 @@ def _pack(sections: dict) -> list[dict]:
 def session_sections(core) -> list[dict]:
     """Build the current-session view.
 
-    Every registered activity provider contributes its full tab rows to the
-    section its ACTIVITY_TAB_TITLE maps to, so the Session window shows
-    everything the per-activity views would — not the condensed summary
-    rows the Career block used to inline.
+    Each provider contributes its **session** rows — a running account of what
+    the session produced.  It used to contribute ``get_tab_rows()``, the full
+    per-activity detail, which is a different question: a breakdown of the
+    place you are in and every commodity in it belongs in the activity's own
+    window, not in a summary of the session.  That is how ring hotspots and a
+    line per refined commodity ended up here.
+
+    Providers may define ``get_session_rows()`` to say exactly what belongs in
+    this view; those that do not fall back to their condensed summary rows.
     """
     sections: dict[str, list] = {t: [] for t in SECTION_ORDER}
 
@@ -245,22 +251,12 @@ def session_sections(core) -> list[dict]:
     if dur_s > 0:
         overview.append(_row("Duration", _duration(dur_s)))
 
-    income = core._plugins.get("income")
-    total_income = 0
-    if income is not None:
-        total_income = getattr(income, "total_income", 0) or 0
-    if total_income:
-        overview.append(_row("Income", _credits(total_income)))
-        if dur_s >= 60:
-            cph = total_income / (dur_s / 3600.0)
-            overview.append(_row("Income rate", f"{_credits(round(cph))}/hr"))
+    # Income is accounted for once, in its own section — see the Income
+    # provider.  Repeating the total here and again per activity was the same
+    # figure three times over.
 
-    state = getattr(core, "state", None)
-    if state is not None:
-        ship = (getattr(state, "ship_name", None)
-                or (getattr(state, "assets_current_ship", None) or {}).get("type_display"))
-        if ship:
-            overview.append(_row("Ship", str(ship)))
+    # The ship in use is not a session statistic — it is named in the Ship
+    # window's header and in the Commander window.
     sections["Overview"] = overview
 
     # ── Per-activity sections ─────────────────────────────────────────────
@@ -272,7 +268,8 @@ def session_sections(core) -> list[dict]:
         try:
             if not p.has_activity():
                 continue
-            raw = p.get_tab_rows()
+            getter = getattr(p, "get_session_rows", None) or p.get_summary_rows
+            raw = getter()
         except Exception:
             continue
         rows: list = []

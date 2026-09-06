@@ -373,15 +373,12 @@ def build_css(theme_name: str) -> str:
 # Map a layout-model window name to its Textual DOM id.  Single source of the
 # id mapping, shared with tui/app.py.
 BLOCK_DOM_ID = {
-    "engineering":  "block-eng",
     "commander":    "block-commander",
-    "crew_slf":     "block-crew",
-    "alerts":       "block-alerts",
-    "cargo":        "block-cargo",
+    "status":       "block-status",
     "navigation":   "block-nav",
     "career":       "block-career",
-    "session":      "block-session",
-    "ship_health":  "block-ship-health",
+    "ship_info":    "block-ship",
+    "objectives":   "block-objectives",
     "exploration":  "block-exploration",
 }
 
