@@ -49,6 +49,20 @@ def pp_rank_progress(rank: int, total_merits: int) -> tuple:
     return fraction, earned, span, rank + 1
 
 
+def _fmt_health(fraction: float) -> str:
+    """Render a 0.0-1.0 health fraction.
+
+    Wear accumulates slowly, so a module at 99.2% would round to a flat "99%"
+    and look identical to one at 98.6%.  One decimal place is kept below full
+    health to keep that difference visible; a genuinely pristine module shows
+    a clean "100%".
+    """
+    pct = max(0.0, min(1.0, fraction)) * 100
+    if pct >= 99.95:
+        return "100%"
+    return f"{pct:.1f}%"
+
+
 class CommanderBlock(GuiBlock):
     BLOCK_TITLE = "COMMANDER"
 

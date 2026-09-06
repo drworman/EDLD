@@ -218,6 +218,40 @@ class HRule(QFrame):
         self.setFixedHeight(1)
 
 
+class ClickableHdr(SecHdr):
+    """A section header that toggles a collapsible group when clicked.
+
+    Colonisation renders a header per system and per construction site, each
+    of which collapses.  The Qt side referenced this class but never defined
+    it, so every GUI colonisation render raised NameError — the window simply
+    stayed empty.  The terminal side does the same job by walking up from the
+    clicked widget in ``on_click``; Qt has no equivalent bubbling for plain
+    labels, so the callback is carried on the header itself.
+
+    ``system_name`` and ``market_id`` identify which group was clicked and are
+    passed straight back to the callback.
+    """
+
+    def __init__(self, title: str = "", palette: dict | None = None,
+                 on_click=None, *, system_name: str | None = None,
+                 market_id: int | None = None,
+                 parent: QWidget | None = None) -> None:
+        super().__init__(title, palette, parent)
+        self.system_name = system_name
+        self.market_id = market_id
+        self._on_click = on_click
+        self.setCursor(Qt.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event) -> None:      # noqa: N802 (Qt naming)
+        if self._on_click is not None and event.button() == Qt.LeftButton:
+            try:
+                self._on_click(system_name=self.system_name,
+                               market_id=self.market_id)
+            except Exception:
+                pass
+        super().mouseReleaseEvent(event)
+
+
 class TextRow(RowLabel):
     """A free-standing line of text, optionally dimmed or marked up."""
 

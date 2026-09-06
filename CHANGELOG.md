@@ -6,6 +6,45 @@ Last updated: 20260906
 
 ## Released in 20260906
 
+### Fixed: Commander and Crew windows stopped rendering partway down
+
+`_fmt_health` lives in the Ship window, and the hull row that uses it was
+moved to Commander without it.  The module imports cleanly and only fails when
+the row is drawn — and because blocks swallow refresh errors, the window
+simply stopped updating at that point.  Mode and Shields, set before the hull
+row, populated; Hull, Fuel, Home System, Current System, Location, Power and
+PP Rank, all set after it, stayed blank.
+
+Three more of the same kind were found by scanning for it:
+
+- `gui/blocks/commander.py` — the same missing `_fmt_health`.
+- `gui/blocks/status.py` — `PP_RANK_NAMES` and `TextRow`, lost when Crew / SLF
+  merged with Alerts, so the crew rank line raised.
+- `gui/blocks/ship_info.py` — a whole colonisation renderer left behind when
+  colonisation moved to Objectives, calling a helper the module no longer had.
+
+Two were older than this release and had never worked: `ClickableHdr`, which
+the Qt colonisation view has called since before these merges and which was
+never defined anywhere, and `_build_loadout_from_capi_modules`, referenced by
+the CAPI stored-ships path and likewise never written.  Both are implemented.
+
+`tests/test_layout_windows.py` now parses every module under `tui/`, `gui/`,
+`core/`, `components/` and `data/` and fails on any helper or class name used
+but never defined.  Compiling and importing cleanly is not enough to catch
+this; only calling the code was, and nothing called these paths.
+
+### Fixed: repaint routing lost seven plugin mappings
+
+`_PLUGIN_TO_BLOCK` had been reduced to six entries — `crew_slf`, `alerts`,
+`cargo`, `engineering`, `ship_health`, `assets` and `colonisation` were deleted
+rather than retargeted when their windows merged.  An unmapped name falls back
+to repainting every block, so nothing looked broken; the dashboard just
+repainted wholesale on every crew wage payment.  That fallback is exactly what
+hid the omission.
+
+`_all_block_ids()` had drifted the same way, naming a window that no longer
+exists and repeating two others.  It is derived from the id map again.
+
 A layout release.  The window set had accumulated more panels than a screen
 holds, several of them near-empty most of the time, and three size classes to
 arrange them in.  This reduces the set by merging windows with their natural

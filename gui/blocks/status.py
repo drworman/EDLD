@@ -10,12 +10,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
-from gui.block_base import GuiBlock, _health_cls, _fmt_credits
+from gui.block_base import GuiBlock, TextRow, _fmt_credits, _health_cls
 from gui.markup import to_html
 
 
 #: Alert rows kept on screen.  Sized so a burst during combat does not push
 #: the crew readout out of the window.
+#: Crew combat ranks, indexed by the journal's rank number.
+PP_RANK_NAMES = [
+    "Harmless", "Mostly Harmless", "Novice", "Competent", "Expert",
+    "Master", "Dangerous", "Deadly", "Elite",
+    "Elite I", "Elite II", "Elite III", "Elite IV", "Elite V",
+]
+
 _MAX_ROWS = 5
 
 

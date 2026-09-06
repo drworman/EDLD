@@ -11,7 +11,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTabWidget
 
-from gui.block_base import GuiBlock, RowScroll, SecHdr
+from gui.block_base import ClickableHdr, GuiBlock, RowScroll, SecHdr
 
 
 def _fmt_rew(v: int) -> str:
@@ -175,6 +175,22 @@ class ObjectivesBlock(GuiBlock):
                 if detail:
                     rows.append(self.text("      " + "  ·  ".join(detail), "dim"))
         return rows
+
+    def _on_hdr_click(self, *, system_name=None, market_id=None) -> None:
+        """Collapse or expand the group whose header was clicked.
+
+        Qt does not bubble clicks from plain labels the way the terminal side
+        walks up from the clicked widget, so ClickableHdr hands the identity
+        of the group straight back here.
+        """
+        if market_id is not None:
+            self._expanded[market_id] = not self._expanded.get(market_id, True)
+        elif system_name is not None:
+            self._expanded_sys[system_name] = not self._expanded_sys.get(
+                system_name, True)
+        else:
+            return
+        self._refresh_colonisation()
 
     def _refresh_colonisation(self) -> None:
         s       = self.state

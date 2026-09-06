@@ -744,3 +744,62 @@ def test_all_block_ids_is_derived_and_complete():
     ids = tui_app.EdldTui._all_block_ids(None)
     assert set(ids) == set(BLOCK_DOM_ID.values())
     assert len(ids) == len(set(ids)), "duplicate ids would refresh twice"
+
+
+# ── No module may reference a name it does not have ───────────────────────────
+
+def _undefined_names(path: Path) -> list[str]:
+    """Module-level names loaded but never defined, imported or assigned.
+
+    Deliberately conservative: only names that look like helpers or classes
+    (leading underscore, or capitalised) are reported, so ordinary locals
+    resolved at runtime do not produce noise.
+    """
+    import ast
+    import builtins
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    defined = set(dir(builtins)) | {"__file__", "__name__", "__doc__"}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                defined.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defined.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            defined.add(node.id)
+        elif isinstance(node, ast.arg):
+            defined.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            defined.add(node.name)
+        elif isinstance(node, ast.Global):
+            defined.update(node.names)
+
+    used = {n.id for n in ast.walk(tree)
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+    return sorted(n for n in used - defined
+                  if n.startswith("_") or n[:1].isupper())
+
+
+def _source_files():
+    dirs = ("tui", "gui", "core", "components", "data")
+    return sorted(f for d in dirs for f in (ROOT / d).rglob("*.py")
+                  if "__pycache__" not in f.parts)
+
+
+@pytest.mark.parametrize("path", _source_files(),
+                         ids=lambda p: str(p.relative_to(ROOT)))
+def test_no_module_uses_an_undefined_helper(path):
+    """Guards the failure mode that merging windows kept producing.
+
+    Lifting a method into another module leaves its helpers behind.  The
+    result compiles and imports cleanly, then raises NameError on the first
+    call — and because blocks swallow refresh errors, the window simply stops
+    updating partway down with no message anywhere.
+
+    `_fmt_health` reached a release this way: Commander's hull row raised, so
+    every row after it stayed blank while Mode and Shields above it worked.
+    """
+    missing = _undefined_names(path)
+    assert not missing, (
+        f"{path.relative_to(ROOT)} uses undefined name(s): {missing}")

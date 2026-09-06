@@ -61,6 +61,49 @@ SCAN_JOURNALS = 10
 _ARMOUR_GRADES = _ARMOUR_GRADES_MAP
 
 
+def _build_loadout_from_capi_modules(modules: dict) -> list[dict]:
+    """Turn a CAPI ``modules`` mapping into the loadout shape used elsewhere.
+
+    Referenced by the CAPI stored-ships and shipyard paths since before this
+    release but never defined, so populating a stored ship's loadout from CAPI
+    raised NameError.  The journal path already builds the same records; this
+    matches that shape so both feed the Ships tab identically.
+
+    CAPI keys slots by name and wraps each module in a ``module`` object; a
+    slot with no item is skipped rather than rendered as an empty row.
+    """
+    out: list[dict] = []
+    for slot, entry in (modules or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        mod = entry.get("module") or entry
+        item = str(mod.get("name", "") or "")
+        if not item:
+            continue
+
+        eng = {}
+        engineer = mod.get("engineer") or mod.get("modifiers") or {}
+        if isinstance(engineer, dict) and engineer.get("blueprintName"):
+            eng = {
+                "BlueprintName": engineer.get("blueprintName", ""),
+                "Level":         int(engineer.get("level", 0) or 0),
+                "Quality":       float(engineer.get("quality", 0) or 0),
+                "ExperimentalEffect": engineer.get("experimentalEffect", ""),
+                "Modifiers":     engineer.get("modifiers") or [],
+            }
+
+        out.append({
+            "slot":          str(slot),
+            "name_internal": item,
+            "name_display":  normalise_module_name(item),
+            "on":            bool(mod.get("on", True)),
+            "priority":      int(mod.get("priority", 0) or 0),
+            "value":         int(mod.get("value", 0) or 0),
+            "engineering":   eng,
+        })
+    return out
+
+
 class AssetsPlugin(BasePlugin):
     PLUGIN_NAME        = "assets"
     PLUGIN_DISPLAY     = "Assets"
