@@ -74,6 +74,13 @@ _MSG_DISPATCH: dict[str, list[str]] = {
 }
 
 _PLUGIN_TO_BLOCK: dict[str, str] = {
+    "crew_slf":      "block-status",
+    "alerts":        "block-status",
+    "cargo":         "block-ship",
+    "engineering":   "block-ship",
+    "ship_health":   "block-ship",
+    "assets":        "block-commander",
+    "colonisation":  "block-objectives",
     "career":        "block-career",
     "navigation":    "block-nav",
     "status":       "block-status",
@@ -232,11 +239,14 @@ class EdldTui(App):
             self._refresh_block(bid)
 
     def _all_block_ids(self) -> list[str]:
-        return [
-            "block-career", "block-nav", "block-commander", "block-status",
-            "block-ship", "block-objectives", "block-status", "block-exploration",
-            "block-career", "block-ship-health",
-        ]
+        """Every window's DOM id, derived rather than listed by hand.
+
+        The hand-written list had drifted again: it named block-ship-health,
+        which no longer exists, and repeated two ids.  Deriving it from
+        BLOCK_DOM_ID means adding or renaming a window cannot leave a window
+        that never refreshes.
+        """
+        return list(BLOCK_DOM_ID.values())
 
     # ── Actions ───────────────────────────────────────────────────────────────
 

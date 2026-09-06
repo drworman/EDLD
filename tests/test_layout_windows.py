@@ -704,3 +704,43 @@ def test_totals_line_aligns_with_the_manifest(front_end):
     row = _cargo_cols(180, 51_000, 9_180_000)
     totals = f"{'257/257 t':>10} | {'':>9} | {'11.8M cr':>10}"
     assert row.index("|") == totals.index("|")
+
+
+# ── Repaint routing ───────────────────────────────────────────────────────────
+
+def test_every_plugin_refresh_sender_is_mapped():
+    """An unmapped name falls back to repainting the whole dashboard.
+
+    Nothing breaks, but the fallback hides the omission — several mappings
+    were lost in a merge and only surfaced as sluggish repaints.
+    """
+    import re
+    import tui.app as tui_app
+
+    senders = set()
+    for path in (ROOT / "components").glob("*.py"):
+        senders |= set(re.findall(r'plugin_refresh",\s*"([a-z_]+)"',
+                                  path.read_text(encoding="utf-8")))
+    # "capi" is a pseudo-sender handled by its own dispatch entry.
+    senders.discard("capi")
+    unmapped = senders - set(tui_app._PLUGIN_TO_BLOCK)
+    assert not unmapped, f"plugins with no block mapping: {sorted(unmapped)}"
+
+
+def test_plugin_map_targets_are_live_ids():
+    import tui.app as tui_app
+    from tui.theme import BLOCK_DOM_ID
+
+    known = set(BLOCK_DOM_ID.values())
+    dead = {k: v for k, v in tui_app._PLUGIN_TO_BLOCK.items() if v not in known}
+    assert not dead, f"plugin map points at dead ids: {dead}"
+
+
+def test_all_block_ids_is_derived_and_complete():
+    """It was hand-written and had drifted: a dead id and two duplicates."""
+    import tui.app as tui_app
+    from tui.theme import BLOCK_DOM_ID
+
+    ids = tui_app.EdldTui._all_block_ids(None)
+    assert set(ids) == set(BLOCK_DOM_ID.values())
+    assert len(ids) == len(set(ids)), "duplicate ids would refresh twice"
