@@ -91,6 +91,30 @@ class CargoPlugin(BasePlugin):
         if isinstance(saved_prices, dict):
             s.cargo_mean_prices = saved_prices
 
+        # The ship's hold and capacity are only reported by Loadout and by
+        # Ship cargo events, and Elite opens a new journal on every launch.
+        # Resume a save while already in an SRV and the new journal contains
+        # neither — only SRV events — so both have to be recovered.
+        #
+        # The hold comes from what was last seen, because its true contents
+        # are often the result of transfers rather than any single Cargo
+        # event: the last Ship cargo event in the previous journal can say
+        # empty while sixty tonnes were moved aboard afterwards.
+        self._saved_cargo: dict = {}
+        saved = self.storage.read_json("cargo.json") or {}
+        if isinstance(saved, dict):
+            self._saved_cargo = saved
+            if not int(getattr(s, "cargo_capacity", 0) or 0):
+                s.cargo_capacity = int(saved.get("capacity", 0) or 0)
+            if not (getattr(s, "cargo_items", None) or {}):
+                items = saved.get("items")
+                if isinstance(items, dict):
+                    s.cargo_items = items
+
+        # Capacity still falls back to the journals, which is the one place it
+        # is reported outright.
+        self._bootstrap_from_journals()
+
         # Bootstrap current-market data — CAPI first, then Market.json.
         # Merge new prices into the persisted set so visiting an FC (which has a
         # single-item Market.json) doesn't erase prices from previous stations.
@@ -167,7 +191,81 @@ class CargoPlugin(BasePlugin):
                 pass
             _time.sleep(2.0)
 
-    def on_event(self, event: dict, state) -> None:
+    def _bootstrap_from_journals(self) -> None:
+        """Seed ship capacity and hold from the most recent journals on disk.
+
+        Reads newest-first and stops once both are known, so the usual cost is
+        one partial file read.  Only Ship cargo is taken: an SRV manifest here
+        would be the wrong hold entirely.
+        """
+        state = self.core.state
+        need_cap   = not int(getattr(state, "cargo_capacity", 0) or 0)
+        need_items = not (getattr(state, "cargo_items", None) or {})
+        if not (need_cap or need_items):
+            return
+
+        try:
+            jdir = Path(self.core.journal_dir)
+            journals = sorted(jdir.glob("Journal*.log"),
+                              key=lambda p: p.stat().st_mtime, reverse=True)
+        except Exception:
+            return
+
+        for path in journals[:8]:
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+
+            for line in reversed(lines):
+                if '"event"' not in line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                name = ev.get("event")
+
+                if need_cap and name == "Loadout":
+                    cap = ev.get("CargoCapacity")
+                    if cap is not None:
+                        state.cargo_capacity = int(cap)
+                        need_cap = False
+
+                elif (need_items and name == "Cargo"
+                        and str(ev.get("Vessel", "Ship")) == "Ship"):
+                    inv = ev.get("Inventory")
+                    if isinstance(inv, list):
+                        state.cargo_items = {
+                            k: v for k, v in
+                            (_cargo_entry(i) for i in inv) if k
+                        }
+                        need_items = False
+
+                if not (need_cap or need_items):
+                    return
+
+    def on_event(self, event, state, *args, **kwargs):
+        """Dispatch, then persist the ship's hold if it changed.
+
+        Wrapped rather than saved inside each branch because several return
+        early, and a hold that is only sometimes persisted is worse than one
+        that never is.
+        """
+        result = self._on_event(event, state, *args, **kwargs)
+        try:
+            snapshot = {
+                "capacity": int(getattr(state, "cargo_capacity", 0) or 0),
+                "items":    getattr(state, "cargo_items", None) or {},
+            }
+            if snapshot != self._saved_cargo:
+                self._saved_cargo = json.loads(json.dumps(snapshot))
+                self.storage.write_json(self._saved_cargo, "cargo.json")
+        except Exception:
+            pass
+        return result
+
+    def _on_event(self, event: dict, state) -> None:
         core = self.core
         gq   = core.gui_queue
         ev   = event.get("event")

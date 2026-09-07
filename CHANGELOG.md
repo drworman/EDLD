@@ -1,10 +1,34 @@
 # EDLD CHANGELOG
 
-Last updated: 20260906
+Last updated: 20260907
 
 ---
 
-## Released in 20260906
+## Released in 20260907
+
+### Fixed: the ship's cargo vanished after resuming in an SRV
+
+Resume a save while already in a surface vehicle and the new journal contains
+no `Loadout` and no ship `Cargo` event at all — only SRV ones.  A real capture
+of that session ran to 282 events without either.  Since only the current
+journal is replayed, EDLD had no capacity and no manifest, so the Cargo tab
+rendered an empty Ship section with a dash for its totals.
+
+Capacity is now recovered from earlier journals, newest-first, stopping at the
+first `Loadout`.  The hold itself is persisted instead, because no single
+event holds it: the last ship `Cargo` event of the previous session read 71 t
+while transfers afterwards brought it to 110.
+
+### Fixed: resuming in an SRV renamed the commander's ship
+
+`LoadGame` reports the *vehicle* in that case — `"Ship": "MEV_Rhino"`,
+`"Ship_Localised": "SRV Rhino"`, with `ShipName` and `ShipIdent` blank — and
+taking it at face value replaced the ship's identity everywhere it is named.
+
+It also reset `vessel_mode` to "ship" while the commander was plainly in an
+SRV, and no `LaunchSRV` follows a resume to correct it.  A surface vehicle
+reported here now sets the SRV state and leaves the ship's identity alone.
+
 
 ### Fixed: the ship's and the SRV's holds are told apart
 
@@ -42,6 +66,8 @@ a mode-based check silently stopped working after any reload — 60 t aboard
 read 84 after another 24 refines.  The SRV's own `Cargo` events keep arriving
 the whole time it is being filled, which makes them the dependable signal.
 
+
+## Released in 20260906
 
 ### Changed: the desktop window opens at the terminal's proportions
 

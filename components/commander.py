@@ -7,7 +7,7 @@ Dashboard block: commander.
 
 from core.plugin_loader import BasePlugin
 from core.state import RANK_NAMES
-from data.ships import resolve_vehicle_name
+from data.ships import SRV_TYPE_NAMES, resolve_vehicle_name
 from core.emit import Terminal
 
 
@@ -196,7 +196,21 @@ class CommanderPlugin(BasePlugin):
                 state.in_supercruise = False
                 state.offline_since_mono = None
                 state.last_offline_alert = None
-                state.pilot_ship = event.get("Ship_Localised") or event.get("Ship")
+                # Resuming a save while in a surface vehicle reports the
+                # *vehicle* here — "Ship": "MEV_Rhino" — with ShipName and
+                # ShipIdent blank.  Taking that as the ship replaced the
+                # commander's actual vessel with "SRV Rhino" in every window
+                # that names it, and reset vessel_mode to "ship" when they
+                # were plainly in an SRV.
+                raw_ship = str(event.get("Ship", "") or "")
+                if raw_ship.lower() in SRV_TYPE_NAMES:
+                    state.vessel_mode = "srv"
+                    state.srv_type    = (event.get("Ship_Localised")
+                                         or resolve_vehicle_name(raw_ship))
+                    state.srv_hull    = 100
+                else:
+                    state.pilot_ship = (event.get("Ship_Localised")
+                                        or event.get("Ship"))
                 fid = event.get("FID", "")
                 if fid and not state.pilot_fid:
                     state.pilot_fid = fid
@@ -233,9 +247,13 @@ class CommanderPlugin(BasePlugin):
                             pass
                 state.last_shutdown_time = None
                 if event.get("ShipName"):  state.ship_name  = event["ShipName"]
-                state.vessel_mode  = "ship"
-                state.srv_type     = ""
-                state.srv_hull     = 100
+                # Only claim they are in the ship when LoadGame actually said
+                # so.  Resuming in a surface vehicle sets vessel_mode above,
+                # and no LaunchSRV follows to correct a wrong guess here.
+                if state.vessel_mode != "srv":
+                    state.vessel_mode  = "ship"
+                    state.srv_type     = ""
+                    state.srv_hull     = 100
                 state.suit_name    = ""
                 state.suit_loadout = ""
                 state.suit_shields = True

@@ -1211,3 +1211,188 @@ def test_ship_cargo_event_restores_ship_refining():
     plugin.on_event({"event": "MiningRefined", "Type": "$painite_name;",
                      "Type_Localised": "Painite"}, state)
     assert state.cargo_items["painite"]["count"] == 1
+
+
+# ── Ship cargo survives a journal roll ────────────────────────────────────────
+
+def test_capacity_is_recovered_from_an_earlier_journal(tmp_path):
+    """Loadout is only written on the launch that produced it.
+
+    Resume a save while already in an SRV and the new journal has no Loadout
+    and no Ship cargo event at all — only SRV ones — so capacity was unknown
+    for the whole session and the Totals row read as a dash.
+    """
+    import importlib.util
+    import queue
+
+    from core.plugin_loader import BasePlugin
+    from core.state import MonitorState
+
+    (tmp_path / "Journal.2026-09-07T005842.01.log").write_text("\n".join(
+        json.dumps(e) for e in [
+            {"timestamp": "2026-09-07T06:00:00Z", "event": "LoadGame"},
+            {"timestamp": "2026-09-07T06:00:01Z", "event": "Loadout",
+             "CargoCapacity": 300},
+        ]) + "\n", encoding="utf-8")
+    (tmp_path / "Journal.2026-09-07T124429.01.log").write_text("\n".join(
+        json.dumps(e) for e in [
+            {"timestamp": "2026-09-07T17:46:02Z", "event": "LoadGame"},
+            {"timestamp": "2026-09-07T17:46:15Z", "event": "Cargo",
+             "Vessel": "SRV", "Count": 0},
+        ]) + "\n", encoding="utf-8")
+
+    spec = importlib.util.spec_from_file_location(
+        "comp_cargo_boot", ROOT / "components" / "cargo.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cls = next(getattr(mod, n) for n in dir(mod)
+               if isinstance(getattr(mod, n), type)
+               and issubclass(getattr(mod, n), BasePlugin)
+               and getattr(mod, n) is not BasePlugin)
+
+    class Storage:
+        def read_json(self, name=None):
+            return {}
+
+        def write_json(self, data, name=None):
+            pass
+
+    class Core:
+        gui_queue = queue.Queue()
+        journal_dir = str(tmp_path)
+        _plugins: dict = {}
+
+        def register_block(self, *a, **k):
+            pass
+
+        def register_session_provider(self, provider):
+            pass
+
+    core = Core()
+    core.state = MonitorState()
+    plugin = cls()
+    plugin.storage = Storage()
+    plugin.core = core
+    plugin.on_load(core)
+
+    assert core.state.cargo_capacity == 300
+
+
+def test_ship_hold_is_persisted_and_restored():
+    """The hold's true contents are often the result of transfers rather than
+    any single Cargo event, so the last event on disk can say empty while
+    tonnes were moved aboard afterwards."""
+    plugin, state = _cargo_plugin()
+
+    store: dict = {}
+
+    class Storage:
+        def read_json(self, name=None):
+            return store.get(name or "data.json", {})
+
+        def write_json(self, data, name=None):
+            store[name or "data.json"] = data
+
+    plugin.storage = Storage()
+    plugin._saved_cargo = {}
+    state.cargo_capacity = 300
+
+    plugin.on_event({"event": "CargoTransfer", "Transfers": [
+        {"Type": "osmium", "Count": 71, "Direction": "toship"}]}, state)
+
+    saved = store.get("cargo.json")
+    assert saved["capacity"] == 300
+    assert saved["items"]["osmium"]["count"] == 71
+
+
+# ── Resuming in a surface vehicle ─────────────────────────────────────────────
+
+def _commander_plugin():
+    import importlib.util
+    import types
+
+    from core.plugin_loader import BasePlugin
+    from core.state import MonitorState
+
+    spec = importlib.util.spec_from_file_location(
+        "comp_cmdr_srv", ROOT / "components" / "commander.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cls = next(getattr(mod, n) for n in dir(mod)
+               if isinstance(getattr(mod, n), type)
+               and issubclass(getattr(mod, n), BasePlugin)
+               and getattr(mod, n) is not BasePlugin)
+
+    state = MonitorState()
+    state.ship_name = "FOSSOR"
+    state.ship_ident = "T11-FO"
+    state.pilot_ship = "Type-11 Prospector"
+
+    class Core:
+        gui_queue = None
+        _plugins: dict = {}
+        notify_levels: dict = {}
+        active_session = types.SimpleNamespace(fuel_check_time=0,
+                                              fuel_check_level=0)
+
+        class emitter:
+            @staticmethod
+            def emit(**kwargs):
+                pass
+
+        def register_session_provider(self, provider):
+            pass
+
+    plugin = cls()
+    plugin.core = Core()
+    plugin.core.state = state
+    return plugin, state
+
+
+RESUME_IN_SRV = {
+    "timestamp": "2026-09-07T17:46:02Z", "event": "LoadGame",
+    "Commander": "SILVAN HOLLOWAY", "Ship": "MEV_Rhino",
+    "Ship_Localised": "SRV Rhino", "ShipID": 36,
+    "ShipName": "", "ShipIdent": "", "FID": "F1", "_logtime": None,
+}
+
+
+def test_resuming_in_an_srv_keeps_the_ship_identity():
+    """LoadGame reports the *vehicle* when resuming in one, with ShipName and
+    ShipIdent blank.  Taking that as the ship renamed the commander's vessel
+    "SRV Rhino" in every window that names it."""
+    plugin, state = _commander_plugin()
+    try:
+        plugin.on_event(RESUME_IN_SRV, state)
+    except Exception:
+        pass
+
+    assert state.pilot_ship == "Type-11 Prospector"
+    assert state.ship_name == "FOSSOR"
+    assert state.ship_ident == "T11-FO"
+
+
+def test_resuming_in_an_srv_sets_the_vessel_mode():
+    """No LaunchSRV follows, so nothing else would ever correct it."""
+    plugin, state = _commander_plugin()
+    try:
+        plugin.on_event(RESUME_IN_SRV, state)
+    except Exception:
+        pass
+
+    assert state.vessel_mode == "srv"
+    assert state.srv_type == "SRV Rhino"
+
+
+def test_resuming_in_the_ship_still_sets_ship_mode():
+    plugin, state = _commander_plugin()
+    event = dict(RESUME_IN_SRV, Ship="type9_military",
+                 Ship_Localised="Type-11 Prospector",
+                 ShipName="FOSSOR", ShipIdent="T11-FO")
+    try:
+        plugin.on_event(event, state)
+    except Exception:
+        pass
+
+    assert state.vessel_mode == "ship"
+    assert state.pilot_ship == "Type-11 Prospector"
