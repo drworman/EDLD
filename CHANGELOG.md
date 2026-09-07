@@ -6,6 +6,97 @@ Last updated: 20260906
 
 ## Released in 20260906
 
+### Fixed: the ship's and the SRV's holds are told apart
+
+Three faults kept the two confused, all of them surfacing now that the Rhino
+carries a refinery and can hold cargo of its own:
+
+- **Cargo.json was read as the ship's regardless of whose it was.**  The game
+  rewrites that file for whichever hold last changed, so while the commander
+  is in an SRV it holds the SRV's manifest.  It is now only applied to the
+  hold it actually describes.
+- **LoadGame emptied the ship's hold.**  Resuming does not unload anything,
+  and no `Vessel: Ship` cargo event necessarily follows — resume straight
+  into an SRV and only SRV events arrive, so the ship's cargo was lost for
+  the rest of the session with nothing to restore it.
+- **The SRV's manifest froze.**  Most SRV cargo events carry a count and no
+  inventory, so the listing stuck at whatever the last event with one said.
+  The count-only events now take the manifest from Cargo.json, which is the
+  SRV's while the commander is aboard.
+
+The Cargo tab lists both holds under their own headings, each with its own
+totals, so a full ship and a full SRV read at a glance.
+
+### Fixed: ore refined in an SRV was counted twice
+
+The Rhino carries a refinery, and what it refines goes into the SRV's hold,
+not the ship's.  `MiningRefined` credited the ship's manifest regardless, so
+the ore was counted once when it was refined and again when `CargoTransfer`
+moved it across — a hold showing 20 t in game read 40 t in EDLD.
+
+Refining is credited to the ship only when the ship is the hold being filled.
+The vessel the game last reported cargo for decides that, rather than the
+commander's tracked vessel mode: `LoadGame` resets that mode to "ship", and
+resuming a save while already in an SRV emits no `LaunchSRV` to correct it, so
+a mode-based check silently stopped working after any reload — 60 t aboard
+read 84 after another 24 refines.  The SRV's own `Cargo` events keep arriving
+the whole time it is being filled, which makes them the dependable signal.
+
+
+### Changed: the desktop window opens at the terminal's proportions
+
+Column widths lived twice — as literals in the terminal stylesheet, and not at
+all in the desktop window, which handed the job to a pair of nested
+QSplitters.  Qt sized those from widget size hints, so the desktop dashboard
+opened with columns bearing no relation to the terminal's, and one stray drag
+left it permanently lopsided with no way back.
+
+`COLUMN_WIDTH_PCT` in the layout model is now the single definition, read by
+both front ends.  The desktop columns are fixed proportional layouts rather
+than splitters, measured at 34.0 / 32.0 / 34.0 percent against a model of
+34 / 32 / 34.
+
+Which window occupies which slot is still changed through
+Preferences > Display; the geometry itself is not draggable, matching the
+terminal.
+
+
+### Fixed: session boundaries were never detected
+
+A play session ends when the commander stops playing, and the journal records
+that three different ways: a `Shutdown`, a `Music` event with `MainMenu`, or —
+when the client crashed and wrote neither — simply the last event in the file.
+A `LoadGame` more than fifteen minutes later starts a new session.
+
+The check only ever looked at the journal being replayed.  Elite opens a new
+journal on every launch, so the closing marker is always in an earlier file:
+across a 269-journal capture a `LoadGame` never once followed a `Shutdown`
+within the same file, and the comparison could not fire.  Every restart
+therefore inherited the previous session's clock.
+
+The marker is now recovered from the preceding journal before the replay
+begins, covering all three cases, and an exit to the main menu closes the
+session live as a `Shutdown` does.  Validated against 242 real journal
+transitions.
+
+### Fixed: the session clock was saved from the wrong variable
+
+Two clocks existed: the `session_stats` plugin's, which the display reads, and
+`state.session_start_time`.  Persistence wrote a module global that is only
+ever populated by a previous *load*, so the stored value was stale or null.
+
+Worse, the save was unreachable — `state.sessionend()` cleared
+`state.session_start_time` on the line immediately above the `if` that guarded
+on it.  The clock is now read before it is cleared, and the plugin's value is
+what gets written.
+
+### Changed: the dashboard is drawn before the journal is replayed
+
+Preload fires thousands of events in a few seconds, and each one triggered a
+repaint, so startup flickered through months of history before settling.
+Repaints are held while the replay runs and done once when it finishes.
+
+
 ### Fixed: Commander and Crew windows stopped rendering partway down
 
 `_fmt_health` lives in the Ship window, and the hull row that uses it was
