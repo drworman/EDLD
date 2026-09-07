@@ -73,6 +73,8 @@ class CargoPlugin(BasePlugin):
     ]
 
     def on_load(self, core) -> None:
+        #: Vessel named by the most recent Cargo event — "Ship" or "SRV".
+        self._cargo_vessel = "Ship"
         super().on_load(core)
         core.register_block(self, priority=45)
         s = core.state
@@ -191,8 +193,29 @@ class CargoPlugin(BasePlugin):
                 # count — never an Inventory.  Untangled, an SRV event with
                 # Count > 0 sent the ship's hold off to re-read Cargo.json,
                 # and an SRV Count:0 emptied the ship's hold outright.
-                if str(event.get("Vessel", "Ship")) == "SRV":
+                self._cargo_vessel = str(event.get("Vessel", "Ship"))
+                if self._cargo_vessel == "SRV":
                     state.srv_cargo_count = max(int(event.get("Count", 0) or 0), 0)
+                    # These events usually carry only a count, but the first
+                    # after a load carries the manifest — keep it when it is
+                    # there so the SRV's hold can be listed rather than just
+                    # totalled.
+                    inv = event.get("Inventory")
+                    if isinstance(inv, list):
+                        state.srv_cargo_items = {
+                            k: v for k, v in
+                            (_cargo_entry(i) for i in inv) if k
+                        }
+                    elif state.srv_cargo_count == 0:
+                        state.srv_cargo_items = {}
+                    else:
+                        # Count-only: Cargo.json is the SRV's while the
+                        # commander is aboard, so it carries the manifest the
+                        # event omits.  Without this the listing froze at
+                        # whatever the last event with an Inventory said.
+                        srv_items = _read_cargo_json(core.journal_dir, "SRV")
+                        if srv_items is not None:
+                            state.srv_cargo_items = srv_items
                     if gq: gq.put(("cargo_update", None))
                     return
 
@@ -293,6 +316,21 @@ class CargoPlugin(BasePlugin):
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
             case "MiningRefined":
+                # Refined ore lands in whatever the commander is flying.  An
+                # SRV with a refinery fills its own hold and reports it through
+                # count-only SRV Cargo events, so crediting the ship here
+                # counts the ore twice: once on refine, and again when
+                # CargoTransfer moves it across.
+                #
+                # vessel_mode alone is not enough to tell.  LoadGame resets it
+                # to "ship", and resuming a save while already in an SRV emits
+                # no LaunchSRV to correct it — so after a reload every refine
+                # was credited to the ship again.  Which hold the game last
+                # reported on is the reliable signal, since the SRV's own
+                # Cargo events keep arriving while it is being filled.
+                if self._in_srv(state):
+                    return
+
                 key = _canonicalise_key(event.get("Type", ""))
                 if key:
                     entry = state.cargo_items.setdefault(key, {
@@ -344,9 +382,26 @@ class CargoPlugin(BasePlugin):
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
             case "LoadGame":
-                state.cargo_items = {}
+                # Resuming does not empty the hold, and no Ship cargo event
+                # necessarily follows: resume straight into an SRV and only
+                # SRV events arrive, so clearing here lost the ship's cargo
+                # for the rest of the session with nothing to restore it.
+                items = _read_cargo_json(core.journal_dir, "Ship")
+                if items is not None:
+                    state.cargo_items = items
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
+
+    def _in_srv(self, state) -> bool:
+        """True when refined ore is going into the SRV rather than the ship.
+
+        Two independent signals, because either can be stale on its own: the
+        vessel the game last reported cargo for, and the commander's tracked
+        vessel mode.
+        """
+        if getattr(self, "_cargo_vessel", "Ship") == "SRV":
+            return True
+        return str(getattr(state, "vessel_mode", "")).lower() == "srv"
 
     def _save_mean_prices(self, prices: dict) -> None:
         """Persist accumulated galactic-average prices to plugin storage."""
@@ -423,8 +478,26 @@ def _build_market_info_from_capi(capi_mkt: dict) -> dict:
     }
 
 
-def _read_cargo_json(journal_dir) -> dict | None:
-    """Read Cargo.json and return cargo_items dict or None."""
+def _cargo_entry(item: dict) -> tuple:
+    """(key, record) for one Cargo inventory entry; ("", None) if unusable."""
+    key = _canonicalise_key(item.get("Name", ""))
+    if not key:
+        return "", None
+    return key, {
+        "count":      int(item.get("Count", 1)),
+        "stolen":     bool(item.get("Stolen", False)),
+        "name_local": item.get("Name_Localised") or _fmt_name(key),
+    }
+
+
+def _read_cargo_json(journal_dir, vessel: str = "Ship") -> dict | None:
+    """Read Cargo.json, but only when it describes ``vessel``.
+
+    The file is rewritten for whichever hold last changed, so while the
+    commander is in an SRV it holds the *SRV's* manifest.  Reading it blindly
+    put SRV ore in the ship's hold.  Returns None when the file describes a
+    different vessel, so the caller leaves its own hold alone.
+    """
     if journal_dir is None:
         return None
     path = Path(journal_dir) / "Cargo.json"
@@ -432,6 +505,8 @@ def _read_cargo_json(journal_dir) -> dict | None:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
+        return None
+    if str(data.get("Vessel", "Ship")) != vessel:
         return None
     result = {}
     for item in data.get("Inventory", []):

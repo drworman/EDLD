@@ -383,11 +383,29 @@ class ShipInfoBlock(TuiBlock):
         # never an inventory, so tonnage is all there is to show — saying so
         # beats an empty section that looks like a failed read.
         if self._srv_deployed():
-            srv_used = int(getattr(s, "srv_cargo_count", 0) or 0)
+            srv_items = getattr(s, "srv_cargo_items", None) or {}
+            srv_used  = int(getattr(s, "srv_cargo_count", 0) or 0)
             rows.append(KVRow("", ""))
             rows.append(SecHdr("SRV"))
             rows.append(HRule())
-            rows.append(KVRow("Carrying", f"{srv_used:>4} t"))
+
+            srv_total = 0
+            for key, item in sorted(srv_items.items(),
+                                    key=lambda kv: (mean_prices.get(kv[0], 0),
+                                                    kv[0])):
+                count = int(item.get("count", 0) or 0)
+                price = int(mean_prices.get(key, 0) or 0)
+                line  = price * count
+                srv_total += line
+                name  = ("⚠ " if item.get("stolen") else "") + (
+                    item.get("name_local") or key.title())
+                rows.append(KVRow(name, _cargo_cols(count, price, line)))
+
+            if srv_items:
+                rows.append(KVRow("Totals", _cargo_cols(srv_used, 0, srv_total)
+                                  .replace(f"{_fmt_cr(0):>9}", f"{'':>9}")))
+            else:
+                rows.append(KVRow("Carrying", f"{srv_used:>5} t"))
 
         scroll.mount(*rows)
 
