@@ -222,9 +222,11 @@ class MonitorState:
         self.pilot_fid               = ""
         self.pilot_squadron_name     = ""
         self.cargo_target_market     = {}
-        # SRV hold.  The journal reports a count for it and never an
-        # inventory, so this is a tonnage only.
+        # SRV hold, tracked apart from the ship's.  Most SRV Cargo events
+        # carry only a count; the first after a load carries the manifest, so
+        # both are kept.
         self.srv_cargo_count: int    = 0
+        self.srv_cargo_items: dict   = {}
         self.cargo_target_market_name= ""
         self.cargo_target_market_ts  = 0.0
         self.slf_capi_type           = None
@@ -424,14 +426,30 @@ class MonitorState:
 _session_start_iso: str | None = None
 
 
-def save_session_state(journal_path: Path, active_session: SessionData) -> None:
-    """Write active session counters to STATE_FILE so they can be restored
-    on the next startup if the same journal is still active. Called on
-    Ctrl+C exit; consumed by ``load_session_state`` at startup."""
+def save_session_state(journal_path: Path, active_session: SessionData,
+                       session_start=None) -> None:
+    """Write active session counters to STATE_FILE for the next startup.
+
+    ``session_start`` is the clock that actually drives the display — the
+    session_stats plugin's.  It used to be omitted and the module-global
+    ``_session_start_iso`` written instead, which is only ever populated by a
+    previous *load*.  So the saved start was stale or null, and on restart the
+    session re-armed from the first LoadGame in the journal: the start of the
+    game session rather than the play session.
+
+    Consumed by ``load_session_state`` at startup, which only restores when
+    the same journal is still current.
+    """
     try:
+        start_iso = _session_start_iso
+        if session_start is not None:
+            try:
+                start_iso = session_start.isoformat()
+            except AttributeError:
+                start_iso = str(session_start) or None
         payload = {
             "journal":             str(journal_path),
-            "session_start_time":  _session_start_iso,
+            "session_start_time":  start_iso,
             "kills":               active_session.kills,
             "credit_total":        active_session.credit_total,
             "merits":              active_session.merits,

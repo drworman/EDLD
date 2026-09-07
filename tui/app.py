@@ -146,6 +146,9 @@ class EdldTui(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        #: Set while a repaint was suppressed during preload, so exactly one
+        #: full refresh is done when the replay finishes.
+        self._preload_pending = True
         self._base_title = f"{self._program}  v{self._version}"
         self.title = self._base_title
         self._refresh_all()
@@ -197,6 +200,10 @@ class EdldTui(App):
                     dirty.update(targets)
         except queue.Empty:
             pass
+        if self._preload_active():
+            self._preload_pending = True
+            return
+        self._drain_preload()
         for bid in dirty:
             self._refresh_block(bid)
 
@@ -226,6 +233,23 @@ class EdldTui(App):
         except Exception:
             pass
 
+    def _preload_active(self) -> bool:
+        """True while the journal is still being replayed at startup.
+
+        Preload fires thousands of events in a few seconds.  Repainting on
+        each one makes the dashboard flicker through months of history before
+        settling, so repaints are held until the replay finishes and then
+        done once.
+        """
+        return bool(getattr(getattr(self._core, "state", None),
+                            "in_preload", False))
+
+    def _drain_preload(self) -> None:
+        """Do the single full repaint owed once preload finishes."""
+        if self._preload_pending and not self._preload_active():
+            self._preload_pending = False
+            self._refresh_all()
+
     def _refresh_block(self, block_id: str) -> None:
         try:
             block = self.query_one(f"#{block_id}")
@@ -235,6 +259,9 @@ class EdldTui(App):
             pass
 
     def _refresh_all(self) -> None:
+        if self._preload_active():
+            self._preload_pending = True
+            return
         for bid in self._all_block_ids():
             self._refresh_block(bid)
 

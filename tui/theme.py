@@ -32,9 +32,9 @@ Screen {
 }
 
 /* Column widths: left 34% : centre 32% : right 34%. */
-#col-left   { width: 34%; height: 100%; }
-#col-centre { width: 32%; height: 100%; }
-#col-right  { width: 34%; height: 100%; }
+#col-left   { width: __COL_A__%; height: 100%; }
+#col-centre { width: __COL_B__%; height: 100%; }
+#col-right  { width: __COL_C__%; height: 100%; }
 
 /* Blocks: no auto-height, no margin (border provides visual separation). */
 TuiBlock {
@@ -365,6 +365,11 @@ def build_css(theme_name: str) -> str:
     else:
         palette = _PALETTES.get(theme_name, _PALETTES["default"])
     css = STRUCTURAL_CSS
+    # Column widths come from the layout model so both front ends stay in
+    # step; hard-coding them here let the desktop window drift.
+    from core.layout_model import COLUMN_WIDTH_PCT
+    for col, pct in COLUMN_WIDTH_PCT.items():
+        css = css.replace(f"__COL_{col}__", str(pct))
     for var, colour in palette.items():
         css = css.replace(var, colour)
     return css + "\n" + _height_css()

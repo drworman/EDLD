@@ -803,3 +803,411 @@ def test_no_module_uses_an_undefined_helper(path):
     missing = _undefined_names(path)
     assert not missing, (
         f"{path.relative_to(ROOT)} uses undefined name(s): {missing}")
+
+
+# ── Session boundaries ────────────────────────────────────────────────────────
+
+def _journal(tmp_path, name, events):
+    p = tmp_path / name
+    p.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    return p
+
+
+@pytest.mark.parametrize("closing,label", [
+    ({"timestamp": "2026-09-06T10:00:00Z", "event": "Shutdown"}, "clean quit"),
+    ({"timestamp": "2026-09-06T10:00:00Z", "event": "Music",
+      "MusicTrack": "MainMenu"}, "exit to main menu"),
+])
+def test_session_end_marker_found_in_the_previous_journal(tmp_path, closing, label):
+    """Elite opens a new journal per launch, so the marker is never in the
+    file being replayed."""
+    from core.journal import bootstrap_last_session_end
+    from core.state import MonitorState
+
+    _journal(tmp_path, "Journal.2026-09-06T090000.01.log", [
+        {"timestamp": "2026-09-06T09:00:00Z", "event": "LoadGame"},
+        closing,
+    ])
+    current = _journal(tmp_path, "Journal.2026-09-06T110000.01.log", [
+        {"timestamp": "2026-09-06T11:00:00Z", "event": "LoadGame"},
+    ])
+
+    state = MonitorState()
+    bootstrap_last_session_end(state, tmp_path, current)
+    assert state.last_shutdown_time is not None, label
+    assert state.last_shutdown_time.hour == 10
+
+
+def test_crashed_client_falls_back_to_the_last_event(tmp_path):
+    """No Shutdown and no MainMenu were ever written, so the last event of
+    the previous journal is when play stopped."""
+    from core.journal import bootstrap_last_session_end
+    from core.state import MonitorState
+
+    _journal(tmp_path, "Journal.2026-09-06T090000.01.log", [
+        {"timestamp": "2026-09-06T09:00:00Z", "event": "LoadGame"},
+        {"timestamp": "2026-09-06T09:42:00Z", "event": "FSDJump"},
+    ])
+    current = _journal(tmp_path, "Journal.2026-09-06T110000.01.log", [
+        {"timestamp": "2026-09-06T11:00:00Z", "event": "LoadGame"},
+    ])
+
+    state = MonitorState()
+    bootstrap_last_session_end(state, tmp_path, current)
+    assert state.last_shutdown_time.hour == 9
+    assert state.last_shutdown_time.minute == 42
+
+
+def test_explicit_marker_beats_a_later_ordinary_event(tmp_path):
+    """Events can follow a Shutdown; the marker is still the end of play."""
+    from core.journal import bootstrap_last_session_end
+    from core.state import MonitorState
+
+    _journal(tmp_path, "Journal.2026-09-06T090000.01.log", [
+        {"timestamp": "2026-09-06T09:00:00Z", "event": "LoadGame"},
+        {"timestamp": "2026-09-06T10:00:00Z", "event": "Music",
+         "MusicTrack": "MainMenu"},
+        {"timestamp": "2026-09-06T10:05:00Z", "event": "Shutdown"},
+    ])
+    current = _journal(tmp_path, "Journal.2026-09-06T110000.01.log", [
+        {"timestamp": "2026-09-06T11:00:00Z", "event": "LoadGame"},
+    ])
+
+    state = MonitorState()
+    bootstrap_last_session_end(state, tmp_path, current)
+    assert state.last_shutdown_time.minute == 5
+
+
+def test_no_earlier_journal_leaves_the_marker_unset(tmp_path):
+    from core.journal import bootstrap_last_session_end
+    from core.state import MonitorState
+
+    current = _journal(tmp_path, "Journal.2026-09-06T110000.01.log", [
+        {"timestamp": "2026-09-06T11:00:00Z", "event": "LoadGame"},
+    ])
+    state = MonitorState()
+    bootstrap_last_session_end(state, tmp_path, current)
+    assert state.last_shutdown_time is None
+
+
+def test_saved_session_start_is_the_clock_the_display_reads(tmp_path):
+    """It used to save a module global only ever set by a previous *load*,
+    so the stored start was stale or null and the session re-armed from the
+    game's first LoadGame."""
+    from datetime import datetime, timezone
+    import core.state as core_state
+
+    started = datetime(2026, 9, 6, 11, 30, tzinfo=timezone.utc)
+    saved = {}
+    core_state.save_session_state.__globals__["json"]  # present
+
+    class Session:
+        kills = 0; credit_total = 0; merits = 0; faction_tally = {}
+        kill_interval_total = 0.0; recent_kill_times = []
+        inbound_scan_count = 0; low_cargo_count = 0
+
+    import unittest.mock as mock
+    with mock.patch.object(core_state, "cmdr_data_dir", lambda: tmp_path):
+        core_state.save_session_state(tmp_path / "J.log", Session(), started)
+        saved = json.loads((tmp_path / "session_state.json").read_text())
+    assert saved["session_start_time"] == started.isoformat()
+
+
+# ── Both front ends open at the same proportions ──────────────────────────────
+
+def test_column_widths_are_defined_once():
+    from core.layout_model import COLUMN_WIDTH_PCT, COLUMNS
+
+    assert set(COLUMN_WIDTH_PCT) == set(COLUMNS)
+    assert sum(COLUMN_WIDTH_PCT.values()) == 100
+
+
+def test_tui_css_uses_the_shared_column_widths():
+    """They were hard-coded in the stylesheet, so the desktop window drifted."""
+    from core.layout_model import COLUMN_WIDTH_PCT
+    from tui.theme import build_css
+
+    css = build_css("default")
+    assert "__COL_" not in css, "a column width was left unsubstituted"
+    for dom, col in (("col-left", "A"), ("col-centre", "B"), ("col-right", "C")):
+        assert f"#{dom}" in css
+        line = next(l for l in css.splitlines() if f"#{dom}" in l)
+        assert f"{COLUMN_WIDTH_PCT[col]}%" in line, line
+
+
+def test_gui_columns_match_the_model_proportions():
+    """The desktop window used to let Qt size the columns from widget hints,
+    so it opened nothing like the terminal."""
+    pytest.importorskip("PySide6")
+    import os
+    import queue
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from core.layout_model import COLUMN_WIDTH_PCT, load_assignment, tui_columns
+
+    class State:
+        in_preload = False
+
+        def __getattr__(self, name):
+            if name.startswith("_"):
+                raise AttributeError(name)
+            return None
+
+    class Cfg:
+        config: dict = {}
+
+        def save(self):
+            pass
+
+    class Core:
+        state = State()
+        cfg = Cfg()
+        gui_queue = queue.Queue()
+        journal_dir = "/tmp"
+        _plugins: dict = {}
+        session_providers: list = []
+        app_settings: dict = {}
+
+        def plugin_call(self, *a, **k):
+            return None
+
+        def register_session_provider(self, provider):
+            pass
+
+    QApplication.instance() or QApplication([])
+    from gui.app import BLOCK_ID, EdldWindow
+
+    window = EdldWindow(Core(), "EDLD", "test", "owner", "owner/repo")
+    window.resize(1920, 1013)
+    window.show()
+    QApplication.processEvents()
+    QApplication.processEvents()
+
+    cols = tui_columns(load_assignment())
+    widths = {}
+    for col in COLUMN_WIDTH_PCT:
+        first = cols[col][0][0]
+        widths[col] = window._blocks[BLOCK_ID[first]].parentWidget().width()
+
+    total = sum(widths.values())
+    for col, expected in COLUMN_WIDTH_PCT.items():
+        actual = widths[col] / total * 100
+        assert abs(actual - expected) <= 1, (
+            f"column {col}: {actual:.1f}% vs model {expected}%")
+
+
+def test_gui_layout_is_not_draggable():
+    """Splitters let a stray drag leave the dashboard permanently lopsided.
+
+    Which window sits where is changed through Preferences > Display; the
+    geometry itself is fixed, as it is in the terminal.
+    """
+    source = (ROOT / "gui" / "app.py").read_text(encoding="utf-8")
+    body = source[source.index("def _build_dashboard"):
+                  source.index("# ── Menus")]
+    assert "QSplitter" not in body.replace(
+        "This replaced a pair of nested QSplitters.", "")
+
+
+# ── SRV mining must not credit the ship twice ─────────────────────────────────
+
+def _cargo_plugin():
+    import importlib.util
+    import queue
+
+    from core.plugin_loader import BasePlugin
+
+    spec = importlib.util.spec_from_file_location(
+        "comp_cargo_srv", ROOT / "components" / "cargo.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cls = next(getattr(mod, n) for n in dir(mod)
+               if isinstance(getattr(mod, n), type)
+               and issubclass(getattr(mod, n), BasePlugin)
+               and getattr(mod, n) is not BasePlugin)
+
+    class State:
+        cargo_items: dict = {}
+        srv_cargo_count = 0
+        in_preload = True
+        vessel_mode = "ship"
+
+        def __getattr__(self, name):
+            if name.startswith("_"):
+                raise AttributeError(name)
+            return None
+
+    class Core:
+        gui_queue = queue.Queue()
+        journal_dir = "/nonexistent"
+        _plugins: dict = {}
+
+    plugin = cls()
+    plugin.core = Core()
+    plugin.core.state = State()
+    return plugin, plugin.core.state
+
+
+def test_srv_refining_then_transfer_counts_the_ore_once():
+    """An SRV with a refinery fills its own hold, not the ship's.
+
+    Taken from a real journal: eight ore refined in the Rhino, transferred to
+    the ship, twelve more, transferred again — twenty tonnes aboard.  Crediting
+    the ship on MiningRefined *and* on CargoTransfer showed forty.
+    """
+    plugin, state = _cargo_plugin()
+
+    state.vessel_mode = "srv"
+    for _ in range(8):
+        plugin.on_event({"event": "MiningRefined", "Type": "$osmium_name;",
+                         "Type_Localised": "Osmium"}, state)
+    assert state.cargo_items == {}, "ship hold credited while in the SRV"
+
+    plugin.on_event({"event": "CargoTransfer", "Transfers": [
+        {"Type": "osmium", "Count": 8, "Direction": "toship"}]}, state)
+    assert state.cargo_items["osmium"]["count"] == 8
+
+    for _ in range(12):
+        plugin.on_event({"event": "MiningRefined", "Type": "$osmium_name;",
+                         "Type_Localised": "Osmium"}, state)
+    plugin.on_event({"event": "CargoTransfer", "Transfers": [
+        {"Type": "osmium", "Count": 12, "Direction": "toship"}]}, state)
+
+    assert state.cargo_items["osmium"]["count"] == 20, "ore counted twice"
+
+
+def test_ship_refining_still_credits_the_hold():
+    """Mining from the ship has no transfer step, so the optimistic credit on
+    MiningRefined is the only thing that fills the hold."""
+    plugin, state = _cargo_plugin()
+
+    state.vessel_mode = "ship"
+    for _ in range(5):
+        plugin.on_event({"event": "MiningRefined", "Type": "$painite_name;",
+                         "Type_Localised": "Painite"}, state)
+    assert state.cargo_items["painite"]["count"] == 5
+
+
+# ── The two holds are kept apart ──────────────────────────────────────────────
+
+def test_cargo_json_is_not_read_as_the_ship_when_it_is_the_srv(tmp_path):
+    """Cargo.json is rewritten for whichever hold last changed.
+
+    While the commander is in an SRV it holds the *SRV's* manifest, so reading
+    it blindly put SRV ore in the ship's hold.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "comp_cargo_json", ROOT / "components" / "cargo.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    (tmp_path / "Cargo.json").write_text(json.dumps({
+        "event": "Cargo", "Vessel": "SRV", "Count": 29,
+        "Inventory": [{"Name": "osmium", "Count": 29, "Stolen": 0}],
+    }), encoding="utf-8")
+
+    assert mod._read_cargo_json(tmp_path, "Ship") is None
+    srv = mod._read_cargo_json(tmp_path, "SRV")
+    assert srv["osmium"]["count"] == 29
+
+
+def test_loadgame_does_not_empty_a_hold_it_cannot_refill(tmp_path):
+    """Resuming straight into an SRV means no Ship cargo event ever arrives.
+
+    Clearing on LoadGame lost the ship's cargo for the rest of the session.
+    """
+    plugin, state = _cargo_plugin()
+    plugin.core.journal_dir = str(tmp_path)
+    (tmp_path / "Cargo.json").write_text(json.dumps({
+        "event": "Cargo", "Vessel": "SRV", "Count": 5,
+        "Inventory": [{"Name": "osmium", "Count": 5, "Stolen": 0}],
+    }), encoding="utf-8")
+
+    state.cargo_items = {"osmium": {"count": 31, "stolen": False,
+                                    "name_local": "Osmium"}}
+    plugin.on_event({"event": "LoadGame"}, state)
+    assert state.cargo_items["osmium"]["count"] == 31
+
+
+def test_srv_manifest_tracks_count_only_events(tmp_path):
+    """Most SRV cargo events carry a count and no inventory, so the listing
+    froze at whatever the last event with one said."""
+    plugin, state = _cargo_plugin()
+    plugin.core.journal_dir = str(tmp_path)
+
+    plugin.on_event({"event": "Cargo", "Vessel": "SRV", "Count": 5,
+                     "Inventory": [{"Name": "osmium", "Count": 5,
+                                    "Stolen": 0}]}, state)
+    assert state.srv_cargo_items["osmium"]["count"] == 5
+
+    (tmp_path / "Cargo.json").write_text(json.dumps({
+        "event": "Cargo", "Vessel": "SRV", "Count": 29,
+        "Inventory": [{"Name": "osmium", "Count": 29, "Stolen": 0}],
+    }), encoding="utf-8")
+    plugin.on_event({"event": "Cargo", "Vessel": "SRV", "Count": 29}, state)
+
+    assert state.srv_cargo_count == 29
+    assert state.srv_cargo_items["osmium"]["count"] == 29
+    assert state.cargo_items == {}, "ship hold disturbed by an SRV event"
+
+
+def test_emptied_srv_clears_its_manifest():
+    plugin, state = _cargo_plugin()
+    plugin.on_event({"event": "Cargo", "Vessel": "SRV", "Count": 8,
+                     "Inventory": [{"Name": "osmium", "Count": 8,
+                                    "Stolen": 0}]}, state)
+    plugin.on_event({"event": "Cargo", "Vessel": "SRV", "Count": 0}, state)
+    assert state.srv_cargo_items == {}
+    assert state.srv_cargo_count == 0
+
+
+def test_srv_refining_survives_a_reload_with_no_launchsrv():
+    """Resuming a save while already in an SRV emits no LaunchSRV.
+
+    LoadGame resets vessel_mode to "ship" and nothing corrects it, so a guard
+    that trusted vessel_mode alone started crediting the ship again: a hold of
+    60 t read 84 after 24 more refines.  The vessel the game last reported
+    cargo for keeps arriving throughout, so that is the reliable signal.
+    """
+    plugin, state = _cargo_plugin()
+
+    # In the SRV, filling it.
+    state.vessel_mode = "srv"
+    plugin.on_event({"event": "Cargo", "Vessel": "SRV", "Count": 1}, state)
+    plugin.on_event({"event": "CargoTransfer", "Transfers": [
+        {"Type": "osmium", "Count": 31, "Direction": "toship"}]}, state)
+    assert state.cargo_items["osmium"]["count"] == 31
+
+    # Reload: vessel_mode goes back to "ship" and no LaunchSRV follows.
+    state.vessel_mode = "ship"
+    plugin.on_event({"event": "Cargo", "Vessel": "SRV", "Count": 5,
+                     "Inventory": [{"Name": "osmium", "Count": 5,
+                                    "Stolen": 0}]}, state)
+    for _ in range(24):
+        plugin.on_event({"event": "MiningRefined", "Type": "$osmium_name;",
+                         "Type_Localised": "Osmium"}, state)
+    assert state.cargo_items["osmium"]["count"] == 31, "ship credited again"
+
+    plugin.on_event({"event": "CargoTransfer", "Transfers": [
+        {"Type": "osmium", "Count": 29, "Direction": "toship"}]}, state)
+    assert state.cargo_items["osmium"]["count"] == 60
+
+
+def test_ship_cargo_event_restores_ship_refining():
+    """Docking the SRV reports the ship's hold again, and refining from the
+    ship must resume crediting it."""
+    plugin, state = _cargo_plugin()
+
+    plugin.on_event({"event": "Cargo", "Vessel": "SRV", "Count": 3}, state)
+    plugin.on_event({"event": "MiningRefined", "Type": "$painite_name;"}, state)
+    assert state.cargo_items == {}
+
+    plugin.on_event({"event": "Cargo", "Vessel": "Ship", "Count": 0,
+                     "Inventory": []}, state)
+    plugin.on_event({"event": "MiningRefined", "Type": "$painite_name;",
+                     "Type_Localised": "Painite"}, state)
+    assert state.cargo_items["painite"]["count"] == 1

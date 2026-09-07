@@ -213,6 +213,9 @@ class CommanderPlugin(BasePlugin):
                 # exceeds SESSION_GAP_MINUTES (default 15).
                 from core.state import SESSION_GAP_MINUTES
                 from datetime import timedelta
+                # Set by Shutdown, by an exit to the main menu, or — when the
+                # client crashed and wrote neither — by the last event of the
+                # previous journal, recovered before the replay begins.
                 shutdown_ts = getattr(state, "last_shutdown_time", None)
                 if shutdown_ts and logtime:
                     gap = (logtime - shutdown_ts).total_seconds() / 60
@@ -368,6 +371,10 @@ class CommanderPlugin(BasePlugin):
 
             case "Music" if event.get("MusicTrack") == "MainMenu":
                 state.in_game = False
+                # Exiting to the main menu ends the play session just as a
+                # Shutdown does; if the commander picks a mode again within
+                # the gap threshold it simply continues.
+                state.last_shutdown_time = logtime
                 import time
                 if state.offline_since_mono is None:
                     state.offline_since_mono = time.monotonic()

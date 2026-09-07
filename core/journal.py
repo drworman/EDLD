@@ -431,6 +431,72 @@ def bootstrap_crew(state: MonitorState, journal_dir: Path, trace_mode: bool = Fa
         state.crew_paid_complete = False
 
 
+def bootstrap_last_session_end(
+    state: MonitorState, journal_dir: Path, current: Path,
+    trace_mode: bool = False,
+) -> None:
+    """Find when the previous play session ended, from earlier journals.
+
+    A session ends when the commander stops playing, which the journal records
+    three different ways:
+
+      * ``Shutdown``                     — a clean quit to desktop
+      * ``Music`` with ``MainMenu``      — exited to the main menu
+      * the last event in the file       — the client crashed, so neither of
+                                           the above was ever written
+
+    None of these can be seen from the file being preloaded: Elite opens a new
+    journal on every launch, so the marker always lives in an earlier one.  In
+    a 269-journal capture, a ``LoadGame`` never once followed a ``Shutdown``
+    within the same file, which is why the gap test that reads only the
+    current journal could never fire.
+
+    Sets ``state.last_shutdown_time`` so the ``LoadGame`` handler can compare
+    against it.  Left as None when no earlier journal exists.
+    """
+    try:
+        journals = sorted(journal_dir.glob("Journal*.log"))
+    except OSError:
+        return
+
+    earlier = [j for j in journals if j.name < current.name]
+    if not earlier:
+        return
+
+    marker = None      # Shutdown / MainMenu — an explicit end
+    last_ts = None     # final timestamped event — the crash fallback
+    try:
+        with open(earlier[-1], encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if '"timestamp"' not in line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                stamp = ev.get("timestamp")
+                if not stamp:
+                    continue
+                try:
+                    when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                last_ts = when
+                name = ev.get("event")
+                if name == "Shutdown" or (
+                        name == "Music" and ev.get("MusicTrack") == "MainMenu"):
+                    marker = when
+    except OSError:
+        return
+
+    state.last_shutdown_time = marker or last_ts
+    if trace_mode and state.last_shutdown_time:
+        kind = "explicit" if marker else "last event (no clean exit)"
+        from core import debug as _dbg
+        _dbg.info(f"  [Session] previous session ended "
+                   f"{state.last_shutdown_time.isoformat()} — {kind}")
+
+
 def bootstrap_hull(state: MonitorState, journal_dir: Path, trace_mode: bool = False) -> None:
     """Recover hull integrity from journal history.
 
@@ -1373,6 +1439,10 @@ def monitor_journal(
     print(f"{Terminal.YELL}Journal file:{Terminal.END} {jfile}")
     state.in_preload = True
 
+    # The marker that closes the previous session is always in an earlier
+    # journal, so it has to be recovered before this one is replayed.
+    bootstrap_last_session_end(state, journal_dir, jfile, trace_mode)
+
     with open(jfile, mode="r", encoding="utf-8") as file:
         print("Preloading journal... (Press Ctrl+C to stop)")
         for line in file:
@@ -1644,9 +1714,16 @@ def run_monitor(
 
     except KeyboardInterrupt:
         print("\nExiting...")
+        # Read the clock before sessionend() clears it.  The guard used to be
+        # state.session_start_time, which the line above had just set to None,
+        # so the session was never actually saved.
+        _sess = (core._plugins.get("session_stats")
+                 if core is not None else None)
+        _session_start = (getattr(_sess, "_session_start_time", None)
+                          or state.session_start_time)
         state.sessionend()
-        if state.session_start_time and journal_file:
-            save_session_state(journal_file, active_session)
+        if _session_start and journal_file:
+            save_session_state(journal_file, active_session, _session_start)
 
     except FileNotFoundError:
         _monitor_died("Journal file not found", state, core)

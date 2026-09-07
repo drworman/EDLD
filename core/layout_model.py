@@ -63,6 +63,14 @@ CLASS_WEIGHT = {PANEL: 50, CENTRE: 33}
 
 CLASS_LABEL = {PANEL: "Large", CENTRE: "Centre"}
 
+#: Column widths as percentages of the dashboard, left to right.  Both front
+#: ends read this so the terminal and the desktop window open with identical
+#: proportions; changing it here changes both.  The centre column is slightly
+#: narrower because its windows are label/value rows, while the outer columns
+#: carry tables and routes that benefit from the extra characters.
+COLUMN_WIDTH_PCT: dict[str, int] = {"A": 34, "B": 32, "C": 34}
+
+
 # ── Window registry ─────────────────────────────────────────────────────────
 # Every dashboard window, its size class, and its display title.  Exploration
 # and Exobiology are registered ahead of their widgets so the Display selector

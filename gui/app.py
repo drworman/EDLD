@@ -45,12 +45,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
-from core.layout_model import COLUMNS, load_assignment, tui_columns
+from core.layout_model import (
+    COLUMN_WIDTH_PCT, COLUMNS, load_assignment, tui_columns,
+)
 from core.palette import rgb
 from gui.about import AboutDialog
 from gui.funding import SupportBar
@@ -154,6 +155,9 @@ class EdldWindow(QMainWindow):
         self._github_repo = github_repo
         self._theme = theme
         self._blocks: dict[str, object] = {}
+        #: Set while a repaint was suppressed during preload, so exactly one
+        #: full refresh is done when the replay finishes.
+        self._preload_pending = True
 
         self._base_title = f"{program}  v{version}"
         self.setWindowTitle(self._base_title)
@@ -201,36 +205,44 @@ class EdldWindow(QMainWindow):
     def _build_dashboard(self) -> QWidget:
         """Build the three columns from the shared layout model.
 
-        Columns are QSplitters so a commander can drag a boundary to give a
-        window more room — the desktop equivalent of the size classes the TUI
-        derives from CLASS_WEIGHT.  Initial sizes come from the model's own
-        percentages, so an unmodified window opens with the same proportions
-        the terminal dashboard uses.
+        The arrangement is fixed, matching the terminal dashboard: three
+        columns at the model's own percentages, each window occupying its
+        slot's share of that column.  Which window sits in which slot is
+        changed through Preferences > Display; the geometry itself is not
+        draggable.
+
+        This replaced a pair of nested QSplitters.  Splitters let Qt pick its
+        own initial sizes from widget size hints, so the desktop window opened
+        with columns that bore no relation to the terminal's, and a stray drag
+        left the dashboard permanently lopsided with no way back.
+
+        Stretch factors are the model percentages scaled by 100, because Qt
+        stretch is integral and the raw values are too coarse to hold the
+        ratio once a column has several windows in it.
         """
         cols = tui_columns(load_assignment())
 
-        outer = QSplitter(Qt.Horizontal)
-        outer.setChildrenCollapsible(False)
-        outer.setHandleWidth(3)
+        outer = QWidget()
+        outer_layout = QHBoxLayout(outer)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(3)
 
         for col in COLUMNS:
-            column = QSplitter(Qt.Vertical)
-            column.setChildrenCollapsible(False)
-            column.setHandleWidth(3)
-            sizes: list[int] = []
+            column = QWidget()
+            column_layout = QVBoxLayout(column)
+            column_layout.setContentsMargins(0, 0, 0, 0)
+            column_layout.setSpacing(3)
+
             for block_name, pct in cols[col]:
                 cls = _BLOCK_CLASSES.get(block_name)
                 if cls is None:
                     continue
                 block = cls(self._core, theme=self._theme)
                 self._blocks[BLOCK_ID[block_name]] = block
-                column.addWidget(block)
-                sizes.append(max(1, int(pct)) * 10)
-            if sizes:
-                column.setSizes(sizes)
-            outer.addWidget(column)
+                column_layout.addWidget(block, max(1, int(pct)) * 100)
 
-        outer.setSizes([100, 100, 100])
+            outer_layout.addWidget(column, COLUMN_WIDTH_PCT.get(col, 33) * 100)
+
         return outer
 
     # ── Menus ─────────────────────────────────────────────────────────────────
@@ -329,6 +341,10 @@ class EdldWindow(QMainWindow):
                     dirty.update(targets)
         except queue.Empty:
             pass
+        if self._preload_active():
+            self._preload_pending = True
+            return
+        self._drain_preload()
         for bid in dirty:
             self._refresh_block(bid)
 
@@ -352,6 +368,23 @@ class EdldWindow(QMainWindow):
         """Embed the session status indicator in the window title."""
         self.setWindowTitle(f"{self._base_title}  {symbol}")
 
+    def _preload_active(self) -> bool:
+        """True while the journal is still being replayed at startup.
+
+        Preload fires thousands of events in a few seconds.  Repainting on
+        each one makes the dashboard flicker through months of history before
+        settling, so repaints are held until the replay finishes and then
+        done once.
+        """
+        return bool(getattr(getattr(self._core, "state", None),
+                            "in_preload", False))
+
+    def _drain_preload(self) -> None:
+        """Do the single full repaint owed once preload finishes."""
+        if self._preload_pending and not self._preload_active():
+            self._preload_pending = False
+            self._refresh_all()
+
     def _refresh_block(self, block_id: str) -> None:
         block = self._blocks.get(block_id)
         if block is None:
@@ -364,6 +397,9 @@ class EdldWindow(QMainWindow):
             pass
 
     def _refresh_all(self) -> None:
+        if self._preload_active():
+            self._preload_pending = True
+            return
         for bid in list(self._blocks):
             self._refresh_block(bid)
 
