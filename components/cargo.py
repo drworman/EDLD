@@ -192,32 +192,38 @@ class CargoPlugin(BasePlugin):
             _time.sleep(2.0)
 
     def _bootstrap_from_journals(self) -> None:
-        """Seed ship capacity and hold from the most recent journals on disk.
+        """Recover ship capacity and hold from the journals on disk.
 
-        Reads newest-first and stops once both are known, so the usual cost is
-        one partial file read.  Only Ship cargo is taken: an SRV manifest here
-        would be the wrong hold entirely.
+        The hold cannot be taken from a single event.  Ship cargo events are
+        often count-only — the newest one in a real capture read "71" with no
+        inventory — and the true contents are frequently the product of
+        transfers made afterwards.  Picking one event found an older, emptied
+        snapshot and reported nothing aboard.
+
+        So the recent journals are replayed forward instead: the last cargo
+        event that carried an inventory is the baseline, and every transfer
+        after it is applied.  Sales and jettisons emit their own cargo event,
+        which resets the baseline, so they need no special handling.
         """
         state = self.core.state
-        need_cap   = not int(getattr(state, "cargo_capacity", 0) or 0)
-        need_items = not (getattr(state, "cargo_items", None) or {})
-        if not (need_cap or need_items):
-            return
-
         try:
             jdir = Path(self.core.journal_dir)
             journals = sorted(jdir.glob("Journal*.log"),
-                              key=lambda p: p.stat().st_mtime, reverse=True)
+                              key=lambda p: p.stat().st_mtime)[-4:]
         except Exception:
             return
 
-        for path in journals[:8]:
+        capacity = 0
+        items: dict | None = None
+
+        for path in journals:
             try:
-                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                lines = path.read_text(encoding="utf-8",
+                                       errors="replace").splitlines()
             except OSError:
                 continue
 
-            for line in reversed(lines):
+            for line in lines:
                 if '"event"' not in line:
                     continue
                 try:
@@ -226,24 +232,46 @@ class CargoPlugin(BasePlugin):
                     continue
                 name = ev.get("event")
 
-                if need_cap and name == "Loadout":
+                if name == "Loadout":
                     cap = ev.get("CargoCapacity")
                     if cap is not None:
-                        state.cargo_capacity = int(cap)
-                        need_cap = False
+                        capacity = int(cap)
 
-                elif (need_items and name == "Cargo"
-                        and str(ev.get("Vessel", "Ship")) == "Ship"):
+                elif name == "Cargo" and str(ev.get("Vessel", "Ship")) == "Ship":
                     inv = ev.get("Inventory")
                     if isinstance(inv, list):
-                        state.cargo_items = {
-                            k: v for k, v in
-                            (_cargo_entry(i) for i in inv) if k
-                        }
-                        need_items = False
+                        items = {k: v for k, v in
+                                 (_cargo_entry(i) for i in inv) if k}
 
-                if not (need_cap or need_items):
-                    return
+                elif name == "CargoTransfer" and items is not None:
+                    for tr in ev.get("Transfers") or []:
+                        key = _canonicalise_key(tr.get("Type", ""))
+                        count = int(tr.get("Count", 0) or 0)
+                        if not key or not count:
+                            continue
+                        if str(tr.get("Direction", "")) == "toship":
+                            entry = items.setdefault(key, {
+                                "count": 0, "stolen": False,
+                                "name_local": tr.get("Type_Localised")
+                                              or _fmt_name(key),
+                            })
+                            entry["count"] += count
+                        else:
+                            entry = items.get(key)
+                            if entry:
+                                entry["count"] -= count
+                                if entry["count"] <= 0:
+                                    items.pop(key, None)
+
+        # The journals win over the persisted copy: they are the record the
+        # game itself wrote, and a stale save — or one written during a
+        # session when the hold was not yet known — would otherwise stick.
+        # Persistence remains the fallback for whatever the journals on disk
+        # no longer reach.
+        if capacity:
+            state.cargo_capacity = capacity
+        if items:
+            state.cargo_items = items
 
     def on_event(self, event, state, *args, **kwargs):
         """Dispatch, then persist the ship's hold if it changed.

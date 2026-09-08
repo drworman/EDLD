@@ -14,10 +14,18 @@ of that session ran to 282 events without either.  Since only the current
 journal is replayed, EDLD had no capacity and no manifest, so the Cargo tab
 rendered an empty Ship section with a dash for its totals.
 
-Capacity is now recovered from earlier journals, newest-first, stopping at the
-first `Loadout`.  The hold itself is persisted instead, because no single
-event holds it: the last ship `Cargo` event of the previous session read 71 t
-while transfers afterwards brought it to 110.
+Capacity and hold are now recovered by replaying the recent journals forward.
+No single event holds the hold: ship cargo events are often count-only — the
+newest in a real capture read "71" with no inventory — and the contents are
+frequently the product of transfers made afterwards, which had brought it to
+110.  Reading one event found an older, emptied snapshot and reported nothing
+aboard.
+
+The last cargo event carrying an inventory is the baseline and every transfer
+after it is applied.  Sales and jettisons emit their own cargo event, which
+resets the baseline, so they need no special handling.  The journals win over
+the persisted copy, so a save written while the hold was not yet known cannot
+stick.
 
 ### Fixed: resuming in an SRV renamed the commander's ship
 

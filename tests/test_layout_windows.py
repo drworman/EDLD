@@ -1278,6 +1278,79 @@ def test_capacity_is_recovered_from_an_earlier_journal(tmp_path):
     assert core.state.cargo_capacity == 300
 
 
+def test_hold_recovery_replays_transfers_after_a_count_only_event():
+    """The newest ship cargo event is often count-only.
+
+    A real capture ended with "Count: 71" and no inventory, while transfers
+    afterwards brought the hold to 110.  Picking a single event found an
+    older, emptied snapshot and reported nothing aboard.
+    """
+    import importlib.util
+    import queue
+    import tempfile
+
+    from core.plugin_loader import BasePlugin
+    from core.state import MonitorState
+
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "Journal.2026-09-07T005842.01.log").write_text("\n".join(
+        json.dumps(e) for e in [
+            {"timestamp": "2026-09-07T06:00:00Z", "event": "Loadout",
+             "CargoCapacity": 300},
+            # Baseline: emptied hold, with an inventory.
+            {"timestamp": "2026-09-07T06:11:55Z", "event": "Cargo",
+             "Vessel": "Ship", "Count": 0, "Inventory": []},
+            {"timestamp": "2026-09-07T06:44:15Z", "event": "CargoTransfer",
+             "Transfers": [{"Type": "osmium", "Count": 71,
+                            "Direction": "toship"}]},
+            # Count-only, and not the final state.
+            {"timestamp": "2026-09-07T08:08:36Z", "event": "Cargo",
+             "Vessel": "Ship", "Count": 71},
+            {"timestamp": "2026-09-07T08:49:31Z", "event": "CargoTransfer",
+             "Transfers": [{"Type": "osmium", "Count": 39,
+                            "Direction": "toship"}]},
+        ]) + "\n", encoding="utf-8")
+
+    spec = importlib.util.spec_from_file_location(
+        "comp_cargo_replay", ROOT / "components" / "cargo.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cls = next(getattr(mod, n) for n in dir(mod)
+               if isinstance(getattr(mod, n), type)
+               and issubclass(getattr(mod, n), BasePlugin)
+               and getattr(mod, n) is not BasePlugin)
+
+    class Storage:
+        def read_json(self, name=None):
+            # A poisoned save, written during a session when the hold was
+            # not yet known — the journals must still win.
+            return {"capacity": 300, "items": {}} if name == "cargo.json" else {}
+
+        def write_json(self, data, name=None):
+            pass
+
+    class Core:
+        gui_queue = queue.Queue()
+        journal_dir = str(tmp)
+        _plugins: dict = {}
+
+        def register_block(self, *a, **k):
+            pass
+
+        def register_session_provider(self, provider):
+            pass
+
+    core = Core()
+    core.state = MonitorState()
+    plugin = cls()
+    plugin.storage = Storage()
+    plugin.core = core
+    plugin.on_load(core)
+
+    assert core.state.cargo_capacity == 300
+    assert core.state.cargo_items["osmium"]["count"] == 110
+
+
 def test_ship_hold_is_persisted_and_restored():
     """The hold's true contents are often the result of transfers rather than
     any single Cargo event, so the last event on disk can say empty while
