@@ -424,3 +424,141 @@ def carrier_display_sections(carrier: dict | None,
             ("Carrier data", "Not exposed by the journal or any anonymous API"),
         ]))
     return sections
+
+
+# ── Cargo manifest ────────────────────────────────────────────────────────────
+#
+# Every hold is priced and ordered here, so the ship's and the SRV's manifests
+# cannot answer the same question differently.  Per-unit value is a property of
+# the commodity and the chosen price source; it does not depend on which vessel
+# the tonne happens to be sitting in.
+
+def is_limpet(name: str) -> bool:
+    """True for the limpet/drone commodity, however it is spelled."""
+    return "limpet" in (name or "").lower() or (name or "").lower() == "drones"
+
+
+def cargo_price_context(state) -> dict:
+    """Resolve the price tables once for a whole panel.
+
+    Built from state alone so that every hold rendered in one repaint is
+    priced against the same market and the same source label.
+    """
+    tgt_info  = getattr(state, "cargo_target_market",      {}) or {}
+    tgt_name  = getattr(state, "cargo_target_market_name", "") or ""
+    mkt_info  = getattr(state, "cargo_market_info",        {}) or {}
+    tgt_comms = tgt_info.get("commodities", {}) or {}
+    return {
+        "tgt_comms":   tgt_comms,
+        "gal_comms":   mkt_info.get("commodities", {}) or {},
+        "mean_prices": getattr(state, "cargo_mean_prices", {}) or {},
+        # A target station only prices the manifest once its market has
+        # actually loaded; the name alone is not enough.
+        "has_target_prices": bool(tgt_name) and bool(tgt_comms),
+    }
+
+
+def cargo_manifest(items: dict, ctx: dict) -> tuple[list[dict], list[dict]]:
+    """Enrich, split and order one hold.
+
+    Returns (freight, limpets).  Freight is ordered cheapest per unit first:
+    with a full hold the question is what to jettison, and that is answered by
+    whatever is worth least per tonne.  Limpets are consumables rather than
+    freight — never sold, and their count is what says whether the run can
+    continue — so they are separated out and left alphabetical, which also
+    keeps them from permanently heading the jettison list at ~100 cr a tonne.
+    """
+    gal_comms   = ctx["gal_comms"]
+    tgt_comms   = ctx["tgt_comms"]
+    mean_prices = ctx["mean_prices"]
+
+    freight: list[dict] = []
+    limpets: list[dict] = []
+
+    for key, info in (items or {}).items():
+        count = int(info.get("count", 0) or 0)
+        if count <= 0:
+            continue
+
+        gal = gal_comms.get(key, {})
+        tgt = tgt_comms.get(key, {})
+        name = (gal.get("name_local")
+                or tgt.get("name_local")
+                or info.get("name_local")
+                or key.replace("_", " ").title())
+
+        # Fall back to persisted mean_prices when cargo_market_info has no
+        # entry (docked at an FC, or no station market loaded yet).
+        gal_avg     = int(gal.get("mean_price") or mean_prices.get(key, 0))
+        tgt_sell    = int(tgt.get("sell_price", 0))
+        docked_sell = int(gal.get("sell_price", 0))
+        if ctx["has_target_prices"]:
+            price = tgt_sell or gal_avg
+        else:
+            price = docked_sell or gal_avg
+
+        row = dict(name=name, count=count, price=price,
+                   stolen=bool(info.get("stolen", False)))
+        (limpets if is_limpet(name) else freight).append(row)
+
+    freight.sort(key=lambda x: (x["price"], x["name"].lower()))
+    limpets.sort(key=lambda x: x["name"].lower())
+    return freight, limpets
+
+
+# ── Cargo manifest columns ────────────────────────────────────────────────────
+#
+# Both front ends render the manifest into a right-aligned value, so every row
+# must be exactly the same width or the separators walk across the screen.
+# Keeping the widths in one place is what makes that checkable.
+
+_CARGO_QTY_W   = 10
+_CARGO_PRICE_W = 9
+_CARGO_VALUE_W = 10
+
+
+def fmt_cargo_cr(v) -> str:
+    """Compact credit formatting for the cargo manifest.
+
+    Distinct from fmt_credits(): the manifest rounds thousands to whole units
+    and groups the units column, which keeps the price column inside its nine
+    characters at every magnitude the game produces.
+    """
+    if not v:
+        return "—"
+    v = int(v)
+    if v >= 1_000_000_000: return f"{v/1_000_000_000:.2f}B cr"
+    if v >= 1_000_000:     return f"{v/1_000_000:.1f}M cr"
+    if v >= 1_000:         return f"{v/1_000:.0f}K cr"
+    return f"{v:,} cr"
+
+
+def cargo_cols(count: int, unit_price: int, line_value: int) -> str:
+    """Units | price per unit | line value, at fixed widths."""
+    return (f"{f'{count} t':>{_CARGO_QTY_W}} | "
+            f"{fmt_cargo_cr(unit_price):>{_CARGO_PRICE_W}} | "
+            f"{fmt_cargo_cr(line_value):>{_CARGO_VALUE_W}}")
+
+
+def cargo_totals_cols(tonnage: str, total_value: int) -> str:
+    """The totals line, in the same three columns as the manifest above it.
+
+    A totals row carries no price per unit, so that column is blank rather
+    than zero — but it still has to occupy its full width, or the separators
+    stop lining up with the rows it totals.  Tonnage is passed as text because
+    the ship reads "used/capacity" and a surface vehicle may have no known
+    capacity to divide by.
+    """
+    return (f"{tonnage:>{_CARGO_QTY_W}} | "
+            f"{'':>{_CARGO_PRICE_W}} | "
+            f"{fmt_cargo_cr(total_value):>{_CARGO_VALUE_W}}")
+
+
+def srv_tonnage(used: int, capacity: int) -> str:
+    """Tonnage for a surface vehicle's totals line.
+
+    Reads "used/capacity t" like the ship's when the vehicle's capacity is
+    known, and plain "used t" when it is not — the journal never reports SRV
+    capacity, so for some vehicles there is no honest denominator to print.
+    """
+    return f"{used}/{capacity} t" if capacity else f"{used} t"

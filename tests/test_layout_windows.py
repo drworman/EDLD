@@ -706,6 +706,210 @@ def test_totals_line_aligns_with_the_manifest(front_end):
     assert row.index("|") == totals.index("|")
 
 
+# ── Cargo pricing is a property of the commodity, not the vessel ──────────────
+
+def _price_ctx(docked=None, target=None, target_name=""):
+    """A price context built the way _refresh_cargo builds one."""
+    from core.ui_helpers import cargo_price_context
+
+    class _S:
+        pass
+
+    s = _S()
+    s.cargo_market_info        = docked or {}
+    s.cargo_target_market      = target or {}
+    s.cargo_target_market_name = target_name
+    s.cargo_mean_prices        = {"osmium": 44_051, "tritium": 51_294,
+                                  "alexandrite": 205_143}
+    return cargo_price_context(s)
+
+
+_MARKET = {
+    "station_name": "Metz Enterprise",
+    "star_system":  "Ega",
+    "commodities": {
+        # Real spreads from Metz Enterprise: sell price runs 6x over galactic
+        # average on osmium and well under it on alexandrite, so a hold priced
+        # from the wrong source is wrong in both directions.
+        "osmium":      dict(name_local="Osmium",      sell_price=264_306,
+                            mean_price=44_051),
+        "tritium":     dict(name_local="Tritium",     sell_price=42_374,
+                            mean_price=51_294),
+        "alexandrite": dict(name_local="Alexandrite", sell_price=89_643,
+                            mean_price=205_143),
+        "drones":      dict(name_local="Limpet",      sell_price=0,
+                            mean_price=100),
+    },
+}
+
+
+@pytest.mark.parametrize("ctx_kwargs", [
+    dict(docked=_MARKET),                                  # docked, no target
+    dict(),                                                # galactic average
+    dict(target=_MARKET, target_name="Metz Enterprise"),   # target loaded
+    dict(docked=_MARKET, target_name="Elsewhere"),         # target not loaded
+])
+def test_srv_hold_is_priced_like_the_ship_hold(ctx_kwargs):
+    """The SRV manifest quoted galactic average while the ship quoted the
+    station's sell price.
+
+    It was invisible because both numbers were plausible and the panel prints
+    one price-source label above both sections, so the SRV rows looked like
+    they came from the market named in the header.  On osmium at Metz
+    Enterprise that is 44,051 against 264,306 for the same tonne.
+    """
+    from core.ui_helpers import cargo_manifest
+
+    ctx  = _price_ctx(**ctx_kwargs)
+    hold = {"osmium": {"count": 20}, "alexandrite": {"count": 4},
+            "tritium": {"count": 60}}
+    srv  = {"osmium": {"count": 33}, "alexandrite": {"count": 2},
+            "tritium": {"count": 5}}
+
+    ship_prices = {x["name"]: x["price"] for x in cargo_manifest(hold, ctx)[0]}
+    srv_prices  = {x["name"]: x["price"] for x in cargo_manifest(srv,  ctx)[0]}
+    assert ship_prices == srv_prices
+
+
+def test_srv_freight_sorts_cheapest_per_unit_first():
+    """The SRV sorted on galactic average while the ship sorted on the
+    resolved price, so the two manifests could disagree about what to
+    jettison first."""
+    from core.ui_helpers import cargo_manifest
+
+    ctx  = _price_ctx(docked=_MARKET)
+    hold = {"osmium": {"count": 20}, "alexandrite": {"count": 4},
+            "tritium": {"count": 60}}
+    srv  = {"osmium": {"count": 33}, "alexandrite": {"count": 2},
+            "tritium": {"count": 5}}
+
+    order = lambda items: [x["name"] for x in cargo_manifest(items, ctx)[0]]
+    assert order(hold) == order(srv) == ["Tritium", "Alexandrite", "Osmium"]
+
+
+def test_srv_limpets_are_separated_like_the_ships():
+    """The SRV section had no limpet handling at all, so limpets sorted into
+    the manifest and headed the jettison list at ~100 cr a tonne."""
+    from core.ui_helpers import cargo_manifest
+
+    ctx = _price_ctx(docked=_MARKET)
+    freight, limpets = cargo_manifest(
+        {"osmium": {"count": 33}, "drones": {"count": 8}}, ctx)
+    assert [x["name"] for x in freight] == ["Osmium"]
+    assert [x["name"] for x in limpets] == ["Limpet"]
+
+
+def test_a_hold_priced_from_galactic_average_orders_differently():
+    """Sanity check that the fixture actually exercises the branch: osmium is
+    the cheapest tonne on galactic average and the dearest at the station."""
+    from core.ui_helpers import cargo_manifest
+
+    hold = {"osmium": {"count": 20}, "alexandrite": {"count": 4},
+            "tritium": {"count": 60}}
+    gal = [x["name"] for x in cargo_manifest(hold, _price_ctx())[0]]
+    stn = [x["name"] for x in cargo_manifest(hold, _price_ctx(docked=_MARKET))[0]]
+    assert gal[0] == "Osmium" and stn[-1] == "Osmium"
+
+
+@pytest.mark.parametrize("front_end", ["tui", "gui"])
+def test_both_holds_are_priced_through_the_shared_path(front_end):
+    """Structural guard, not a behaviour check.
+
+    The bug was two price expressions in one method, eighty lines apart: the
+    ship's resolved a target or docked sell price, the SRV's only ever read
+    cargo_mean_prices.  Asserting on cargo_manifest() alone would not catch a
+    future edit that open-codes a price lookup in the block again, so this
+    asserts the shape: exactly one price context per repaint, one manifest
+    call per hold, and no local price arithmetic left behind.
+    """
+    source = (ROOT / front_end / "blocks" / "ship_info.py").read_text(
+        encoding="utf-8")
+    # Count call sites only: not the import that brings the names in, and not
+    # the comments that explain them.
+    source = "\n".join(ln for ln in source.splitlines()
+                       if not ln.lstrip().startswith(("from ", "import ", "#"))
+                       and "is_limpet)" not in ln)
+
+    assert source.count("cargo_price_context(") == 1, \
+        "one price context per panel, so both holds quote the same market"
+    assert source.count("cargo_manifest(") == 2, \
+        "one manifest call for the ship's hold and one for the SRV's"
+    for leftover in ("mean_prices.get(", "sell_price", "mean_price"):
+        assert leftover not in source, \
+            f"{leftover!r} is priced in core.ui_helpers now, not in the block"
+
+    # The totals lines are formatted by the shared helper too — the SRV's was
+    # built by formatting a zero price and string-replacing it back out.
+    assert ".replace(" not in source, \
+        "totals columns come from cargo_totals_cols(), not string surgery"
+    assert source.count("cargo_totals_cols(") == 3, \
+        "one totals line for the ship and two for the SRV's two branches"
+
+
+# ── Totals lines and SRV capacity ─────────────────────────────────────────────
+
+def test_totals_line_uses_the_manifest_column_widths():
+    """The SRV totals line was built by formatting a zero price and then
+    string-replacing it back out.  It worked, but it broke the moment the
+    credit formatter's output width changed."""
+    from core.ui_helpers import cargo_cols, cargo_totals_cols
+
+    widths = {len(cargo_cols(c, p, c * p))
+              for c, p in ((1, 10), (180, 51_000), (1_800, 1_500_000))}
+    widths |= {len(cargo_totals_cols("62/256 t", 5_286_120)),
+               len(cargo_totals_cols("33/72 t",  8_722_098)),
+               len(cargo_totals_cols("33 t",     0))}
+    assert len(widths) == 1, f"totals line does not match the manifest: {widths}"
+
+
+def test_totals_line_leaves_the_price_column_blank():
+    """A totals row has no price per unit, but the column still has to hold
+    its width or the separators stop lining up with the rows above."""
+    from core.ui_helpers import cargo_totals_cols
+
+    rendered = cargo_totals_cols("62/256 t", 5_286_120)
+    assert rendered.count("|") == 2
+    assert "0 cr" not in rendered and "—" not in rendered.split("|")[1]
+    assert rendered.split("|")[1].strip() == ""
+
+
+@pytest.mark.parametrize("vehicle,expected", [
+    ("mev_rhino",               72),   # read off the in-game panels
+    ("SRV Rhino",               72),   # state records the display name
+    ("testbuggy",                4),
+    ("combat_multicrew_srv_01",  2),
+    ("lander01",                 0),   # Nomad: no confirmed figure
+    ("",                         0),
+    (None,                       0),
+])
+def test_srv_cargo_capacity_resolves_by_id_or_display_name(vehicle, expected):
+    """state.srv_type holds a localised display name, not the journal id, so
+    the lookup has to accept both."""
+    from data.ships import srv_cargo_capacity
+
+    assert srv_cargo_capacity(vehicle) == expected
+
+
+def test_srv_tonnage_omits_an_unknown_denominator():
+    """The journal never reports SRV capacity — not on LaunchSRV, not on
+    Cargo, not in Status.json — so for a vehicle with no confirmed figure the
+    manifest shows plain tonnage rather than a denominator that might be
+    wrong.  A wrong one would read as a full hold while there was room."""
+    from core.ui_helpers import srv_tonnage
+
+    assert srv_tonnage(33, 72) == "33/72 t"
+    assert srv_tonnage(33, 0)  == "33 t"
+
+
+def test_the_rhino_capacity_covers_what_the_journals_actually_show():
+    """Third-party references say 24 t.  Real journals run smoothly past 24
+    to a high-water mark of 68 t, so a 24 t denominator would have shown a
+    283%-full hold."""
+    from data.ships import srv_cargo_capacity
+
+    assert srv_cargo_capacity("mev_rhino") >= 68
+
+
 # ── Repaint routing ───────────────────────────────────────────────────────────
 
 def test_every_plugin_refresh_sender_is_mapped():

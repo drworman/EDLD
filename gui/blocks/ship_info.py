@@ -29,6 +29,10 @@ component.
 from __future__ import annotations
 
 from core.state import FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD
+from core.ui_helpers import (cargo_cols, cargo_manifest,
+                             cargo_price_context, cargo_totals_cols,
+                             fmt_cargo_cr, is_limpet, srv_tonnage)
+from data.ships       import srv_cargo_capacity
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QPushButton, QTabWidget, QVBoxLayout, QWidget,
@@ -63,30 +67,19 @@ _TABS = [
 ]
 
 
-def _fmt_cr(v) -> str:
-    """Compact credit formatting for the cargo manifest."""
-    if not v:
-        return "—"
-    v = int(v)
-    if v >= 1_000_000_000: return f"{v/1_000_000_000:.2f}B cr"
-    if v >= 1_000_000:     return f"{v/1_000_000:.1f}M cr"
-    if v >= 1_000:         return f"{v/1_000:.0f}K cr"
-    return f"{v:,} cr"
+# Re-exported from core.ui_helpers so both front ends and both holds share one
+# set of column widths; imported from here by tests and by the rest of this
+# module.
+_fmt_cr     = fmt_cargo_cr
+_cargo_cols = cargo_cols
 
 
-def _cargo_cols(count: int, unit_price: int, line_value: int) -> str:
-    """Units | price per unit | line value, at fixed widths.
-
-    Nine characters of tonnage, matching the "used/capacity t" the Totals
-    line puts in the same column, so the separators line up on every row.
-    """
-    return (f"{f'{count} t':>10} | {_fmt_cr(unit_price):>9} "
-            f"| {_fmt_cr(line_value):>10}")
 
 
-def _is_limpet(name: str) -> bool:
-    """True for the limpet/drone commodity, however it is spelled."""
-    return "limpet" in (name or "").lower() or (name or "").lower() == "drones"
+
+# Re-exported from core.ui_helpers so the ship and SRV manifests share one
+# definition; imported from here by tests and by the rest of this module.
+_is_limpet = is_limpet
 
 
 class ShipInfoBlock(GuiBlock):
@@ -285,12 +278,11 @@ class ShipInfoBlock(GuiBlock):
         tgt_info  = getattr(s, "cargo_target_market", {})
         tgt_name  = getattr(s, "cargo_target_market_name", "") or ""
         mkt_info  = getattr(s, "cargo_market_info", {})
-        tgt_comms = tgt_info.get("commodities", {})
-        gal_comms = mkt_info.get("commodities", {})
-        # has_target_name: user has selected a station (show its name in header)
-        # has_target_prices: station market data was loaded (use for prices)
-        has_target_name   = bool(tgt_name)
-        has_target_prices = has_target_name and bool(tgt_comms)
+        # has_target_name drives the header label only: the station's name is
+        # shown as soon as one is selected, but pricing waits for its market to
+        # load.  That distinction lives in cargo_price_context() now, so the
+        # two holds below cannot disagree about which market they are quoting.
+        has_target_name = bool(tgt_name)
 
         if has_target_name:
             stn  = tgt_info.get("station_name", "") or ""
@@ -313,40 +305,10 @@ class ShipInfoBlock(GuiBlock):
         # its own.  No special-case notice.
 
         # ── Build enriched item list ──────────────────────────────────────────
-        enriched = []
-        mean_prices = getattr(s, "cargo_mean_prices", {}) or {}
-        for key, info in items.items():
-            count = info.get("count", 0)
-            if count <= 0:
-                continue
-            gal  = gal_comms.get(key, {})
-            tgt  = tgt_comms.get(key, {})
-            name = (gal.get("name_local")
-                    or tgt.get("name_local")
-                    or info.get("name_local")
-                    or key.replace("_", " ").title())
-            # Fall back to persisted mean_prices when cargo_market_info has no entry
-            # (e.g. when docked at FC or no station market loaded yet)
-            gal_avg     = int(gal.get("mean_price") or mean_prices.get(key, 0))
-            tgt_sell    = int(tgt.get("sell_price", 0))
-            docked_sell = int(gal.get("sell_price", 0))
-            if has_target_prices:
-                price = tgt_sell or gal_avg
-            else:
-                price = docked_sell or gal_avg
-            stolen = info.get("stolen", False)
-            enriched.append(dict(name=name, count=count,
-                                 price=price, stolen=stolen))
-
-        # Limpets are consumables rather than freight — never sold, and their
-        # count is what tells you whether the run can continue — so they sit
-        # apart, below a blank line and immediately above the totals.
-        limpets  = [x for x in enriched if _is_limpet(x["name"])]
-        enriched = [x for x in enriched if not _is_limpet(x["name"])]
-
-        # Cheapest per unit first.  With a full hold the question is what to
-        # jettison, and that is answered by whatever is worth least per tonne.
-        enriched.sort(key=lambda x: (x["price"], x["name"].lower()))
+        # One price context for the whole panel, so every hold below is valued
+        # against the same market the header names.
+        price_ctx = cargo_price_context(s)
+        enriched, limpets = cargo_manifest(items, price_ctx)
 
         # ── Render rows: qty  |  credits ─────────────────────────────────────
         # The ship's hold is one section and the SRV's is another; heading
@@ -381,7 +343,7 @@ class ShipInfoBlock(GuiBlock):
         cr_total = _fmt_cr(total) if total else "—"
         rows.append(self.kv("", ""))          # blank spacer row
         rows.append(self.rule())              # visible separator line
-        rows.append(self.kv("Totals", f"{cap_str:>10} | {'':>9} | {cr_total:>10}"))
+        rows.append(self.kv("Totals", cargo_totals_cols(cap_str, total)))
 
         # ── SRV hold ─────────────────────────────────────────────────────────
         # Only while an SRV is out.  The journal reports a count for it and
@@ -393,24 +355,39 @@ class ShipInfoBlock(GuiBlock):
             rows.append(self.hdr("SRV"))
             rows.append(self.rule())
 
+            # Same price context and the same ordering rules as the ship's
+            # hold: a tonne is worth what the chosen market pays for it,
+            # whichever vessel is carrying it.
+            srv_freight, srv_limpets = cargo_manifest(srv_items, price_ctx)
+
             srv_total = 0
-            for key, item in sorted(srv_items.items(),
-                                    key=lambda kv: (mean_prices.get(kv[0], 0),
-                                                    kv[0])):
-                count = int(item.get("count", 0) or 0)
-                price = int(mean_prices.get(key, 0) or 0)
-                line  = price * count
+            for item in srv_freight:
+                count  = item["count"]
+                price  = item["price"]
+                line   = price * count
                 srv_total += line
-                name  = ("⚠ " if item.get("stolen") else "") + (
-                    item.get("name_local") or key.title())
+                name   = ("⚠ " if item["stolen"] else "") + item["name"]
                 rows.append(self.kv(name, _cargo_cols(count, price, line)))
 
+            if srv_limpets:
+                rows.append(self.kv("", ""))
+            for item in srv_limpets:
+                count  = item["count"]
+                line   = item["price"] * count
+                srv_total += line
+                rows.append(self.kv(item["name"],
+                                    _cargo_cols(count, item["price"], line)))
+
+            # The journal never reports a surface vehicle's capacity, so the
+            # denominator comes from a table and is omitted for vehicles whose
+            # capacity is not established rather than guessed at.
+            tonnage = srv_tonnage(srv_used,
+                                  srv_cargo_capacity(getattr(s, "srv_type", "")))
             if srv_items:
-                rows.append(self.kv("Totals",
-                                    _cargo_cols(srv_used, 0, srv_total)
-                                    .replace(f"{_fmt_cr(0):>9}", f"{'':>9}")))
+                rows.append(self.kv("Totals", cargo_totals_cols(tonnage, srv_total)))
             else:
-                rows.append(self.kv("Carrying", f"{srv_used:>5} t"))
+                # Count-only cargo event: tonnage is known, contents are not.
+                rows.append(self.kv("Carrying", cargo_totals_cols(tonnage, 0)))
 
         self._cargo_scroll.set_rows(rows)
 

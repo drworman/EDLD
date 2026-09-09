@@ -1,8 +1,90 @@
 # EDLD CHANGELOG
 
-Last updated: 20260907
+Last updated: 20260909
 
 ---
+
+## Released in 20260909
+
+### Fixed: the SRV's cargo was priced from a different market than the ship's
+
+Per-unit value is a property of the commodity and the chosen price source.  It
+does not depend on which vessel the tonne is sitting in, but the Cargo tab said
+otherwise: the ship's manifest resolved the target station's sell price, or the
+docked station's, falling back to galactic average, while the SRV's manifest
+only ever read `cargo_mean_prices`.  Docked at Metz Enterprise in Ega, 33 tonnes
+of osmium in the Rhino read 44,051 a tonne against the same ore's 264,306 in the
+ship's hold, a sixfold difference on identical cargo.
+
+It was invisible for three reasons.  Both figures are plausible on their own,
+and nothing in the panel invites comparing them.  The panel prints one
+price-source label above both sections, so the SRV rows appeared to come from
+the market named in the header when they never did.  And the error is not a
+consistent offset that could be eyeballed — sell price runs several hundred per
+cent over galactic average on osmium, painite and ruby, and forty to sixty per
+cent under it on alexandrite, low temperature diamonds and the other high-value
+gems, so the SRV read high on some cargo and low on other cargo in the same
+hold.
+
+The sorts diverged with the prices.  Freight is ordered cheapest per tonne first
+so that a full hold answers the question of what to jettison, but the ship
+ordered on the resolved price and the SRV on galactic average, which are
+different orderings of the same manifest.  The SRV section also had no limpet
+handling at all, so limpets sorted in with freight and headed the jettison list
+at around a hundred credits a tonne — the exact placement the ship's manifest
+was changed to avoid.
+
+Pricing, limpet separation and ordering now live in `core.ui_helpers`, in
+`cargo_price_context()` and `cargo_manifest()`.  One context is built per
+repaint and every hold in that repaint is valued against it, so the two
+manifests cannot answer the same question differently.  Both front ends call
+the same functions; neither prices anything locally any more.
+
+The two expressions sat eighty lines apart in one method, duplicated across the
+TUI and the GUI, which is why the front ends agreed with each other and both
+disagreed with themselves.  A structural test now asserts the shape rather than
+the output — one price context per panel, one manifest call per hold, no price
+arithmetic left in either block — because a test that only exercises
+`cargo_manifest()` would not notice a future edit that open-codes a lookup in a
+renderer again.
+
+
+### Fixed: the SRV totals line was assembled by string surgery
+
+It rendered a manifest row with a price of zero and then replaced the
+formatted zero back out to blank the column, which produced the right output
+only for as long as the credit formatter's output stayed exactly nine
+characters wide.  Both totals lines — the ship's and the SRV's — are now built
+by `cargo_totals_cols()` alongside the manifest's own `cargo_cols()`, from one
+set of column widths, so the separators cannot drift apart.
+
+`_fmt_cr` and `_cargo_cols` moved to `core.ui_helpers` with them.  They were
+byte-identical copies in the TUI and the GUI, which is the arrangement that let
+the two price paths diverge in the first place.  Both names remain importable
+from either block module.
+
+### Changed: the SRV totals line shows capacity where it is known
+
+It read "Carrying 41 t" while the ship's read "62/256 t", so there was no way
+to tell from the panel how much room was left.  It now reads "41/72 t" in the
+same columns.
+
+The game never reports a surface vehicle's cargo capacity.  `LaunchSRV` gives
+only a loadout name, a `Cargo` event for a surface vehicle carries a count and
+nothing else, and `Status.json` reports current tonnage with no capacity beside
+it — so the denominator comes from a table in `data/ships.py`, keyed by vehicle
+and consulted through `srv_cargo_capacity()`.
+
+Only established figures are listed: the Rhino at 72 tonnes, read off the
+in-game panels, the Scarab at 4 and the Scorpion at 2.  Third-party references
+giving the Rhino 24 tonnes are wrong, and provably so from the journals — real
+SRV cargo counts run smoothly past 24 to a high-water mark of 68, which a 24 t
+denominator would have displayed as a hold 283% full.  A vehicle with no
+confirmed figure falls back to plain tonnage rather than a denominator that
+might be wrong, because a wrong one reads as a full hold while there is still
+room, or the reverse.  Adding one is a single line, and the totals line picks
+it up with no other change.
+
 
 ## Released in 20260907
 

@@ -353,6 +353,55 @@ SRV_TYPE_NAMES = {
 }
 
 
+#: Cargo capacity in tonnes, by surface-vehicle type id.
+#:
+#: The game never reports this.  ``LaunchSRV`` carries only a loadout name
+#: ("starter", "default", "advanced"), ``Cargo`` events for a surface vehicle
+#: carry Count and nothing else, and ``Status.json`` reports current tonnage
+#: with no capacity beside it — so a denominator has to come from here or not
+#: at all.
+#:
+#: Only vehicles whose capacity is established are listed.  An absent entry
+#: means the manifest shows plain tonnage rather than a fraction, because a
+#: wrong denominator presented as fact is worse than no denominator: it would
+#: read as "hold full" while there was room, or the reverse.
+#:
+#: Deliberately absent:
+#:   lander01   — Nomad, no confirmed figure.
+#:
+#: Fill it in when a capacity is confirmed and the totals line picks it up with
+#: no other change.
+SRV_CARGO_CAPACITY = {
+    "testbuggy":               4,   # Scarab, per Frontier's own store page.
+                                    # Was 2 t before the Odyssey-era buff.
+    "combat_multicrew_srv_01": 2,   # Scorpion.
+    "mev_rhino":              72,   # Rhino, read off the in-game panels.
+                                    # Third-party references saying 24 are
+                                    # wrong: real journals run smoothly past
+                                    # 24 to a high-water mark of 68 t.
+}
+
+#: Reverse of SRV_TYPE_NAMES, so a capacity can be found from a display name
+#: when only that was recorded.
+_SRV_NAME_TO_ID = {v.lower(): k for k, v in SRV_TYPE_NAMES.items()}
+
+
+def srv_cargo_capacity(vehicle: str) -> int:
+    """Cargo capacity in tonnes for a surface vehicle, or 0 when unknown.
+
+    Accepts either the journal type id ("mev_rhino") or the display name
+    ("SRV Rhino"), because state records the display name and older persisted
+    state has no id at all.  Zero means "do not show a denominator" — it is
+    never a real capacity.
+    """
+    key = (vehicle or "").lower().strip()
+    if not key:
+        return 0
+    if key in SRV_CARGO_CAPACITY:
+        return SRV_CARGO_CAPACITY[key]
+    return SRV_CARGO_CAPACITY.get(_SRV_NAME_TO_ID.get(key, ""), 0)
+
+
 def resolve_vehicle_name(raw: str) -> str:
     """Display name for a surface vehicle, from its journal type id.
 
