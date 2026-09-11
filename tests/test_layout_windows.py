@@ -910,6 +910,226 @@ def test_the_rhino_capacity_covers_what_the_journals_actually_show():
     assert srv_cargo_capacity("mev_rhino") >= 68
 
 
+# ── Price source is stated, and can be pinned to galactic average ─────────────
+
+def _ctx_state(**kw):
+    class _S: pass
+    s = _S()
+    s.cargo_mean_prices        = kw.get("means", {})
+    s.cargo_market_info        = kw.get("docked", {})
+    s.cargo_target_market      = kw.get("target", {})
+    s.cargo_target_market_name = kw.get("target_name", "")
+    s.cargo_price_galactic     = kw.get("pinned", False)
+    return s
+
+
+def test_the_panel_names_the_market_it_is_quoting():
+    """The label is built beside the prices so the two cannot disagree."""
+    from core.ui_helpers import cargo_price_context
+
+    assert cargo_price_context(
+        _ctx_state(docked=_MARKET))["source_label"] == "Metz Enterprise · Ega"
+    assert cargo_price_context(_ctx_state())["source_label"] == "Gal. Avg"
+
+
+def test_pinning_galactic_average_overrides_both_markets():
+    """Clearing the target alone falls back to the docked station's prices,
+    which is not what galactic average means — so the pin beats both."""
+    from core.ui_helpers import cargo_manifest, cargo_price_context
+
+    kw = dict(means={"osmium": 44_051}, docked=_MARKET, target=_MARKET,
+              target_name="Metz Enterprise")
+    one = {"osmium": {"count": 1}}
+
+    ctx = cargo_price_context(_ctx_state(**kw, pinned=False))
+    assert ctx["mode"] == "target"
+    assert cargo_manifest(one, ctx)[0][0]["price"] == 264_306
+
+    ctx = cargo_price_context(_ctx_state(**kw, pinned=True))
+    assert ctx["mode"] == "galactic"
+    assert ctx["source_label"] == "Gal. Avg"
+    assert cargo_manifest(one, ctx)[0][0]["price"] == 44_051
+
+
+@pytest.mark.parametrize("front_end", ["tui", "gui"])
+def test_the_price_source_widget_actually_exists(front_end):
+    """theme.py carried rules for #cargo-price-src all along, but the TUI
+    never mounted the row and the update sat inside a bare except — so the
+    label silently never appeared."""
+    source = (ROOT / front_end / "blocks" / "ship_info.py").read_text(
+        encoding="utf-8")
+    if front_end == "tui":
+        assert 'id="cargo-price-src"' in source, \
+            "the price-source label is queried but never composed"
+        assert 'id="cargo-hdr-row"' in source
+    else:
+        assert "self._price_src" in source
+
+
+@pytest.mark.parametrize("front_end", ["tui", "gui"])
+def test_both_front_ends_offer_a_galactic_average_control(front_end):
+    source = (ROOT / front_end / "blocks" / "ship_info.py").read_text(
+        encoding="utf-8")
+    assert "Gal. Avg" in source
+    assert "cargo_price_galactic" in source
+
+
+# ── Session boundaries: a mid-session menu bounce is not an end ───────────────
+
+def _sess_journal(tmp_path, name, events):
+    p = tmp_path / name
+    p.write_text("\n".join(json.dumps(e) for e in events) + "\n",
+                 encoding="utf-8")
+    return p
+
+
+def test_a_menu_bounce_does_not_date_the_session_end(tmp_path):
+    """Dropping to the main menu and picking a mode again seconds later left
+    a MainMenu mid-file.  bootstrap kept it as the session end, so every hour
+    played afterwards counted as idle: one real capture dated the end to
+    20:22 and then played on until 15:02 the next day, an 18.7-hour phantom
+    gap that split the session two minutes after the commander sat down."""
+    from core.journal import bootstrap_last_session_end
+    from core.state import MonitorState
+
+    _sess_journal(tmp_path, "Journal.2026-06-04T151137.01.log", [
+        {"timestamp": "2026-06-04T20:12:35Z", "event": "LoadGame"},
+        {"timestamp": "2026-06-04T20:22:43Z", "event": "Music",
+         "MusicTrack": "MainMenu"},
+        {"timestamp": "2026-06-04T20:22:48Z", "event": "LoadGame"},
+        {"timestamp": "2026-06-05T15:02:15Z", "event": "FSDJump"},  # crash
+    ])
+    current = _sess_journal(tmp_path, "Journal.2026-06-05T100356.01.log", [
+        {"timestamp": "2026-06-05T15:04:43Z", "event": "LoadGame"},
+    ])
+
+    state = MonitorState()
+    bootstrap_last_session_end(state, tmp_path, current)
+    assert state.last_shutdown_time is not None
+    assert state.last_shutdown_time.isoformat().startswith("2026-06-05T15:02:15")
+
+
+def test_a_menu_exit_with_no_resume_still_ends_the_session(tmp_path):
+    """The marker is what makes an idle-at-the-menu gap visible, so clearing
+    it on any LoadGame at all would break the case it exists for."""
+    from core.journal import bootstrap_last_session_end
+    from core.state import MonitorState
+
+    _sess_journal(tmp_path, "Journal.2026-06-04T151137.01.log", [
+        {"timestamp": "2026-06-04T20:12:35Z", "event": "LoadGame"},
+        {"timestamp": "2026-06-04T22:00:00Z", "event": "Music",
+         "MusicTrack": "MainMenu"},
+        {"timestamp": "2026-06-05T00:00:00Z", "event": "Music",
+         "MusicTrack": "MainMenu"},
+    ])
+    current = _sess_journal(tmp_path, "Journal.2026-06-05T100356.01.log", [
+        {"timestamp": "2026-06-05T10:04:43Z", "event": "LoadGame"},
+    ])
+
+    state = MonitorState()
+    bootstrap_last_session_end(state, tmp_path, current)
+    assert state.last_shutdown_time.isoformat().startswith("2026-06-05T00:00:00")
+
+
+def test_a_clean_shutdown_still_ends_the_session(tmp_path):
+    from core.journal import bootstrap_last_session_end
+    from core.state import MonitorState
+
+    _sess_journal(tmp_path, "Journal.2026-06-04T151137.01.log", [
+        {"timestamp": "2026-06-04T20:12:35Z", "event": "LoadGame"},
+        {"timestamp": "2026-06-04T23:30:00Z", "event": "Shutdown"},
+    ])
+    current = _sess_journal(tmp_path, "Journal.2026-06-05T100356.01.log", [
+        {"timestamp": "2026-06-05T10:04:43Z", "event": "LoadGame"},
+    ])
+
+    state = MonitorState()
+    bootstrap_last_session_end(state, tmp_path, current)
+    assert state.last_shutdown_time.isoformat().startswith("2026-06-04T23:30:00")
+
+
+# ── Footer controls have to actually be drawn ─────────────────────────────────
+#
+# Asserting a control exists in the DOM proves nothing about whether anyone can
+# see it.  A Static defaults to filling its Horizontal, so the first control in
+# a footer takes the whole strip and everything after it is laid out beyond the
+# right edge: present, clickable in a synthetic test, and never drawn.  These
+# render the block for real and check where things landed.
+
+def _render_block(block_cls, size=(82, 34), before_render=None):
+    """Boot a one-block Textual app with the real stylesheet and render it.
+
+    Returns (screen_lines, {widget_id: Region}) for the block's footer.
+    """
+    import asyncio
+    from textual.app import App
+    from tui.theme import build_css
+
+    result = {}
+
+    class _One(App):
+        CSS = build_css("default")
+        def compose(self):
+            yield block_cls(core_mod, id="block-under-test")
+
+    async def _run():
+        app = _One()
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            if before_render is not None:
+                before_render(app)
+            await pilot.pause()
+            lines = ["".join(seg.text for seg in strip).rstrip()
+                     for strip in app.screen._compositor.render_strips()]
+            footers = {}
+            for w in app.query(".footer-lbl"):
+                footers[str(w.id)] = (w.region, w.parent.region)
+            result["lines"] = lines
+            result["footers"] = footers
+
+    asyncio.run(_run())
+    return result["lines"], result["footers"]
+
+
+import core as core_mod
+
+
+@pytest.mark.parametrize("module,cls_name", [
+    ("tui.blocks.ship_info",  "ShipInfoBlock"),
+    ("tui.blocks.navigation", "NavigationBlock"),
+    ("tui.blocks.commander",  "CommanderBlock"),
+])
+def test_no_footer_control_is_laid_out_off_screen(module, cls_name):
+    """Every footer control must sit inside the footer it belongs to.
+
+    The Cargo footer's "Gal. Avg" control shipped invisible: cargo-target-btn
+    computed to the full 80-column width, so Gal. Avg was placed at x=81 and
+    the target-name label at x=161.  The navigation footer escaped only
+    because it set width:auto per id.
+    """
+    import importlib
+    cls = getattr(importlib.import_module(module), cls_name)
+    _, footers = _render_block(cls)
+    assert footers, f"{cls_name} exposes no .footer-lbl controls to check"
+    for wid, (region, parent) in footers.items():
+        assert region.right <= parent.right, (
+            f"{wid} is drawn to x={region.right}, past its footer's "
+            f"right edge at {parent.right} — it will never be visible")
+
+
+def test_the_cargo_footer_draws_both_of_its_controls():
+    """The specific regression: Set Target rendered, Gal. Avg did not."""
+    from tui.blocks.ship_info import ShipInfoBlock
+
+    lines, _ = _render_block(
+        ShipInfoBlock,
+        before_render=lambda app: app.query_one(ShipInfoBlock)._refresh_cargo())
+    footer = [ln for ln in lines if ">> Set Target" in ln]
+    assert footer, "the Cargo footer did not render at all"
+    assert "Gal. Avg" in footer[0], (
+        f"Gal. Avg is missing from the rendered footer: {footer[0]!r}")
+
+
 # ── Repaint routing ───────────────────────────────────────────────────────────
 
 def test_every_plugin_refresh_sender_is_mapped():

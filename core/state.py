@@ -228,6 +228,10 @@ class MonitorState:
         self.srv_cargo_count: int    = 0
         self.srv_cargo_items: dict   = {}
         self.cargo_target_market_name= ""
+        # Pin the cargo manifest to galactic average, ignoring both the
+        # target market and the station currently docked at.  Set by the
+        # panel's "Gal. Avg" control, cleared when a target is chosen.
+        self.cargo_price_galactic   = False
         self.cargo_target_market_ts  = 0.0
         self.slf_capi_type           = None
         self.pilot_squadron_tag      = ""

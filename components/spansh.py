@@ -282,6 +282,9 @@ class SpanshPlugin(BasePlugin):
                    _record: dict | None = None) -> None:
         """Set target market. If _record supplied (from search result) use it
         directly without a second network request."""
+        # Releasing the pin here rather than in the panels means every caller
+        # gets it: pick a target and it is used, wherever the pick came from.
+        self.core.state.cargo_price_galactic = False
         if _record:
             threading.Thread(
                 target=self._store_record,

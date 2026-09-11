@@ -448,14 +448,42 @@ def cargo_price_context(state) -> dict:
     tgt_name  = getattr(state, "cargo_target_market_name", "") or ""
     mkt_info  = getattr(state, "cargo_market_info",        {}) or {}
     tgt_comms = tgt_info.get("commodities", {}) or {}
+    forced    = bool(getattr(state, "cargo_price_galactic", False))
+
+    # A target station only prices the manifest once its market has actually
+    # loaded; the name alone is not enough.
+    if forced:
+        mode = "galactic"
+    elif tgt_name and tgt_comms:
+        mode = "target"
+    else:
+        mode = "station"
+
     return {
-        "tgt_comms":   tgt_comms,
-        "gal_comms":   mkt_info.get("commodities", {}) or {},
-        "mean_prices": getattr(state, "cargo_mean_prices", {}) or {},
-        # A target station only prices the manifest once its market has
-        # actually loaded; the name alone is not enough.
-        "has_target_prices": bool(tgt_name) and bool(tgt_comms),
+        "tgt_comms":    tgt_comms,
+        "gal_comms":    mkt_info.get("commodities", {}) or {},
+        "mean_prices":  getattr(state, "cargo_mean_prices", {}) or {},
+        "mode":         mode,
+        "source_label": _price_source_label(mode, tgt_info, tgt_name, mkt_info),
     }
+
+
+def _price_source_label(mode: str, tgt_info: dict, tgt_name: str,
+                        mkt_info: dict) -> str:
+    """What the panel says it is quoting.
+
+    Built here rather than in the renderers so the label and the prices below
+    it can never describe different markets.
+    """
+    if mode == "galactic":
+        return "Gal. Avg"
+    if mode == "target":
+        stn  = tgt_info.get("station_name", "") or ""
+        sys_ = tgt_info.get("star_system",  "") or ""
+        return f"{stn} · {sys_}" if stn and sys_ else (tgt_name or "Target")
+    stn  = mkt_info.get("station_name", "") or ""
+    sys_ = mkt_info.get("star_system",  "") or ""
+    return f"{stn} · {sys_}" if stn and sys_ else (stn or sys_ or "Gal. Avg")
 
 
 def cargo_manifest(items: dict, ctx: dict) -> tuple[list[dict], list[dict]]:
@@ -471,6 +499,7 @@ def cargo_manifest(items: dict, ctx: dict) -> tuple[list[dict], list[dict]]:
     gal_comms   = ctx["gal_comms"]
     tgt_comms   = ctx["tgt_comms"]
     mean_prices = ctx["mean_prices"]
+    mode        = ctx["mode"]
 
     freight: list[dict] = []
     limpets: list[dict] = []
@@ -492,7 +521,10 @@ def cargo_manifest(items: dict, ctx: dict) -> tuple[list[dict], list[dict]]:
         gal_avg     = int(gal.get("mean_price") or mean_prices.get(key, 0))
         tgt_sell    = int(tgt.get("sell_price", 0))
         docked_sell = int(gal.get("sell_price", 0))
-        if ctx["has_target_prices"]:
+        if mode == "galactic":
+            # Pinned by the user: ignore both markets, quote the average.
+            price = gal_avg
+        elif mode == "target":
             price = tgt_sell or gal_avg
         else:
             price = docked_sell or gal_avg

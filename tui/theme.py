@@ -275,11 +275,17 @@ PreferencesScreen Button { height: 3; margin-left: 1; }
     background: $title-bg;
 }
 
+/* A footer control sizes to its own label.  Without this a Static defaults to
+   filling its Horizontal, so the first control swallows the strip and every
+   control after it is laid out off-screen — visible in the DOM, and reachable
+   by a click test, but never drawn. */
+.footer-lbl { width: auto; }
+
 /* Navigation footer: three controls then a status label taking the slack */
-#nav-follow-btn { width: auto; }
-#nav-copy-btn   { width: auto; }
-#nav-clear-btn  { width: auto; }
 #nav-follow-lbl { width: 1fr; text-align: right; }
+
+/* Cargo footer: two controls then the target name taking the slack */
+#cargo-target-lbl { width: 1fr; text-align: right; }
 
 /* ── Search modal ──────────────────────────────────────────────────────────── */
 SearchModal { align: center middle; }

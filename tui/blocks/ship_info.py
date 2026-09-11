@@ -101,15 +101,39 @@ class ShipInfoBlock(TuiBlock):
                 yield from self._compose_engineering()
 
     def _compose_cargo(self) -> ComposeResult:
+        # The panel prices every row against one market, so it has to say
+        # which.  theme.py has carried rules for this row all along; the row
+        # itself was never mounted, and the update was wrapped in a bare
+        # except, so the label simply never appeared.
+        with Horizontal(id="cargo-hdr-row"):
+            yield Label("Cargo", id="cargo-title", classes="block-title")
+            yield Label("", id="cargo-price-src", classes="block-title")
         with VerticalScroll(id="cargo-scroll"):
             yield Label("No cargo", id="cargo-empty")
         with Horizontal(id="cargo-footer"):
             yield Static(">> Set Target", id="cargo-target-btn",
                          classes="footer-lbl")
+            yield Static(">> Gal. Avg", id="cargo-galavg-btn",
+                         classes="footer-lbl")
             yield Label("", id="cargo-target-lbl", classes="dim")
 
     def on_click(self, event) -> None:
-        if str(getattr(event.widget, "id", "")) != "cargo-target-btn":
+        wid = str(getattr(event.widget, "id", ""))
+
+        if wid == "cargo-galavg-btn":
+            # One control, both effects: drop the target market and stop
+            # quoting whatever station happens to be underfoot.  Clearing the
+            # target alone would fall back to the docked station's prices,
+            # which is not what "galactic average" means.
+            event.stop()
+            self.core.state.cargo_price_galactic = True
+            spansh = self.core._plugins.get("spansh")
+            if spansh is not None:
+                spansh.clear_target()
+            self._refresh_cargo()
+            return
+
+        if wid != "cargo-target-btn":
             return
         event.stop()
         spansh = self.core._plugins.get("spansh")
@@ -244,31 +268,14 @@ class ShipInfoBlock(TuiBlock):
         used  = sum(i.get("count", 0) for i in items.values())
 
         # ── Price source label (top-right of header) ──────────────────────────
-        tgt_info  = getattr(s, "cargo_target_market", {})
         tgt_name  = getattr(s, "cargo_target_market_name", "") or ""
-        mkt_info  = getattr(s, "cargo_market_info", {})
-        # has_target_name drives the header label only: the station's name is
-        # shown as soon as one is selected, but pricing waits for its market to
-        # load.  That distinction lives in cargo_price_context() now, so the
-        # two holds below cannot disagree about which market they are quoting.
-        has_target_name = bool(tgt_name)
+        # One price context for the whole panel: the label below and every
+        # hold further down are built from it, so they cannot describe
+        # different markets.
+        price_ctx = cargo_price_context(s)
 
-        if has_target_name:
-            stn  = tgt_info.get("station_name", "") or ""
-            sys_ = tgt_info.get("star_system",  "") or ""
-            src_label = f"{stn} · {sys_}" if stn and sys_ else (tgt_name or "Target")
-        else:
-            stn  = mkt_info.get("station_name", "") or ""
-            sys_ = mkt_info.get("star_system",  "") or ""
-            src_label = (f"{stn} · {sys_}" if stn and sys_ else
-                         stn or sys_ or "Gal. Avg")
-
-        try:
-            self.query_one("#cargo-price-src", Label).update(
-                f" {src_label} "
-            )
-        except Exception:
-            pass
+        self.query_one("#cargo-price-src", Label).update(
+            f" {price_ctx['source_label']} ")
 
         # ── Target label in footer ────────────────────────────────────────────
         try:
@@ -291,9 +298,6 @@ class ShipInfoBlock(TuiBlock):
         # its own.  No special-case notice.
 
         # ── Build enriched item list ──────────────────────────────────────────
-        # One price context for the whole panel, so every hold below is valued
-        # against the same market the header names.
-        price_ctx = cargo_price_context(s)
         enriched, limpets = cargo_manifest(items, price_ctx)
 
         # ── Render rows: qty  |  credits ─────────────────────────────────────
@@ -329,7 +333,6 @@ class ShipInfoBlock(TuiBlock):
             rows.append(KVRow(item["name"],
                               _cargo_cols(count, item["price"], line)))
 
-        cr_total = _fmt_cr(total) if total else "—"
         rows.append(KVRow("", ""))                       # blank spacer row
         rows.append(Static("─" * 40, classes="sep"))     # visible separator line
         # Totals carries no per-unit price, so that column stays empty and

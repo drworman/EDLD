@@ -4,6 +4,74 @@ Last updated: 20260909
 
 ---
 
+## Unreleased
+
+### Fixed: a bounce to the main menu ended the session
+
+Sessions split on the gap between the end of the last one and the next
+`LoadGame`, and the end is recovered from the previous journal — a `Shutdown`,
+an exit to the main menu, or, when the client crashed and wrote neither, the
+last event in the file.  The scan kept the last main-menu marker it saw
+regardless of what followed it, so a commander who dropped to the menu and
+picked a mode again seconds later left one sitting mid-file, and everything
+played after it counted as idle.
+
+One real capture bounced at 20:22:43, was back in-game at 20:22:48, and played
+another eighteen hours before the client died without a clean exit.  The
+session was dated as ending at the bounce, so sitting back down two minutes
+later looked like an 18.7-hour gap and split the session.
+
+A marker only ends a session when no `LoadGame` follows it.  Checked against
+all 194 journal pairs in a real capture: every boundary decision now matches
+the actual idle gap, where seven previously split a session that had never
+stopped.
+
+### Fixed: the Cargo panel never said which market it was pricing from
+
+The TUI queried `#cargo-price-src` and updated it inside a bare `except`,
+`theme.py` carried layout rules for the row, and the row was never composed —
+so the query raised on every repaint and the label simply never appeared.  The
+GUI built its own copy and worked, with a comment claiming it sat "the same
+place the TUI puts it".  The row is now composed, and both front ends read one
+label built by `cargo_price_context()` beside the prices it describes, so the
+header and the manifest cannot name different markets.
+
+### Fixed: footer controls after the first were laid out off-screen
+
+`.footer-lbl` carried no width rule, and a Textual `Static` defaults to filling
+its `Horizontal`, so the first control in a footer took the whole strip and
+everything after it was placed past the right edge — present in the DOM,
+reachable by a synthetic click, and never drawn.  The navigation footer escaped
+only because it set `width: auto` on each of its three controls by id.
+
+The Cargo footer had one control and so never showed the fault, until a second
+was added beside it: `cargo-target-btn` computed to the full 80 columns,
+putting "Gal. Avg" at x=81 and the target-name label at x=161.  That label had
+been invisible all along for the same reason — "No target set" has never once
+been drawn.
+
+`.footer-lbl` now sizes to its content, which is what all three footers wanted,
+and the per-id navigation rules fold into it.  The Cargo footer gets the same
+slack-taking label rule the navigation footer already had.
+
+Tests for this render the block against the real stylesheet and assert where
+things actually landed, rather than that a widget exists.  Existence in the DOM
+was what made the bug survive review.
+
+### Added: a control to pin the manifest to galactic average
+
+Prices follow the target station when one is set and the docked station
+otherwise, and there was no way back to galactic average short of undocking.
+Clearing the target was not enough on its own — it falls back to whatever
+station is underfoot, which is not what galactic average means — so this is an
+explicit third mode rather than a target reset.
+
+"Gal. Avg" sits beside "Set Target" in the Cargo footer in both front ends.  It
+drops the target and pins pricing to the average until a new target is chosen;
+`set_target()` releases the pin itself, so it is released for every caller
+rather than each panel remembering to.
+
+
 ## Released in 20260909
 
 ### Fixed: the SRV's cargo was priced from a different market than the ship's

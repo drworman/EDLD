@@ -445,6 +445,11 @@ def bootstrap_last_session_end(
       * the last event in the file       — the client crashed, so neither of
                                            the above was ever written
 
+    Only a marker with no ``LoadGame`` after it ends the session: dropping to
+    the main menu and picking a mode again is a bounce mid-session, not an
+    end, and dating the session's end to that bounce counts everything played
+    afterwards as idle time.
+
     None of these can be seen from the file being preloaded: Elite opens a new
     journal on every launch, so the marker always lives in an earlier one.  In
     a 269-journal capture, a ``LoadGame`` never once followed a ``Shutdown``
@@ -486,6 +491,15 @@ def bootstrap_last_session_end(
                 if name == "Shutdown" or (
                         name == "Music" and ev.get("MusicTrack") == "MainMenu"):
                     marker = when
+                elif name == "LoadGame":
+                    # Play resumed, so the marker above did not end the
+                    # session after all.  A commander who drops to the main
+                    # menu and picks a mode again seconds later leaves a
+                    # MainMenu behind mid-file; keeping it would date the end
+                    # of the session to that bounce rather than to whenever
+                    # play actually stopped, and every hour played afterwards
+                    # would be counted as idle.
+                    marker = None
     except OSError:
         return
 

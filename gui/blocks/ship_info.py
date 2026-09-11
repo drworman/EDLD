@@ -132,11 +132,18 @@ class ShipInfoBlock(GuiBlock):
         self._target_btn = QPushButton("Set Target")
         self._target_btn.setProperty("role", "link")
         self._target_btn.clicked.connect(self._on_set_target)
+        self._galavg_btn = QPushButton("Gal. Avg")
+        self._galavg_btn.setProperty("role", "link")
+        self._galavg_btn.setToolTip(
+            "Price the manifest at galactic average, ignoring the target "
+            "market and the station docked at")
+        self._galavg_btn.clicked.connect(self._on_galactic_average)
         self._target_lbl = QLabel()
         self._target_lbl.setProperty("role", "dim")
         self._target_lbl.setTextFormat(Qt.RichText)
         self._target_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         fl.addWidget(self._target_btn, 0)
+        fl.addWidget(self._galavg_btn, 0)
         fl.addWidget(self._target_lbl, 1)
         cargo_page_layout.addWidget(footer)
         self._tabs.addTab(cargo_page, "Cargo")
@@ -193,6 +200,20 @@ class ShipInfoBlock(GuiBlock):
         )
         dlg.accepted_result.connect(_on_select)
         dlg.exec()
+
+    def _on_galactic_average(self) -> None:
+        """Pin the manifest to galactic average.
+
+        One control, both effects: drop the target market and stop quoting
+        whatever station happens to be underfoot.  Clearing the target alone
+        would fall back to the docked station's prices, which is not what
+        "galactic average" means.
+        """
+        self.core.state.cargo_price_galactic = True
+        spansh = self.core._plugins.get("spansh")
+        if spansh is not None:
+            spansh.clear_target()
+        self.refresh_data()
 
     # ── Refresh ───────────────────────────────────────────────────────────────
 
@@ -275,24 +296,11 @@ class ShipInfoBlock(GuiBlock):
         used  = sum(i.get("count", 0) for i in items.values())
 
         # ── Price source label (top-right of header) ──────────────────────────
-        tgt_info  = getattr(s, "cargo_target_market", {})
         tgt_name  = getattr(s, "cargo_target_market_name", "") or ""
-        mkt_info  = getattr(s, "cargo_market_info", {})
-        # has_target_name drives the header label only: the station's name is
-        # shown as soon as one is selected, but pricing waits for its market to
-        # load.  That distinction lives in cargo_price_context() now, so the
-        # two holds below cannot disagree about which market they are quoting.
-        has_target_name = bool(tgt_name)
-
-        if has_target_name:
-            stn  = tgt_info.get("station_name", "") or ""
-            sys_ = tgt_info.get("star_system",  "") or ""
-            src_label = f"{stn} · {sys_}" if stn and sys_ else (tgt_name or "Target")
-        else:
-            stn  = mkt_info.get("station_name", "") or ""
-            sys_ = mkt_info.get("star_system",  "") or ""
-            src_label = (f"{stn} · {sys_}" if stn and sys_ else
-                         stn or sys_ or "Gal. Avg")
+        # One price context for the whole panel: the label and every hold
+        # below are built from it, so they cannot describe different markets.
+        price_ctx = cargo_price_context(s)
+        src_label = price_ctx["source_label"]
 
         self._price_src.setText(to_html(f" {src_label} ", self.palette_map))
         self._target_lbl.setText(to_html(
@@ -305,9 +313,6 @@ class ShipInfoBlock(GuiBlock):
         # its own.  No special-case notice.
 
         # ── Build enriched item list ──────────────────────────────────────────
-        # One price context for the whole panel, so every hold below is valued
-        # against the same market the header names.
-        price_ctx = cargo_price_context(s)
         enriched, limpets = cargo_manifest(items, price_ctx)
 
         # ── Render rows: qty  |  credits ─────────────────────────────────────
@@ -340,7 +345,6 @@ class ShipInfoBlock(GuiBlock):
             rows.append(self.kv(item["name"],
                                 _cargo_cols(count, item["price"], line)))
 
-        cr_total = _fmt_cr(total) if total else "—"
         rows.append(self.kv("", ""))          # blank spacer row
         rows.append(self.rule())              # visible separator line
         rows.append(self.kv("Totals", cargo_totals_cols(cap_str, total)))
