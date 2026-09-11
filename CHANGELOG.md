@@ -1,10 +1,10 @@
 # EDLD CHANGELOG
 
-Last updated: 20260909
+Last updated: 20260911
 
 ---
 
-## Unreleased
+## Released in 20260911
 
 ### Fixed: a bounce to the main menu ended the session
 
