@@ -287,6 +287,41 @@ PreferencesScreen Button { height: 3; margin-left: 1; }
 /* Cargo footer: two controls then the target name taking the slack */
 #cargo-target-lbl { width: 1fr; text-align: right; }
 
+/* ── Sell table modal ──────────────────────────────────────────────────────── */
+SellModal { align: center middle; }
+
+#sell-outer {
+    width: 60%;
+    height: 80%;
+    background: $block-bg;
+    border: solid $accent;
+    padding: 1 2;
+}
+
+#sell-title { width: 100%; }
+#sell-hint  { width: 100%; margin-bottom: 1; }
+
+/* The tabs take the slack; each pane's scroller then fills its tab, or the
+   rows are laid out past the bottom of the modal and never drawn. */
+#sell-tabs             { height: 1fr; }
+#sell-tabs TabPane     { height: 1fr; padding: 0; }
+.sell-rows             { height: 1fr; }
+
+.sell-row   { width: 100%; height: 1; background: $block-bg; }
+.sell-name  { width: 1fr; background: transparent; }
+.sell-price { width: 14; text-align: right; background: transparent; }
+
+/* Zebra striping.  $row-alt is derived from $block-bg in core.palette rather
+   than being a palette entry a theme states, so custom themes get it free.
+   It is deliberately NOT $title-bg: that is only six points per channel above
+   the block fill, which a 256-colour terminal quantises onto the same palette
+   entry — the stripe vanished in the terminal while showing perfectly in the
+   Qt window, which is always truecolor.
+
+   The two labels are transparent above so the row's own fill shows through
+   them rather than punching two block-bg holes in the stripe. */
+.sell-row-alt { background: $row-alt; }
+
 /* ── Search modal ──────────────────────────────────────────────────────────── */
 SearchModal { align: center middle; }
 

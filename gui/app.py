@@ -56,6 +56,7 @@ from core.palette import rgb
 from gui.about import AboutDialog
 from gui.funding import SupportBar
 from gui.preferences import PreferencesDialog
+from gui.sell_dialog import SellDialog
 from gui.theme import stylesheet
 
 from gui.blocks.career       import CareerBlock
@@ -293,6 +294,11 @@ class EdldWindow(QMainWindow):
         full.setCheckable(True)
         full.triggered.connect(self._toggle_fullscreen)
         view_menu.addAction(full)
+        sell_act = QAction("&Sell Table", self)
+        sell_act.setShortcut(QKeySequence("Ctrl+S"))
+        sell_act.triggered.connect(self.action_sell_table)
+        view_menu.addAction(sell_act)
+        view_menu.addSeparator()
         support_act = QAction("Show &Support Bar", self)
         support_act.setCheckable(True)
         support_act.setChecked(True)
@@ -444,6 +450,29 @@ class EdldWindow(QMainWindow):
     def action_options(self) -> None:
         dlg = PreferencesDialog(self._core, theme=self._theme, parent=self)
         dlg.exec()
+
+    def action_sell_table(self) -> None:
+        """Open the sell table, or close it if it is already open.
+
+        Non-modal and kept on the instance, so the same shortcut toggles one
+        window rather than stacking copies, and the dashboard behind it goes
+        on updating.
+        """
+        existing = getattr(self, "_sell_dialog", None)
+        if existing is not None and existing.isVisible():
+            existing.close()
+            return
+        table = self._core.plugin_call("cargo", "sell_table")
+        if not isinstance(table, dict):
+            return
+        if existing is None:
+            existing = SellDialog(self, table, theme=self._theme)
+            self._sell_dialog = existing
+        else:
+            existing.set_table(table)
+        existing.show()
+        existing.raise_()
+        existing.activateWindow()
 
     def action_about(self) -> None:
         AboutDialog(self, self._program, self._version, self._author,

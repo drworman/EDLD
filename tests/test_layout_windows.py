@@ -1681,6 +1681,9 @@ def test_capacity_is_recovered_from_an_earlier_journal(tmp_path):
         def write_json(self, data, name=None):
             pass
 
+        def file_path(self, filename):
+            return tmp_path / f"cargo.{filename}"
+
     class Core:
         gui_queue = queue.Queue()
         journal_dir = str(tmp_path)
@@ -1752,6 +1755,9 @@ def test_hold_recovery_replays_transfers_after_a_count_only_event():
 
         def write_json(self, data, name=None):
             pass
+
+        def file_path(self, filename):
+            return tmp / f"cargo.{filename}"
 
     class Core:
         gui_queue = queue.Queue()
@@ -1848,7 +1854,7 @@ def _commander_plugin():
 
 RESUME_IN_SRV = {
     "timestamp": "2026-09-07T17:46:02Z", "event": "LoadGame",
-    "Commander": "SILVAN HOLLOWAY", "Ship": "MEV_Rhino",
+    "Commander": "MERRICK CALBRUIN", "Ship": "MEV_Rhino",
     "Ship_Localised": "SRV Rhino", "ShipID": 36,
     "ShipName": "", "ShipIdent": "", "FID": "F1", "_logtime": None,
 }

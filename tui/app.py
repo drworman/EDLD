@@ -27,6 +27,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 
 from tui.preferences   import PreferencesScreen
 from tui.confirm_modal import ConfirmModal
+from tui.sell_modal    import SellModal
 from tui.blocks.career import CareerBlock
 from tui.blocks.ship_info   import ShipInfoBlock
 from tui.blocks.objectives  import ObjectivesBlock
@@ -116,6 +117,7 @@ class EdldTui(App):
         Binding("ctrl+r", "reset_session",  "Reset Session"),
         Binding("ctrl+l", "clear_alerts",   "Clear Alerts"),
         Binding("ctrl+o", "options",        "Options"),
+        Binding("ctrl+s", "sell_table",     "Sell Table"),
         Binding("ctrl+k", "toggle_ksw",     "Session Mgmt", show=True),
         Binding("ctrl+t", "kill_session",   "Quit Game",    show=True),
     ]
@@ -320,6 +322,21 @@ class EdldTui(App):
 
     def action_options(self) -> None:
         self.push_screen(PreferencesScreen(self._core))
+
+    def action_sell_table(self) -> None:
+        """Open the sell table, or close it if it is already open.
+
+        The modal binds Ctrl+S to dismiss, so a second press while it has
+        focus closes it and never reaches here.  The guard covers the case
+        where it does not have focus — two stacked copies of the same table
+        would be a puzzle to get out of.
+        """
+        if any(isinstance(s, SellModal) for s in self.screen_stack):
+            return
+        table = self._core.plugin_call("cargo", "sell_table")
+        if not isinstance(table, dict):
+            return
+        self.push_screen(SellModal(table))
 
 
 def run_tui(core: "CoreAPI", program: str, version: str, theme: str = "default") -> None:

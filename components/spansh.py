@@ -412,6 +412,11 @@ class SpanshPlugin(BasePlugin):
         s.cargo_target_market = {
             "station_name": stn_name,
             "star_system":  sys_name,
+            # Spansh spells a carrier "Drake-Class Carrier"; recorded so the
+            # sell table can decline to quote one.  Absent on some records,
+            # which reads as "not a carrier" — the right default, since every
+            # carrier record does carry it.
+            "station_type": (rec.get("type") or "").strip(),
             "commodities":  commodities,
             "source":       "spansh",
             "updated":      updated,

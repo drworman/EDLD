@@ -124,6 +124,63 @@ PALETTES: dict[str, dict[str, str]] = {
 }
 PALETTES["default-dark"] = PALETTES["default"]
 
+
+# ── Derived colours ───────────────────────────────────────────────────────────
+
+#: How far the zebra stripe is pulled from the block fill toward the text
+#: colour.  Blending toward $fg rather than adding a fixed offset means the
+#: stripe lightens on the dark palettes and darkens on the light one, with no
+#: per-theme special case.
+#:
+#: The figure is set by the terminal, not by taste.  Below 10% the stripe
+#: stops surviving 256-colour quantisation: #1c1810 and a 6%-lighter #241e16
+#: are both nearest to colour 16 on the xterm palette, so a 256-colour
+#: terminal paints every row the same and the striping silently disappears.
+#: Qt is always truecolor, which is why the desktop window showed a stripe the
+#: terminal never did.  12% clears the threshold in all eight palettes with
+#: margin, and still reads as about a 9% step where truecolor is available.
+_STRIPE_BLEND = 0.12
+
+
+def _blend(base: str, toward: str, pct: float) -> str:
+    """Mix two ``#rrggbb`` colours.  Returns ``base`` if either is unparseable."""
+    try:
+        a = base.lstrip("#")
+        b = toward.lstrip("#")
+        if len(a) != 6 or len(b) != 6:
+            return base
+        mixed = tuple(
+            round(int(a[i:i + 2], 16)
+                  + (int(b[i:i + 2], 16) - int(a[i:i + 2], 16)) * pct)
+            for i in (0, 2, 4)
+        )
+        return "#%02x%02x%02x" % tuple(max(0, min(255, v)) for v in mixed)
+    except ValueError:
+        return base
+
+
+def derive(palette: dict[str, str]) -> dict[str, str]:
+    """Add the computed entries a palette does not state for itself.
+
+    Currently just ``$row-alt``, the zebra stripe.  Applied to the built-ins
+    below and to every custom theme as it loads, so a theme file never has to
+    know the stripe exists.
+    """
+    if "$row-alt" in palette:
+        return palette
+    palette = dict(palette)
+    palette["$row-alt"] = _blend(
+        palette.get("$block-bg", "#161a1f"),
+        palette.get("$fg", "#d8dce5"),
+        _STRIPE_BLEND,
+    )
+    return palette
+
+
+# "default-dark" is the same object as "default", so derive into a fresh dict
+# per name rather than mutating in place.
+PALETTES = {name: derive(pal) for name, pal in PALETTES.items()}
+
 #: Display names for the built-in themes, in the order the preferences
 #: selectors present them.  Shared so the TUI and GUI offer the same list.
 THEME_CHOICES: list[tuple[str, str]] = [
@@ -159,7 +216,7 @@ def load_custom_palette(css_path) -> dict | None:
             m = _re.search(rf"--{name}\s*:\s*([^;]+);", block)
             return m.group(1).strip() if m else default
 
-        return {
+        return derive({
             "$bg":       _v("bg-deep",  "#0d0f12"),
             "$block-bg": _v("bg-mid",   "#161a1f"),
             "$title-bg": _v("bg-panel", "#1c2128"),
@@ -170,7 +227,7 @@ def load_custom_palette(css_path) -> dict | None:
             "$green":    _v("green",    "#57e389"),
             "$amber":    _v("amber",    "#f8e45c"),
             "$red":      _v("red",      "#e05c5c"),
-        }
+        })
     except Exception:
         return None
 
