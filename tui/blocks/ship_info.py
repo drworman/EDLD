@@ -32,7 +32,7 @@ from textual.containers import VerticalScroll, Horizontal
 
 from tui.block_base     import TuiBlock, KVRow, HRule, SecHdr, _health_cls
 from core.state         import FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD
-from core.ui_helpers   import (cargo_cols, cargo_manifest,
+from core.ui_helpers   import (cargo_cols, cargo_header_cols, cargo_manifest,
                                cargo_price_context, cargo_totals_cols,
                                fmt_cargo_cr, is_limpet, srv_tonnage)
 from data.ships         import srv_cargo_capacity
@@ -303,7 +303,11 @@ class ShipInfoBlock(TuiBlock):
         # ── Render rows: qty  |  credits ─────────────────────────────────────
         # The ship's hold is one section and the SRV's is another; heading
         # each keeps them apart when both are carrying something.
-        rows: list = [SecHdr("Ship"), HRule()]
+        # Column headings above the rule, so the rule underlines them the way
+        # it would in a table rather than floating between two sets of rows.
+        rows: list = [SecHdr("Ship"),
+                      KVRow("Commodity", cargo_header_cols(), "val dim"),
+                      HRule()]
         total = 0
 
         # Three fixed-width columns — units, price per unit, line value.  KVRow
@@ -348,6 +352,7 @@ class ShipInfoBlock(TuiBlock):
             srv_used  = int(getattr(s, "srv_cargo_count", 0) or 0)
             rows.append(KVRow("", ""))
             rows.append(SecHdr("SRV"))
+            rows.append(KVRow("Commodity", cargo_header_cols(), "val dim"))
             rows.append(HRule())
 
             # Same price context and the same ordering rules as the ship's

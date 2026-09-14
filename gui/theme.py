@@ -81,6 +81,18 @@ QLabel[role="section"] {{
     padding-top: 4px;
 }}
 QLabel[role="dim"]    {{ color: {c['dim']}; background: transparent; }}
+
+/* A value column stays monospace whatever colour it is wearing.
+   classes_to_props turns "val dim" and "val highlight" into role="dim" and
+   role="highlight", which carry a colour and nothing else — so a value marked
+   either way silently lost the monospace face that role="val" supplies, and
+   with it every column the shared helpers had padded into line.  The column
+   headings on the cargo manifest were the visible case: proportional
+   headings sitting over monospace figures, lining up with nothing.
+
+   Keyed on a property KVRow sets once and never rewrites, rather than on the
+   role, because the role is exactly what changes when the colour does. */
+QLabel[col="value"] {{ font-family: {MONO_FAMILIES}; }}
 QLabel[role="hdrkey"] {{
     color: {c['accent']};
     background: transparent;
@@ -270,6 +282,27 @@ QGroupBox::title {{
     font-size: {f['small']}pt;
     font-weight: 600;
 }}
+/* Tables.  alternate-background-color must be stated or Qt supplies its own,
+   which is a light grey and unreadable on every dark palette here.
+   {c['row-alt']} is derived from the block fill in core.palette and is the
+   same stripe the TUI paints, so the two windows match. */
+QTableWidget, QTableView {{
+    background: {c['block-bg']};
+    alternate-background-color: {c['row-alt']};
+    color: {c['fg']};
+    border: none;
+    gridline-color: {c['border']};
+}}
+QTableWidget::item, QTableView::item {{ padding: 3px 6px; }}
+QHeaderView::section {{
+    background: {c['title-bg']};
+    color: {c['dim']};
+    border: none;
+    border-bottom: 1px solid {c['border']};
+    padding: 4px 6px;
+}}
+QTableCornerButton::section {{ background: {c['title-bg']}; border: none; }}
+
 QListWidget {{
     background-color: {c['bg']};
     border: 1px solid {c['border']};

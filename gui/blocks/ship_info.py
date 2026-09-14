@@ -29,7 +29,7 @@ component.
 from __future__ import annotations
 
 from core.state import FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD
-from core.ui_helpers import (cargo_cols, cargo_manifest,
+from core.ui_helpers import (cargo_cols, cargo_header_cols, cargo_manifest,
                              cargo_price_context, cargo_totals_cols,
                              fmt_cargo_cr, is_limpet, srv_tonnage)
 from data.ships       import srv_cargo_capacity
@@ -318,7 +318,11 @@ class ShipInfoBlock(GuiBlock):
         # ── Render rows: qty  |  credits ─────────────────────────────────────
         # The ship's hold is one section and the SRV's is another; heading
         # each keeps them apart when both are carrying something.
-        rows: list = [self.hdr("Ship"), self.rule()]
+        # Column headings above the rule, so the rule underlines them the way
+        # it would in a table rather than floating between two sets of rows.
+        rows: list = [self.hdr("Ship"),
+                      self.kv("Commodity", cargo_header_cols(), "val dim"),
+                      self.rule()]
         total = 0
 
         for item in enriched:
@@ -357,6 +361,7 @@ class ShipInfoBlock(GuiBlock):
             srv_used  = int(getattr(s, "srv_cargo_count", 0) or 0)
             rows.append(self.kv("", ""))
             rows.append(self.hdr("SRV"))
+            rows.append(self.kv("Commodity", cargo_header_cols(), "val dim"))
             rows.append(self.rule())
 
             # Same price context and the same ordering rules as the ship's

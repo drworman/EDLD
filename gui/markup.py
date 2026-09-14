@@ -56,6 +56,32 @@ def _colour(name: str, palette: dict[str, str]) -> str | None:
     return None
 
 
+#: A run of two or more spaces, or a space at the very start of the string.
+#: These are alignment padding, not word gaps.
+#: The longer branch is first so a two-space run at the start of the string
+#: is protected whole, rather than the ``^ `` branch taking its first space
+#: and leaving the second as an ordinary space Qt would then swallow.
+_PAD_RE = re.compile(r" {2,}|^ ")
+
+
+def _keep_padding(escaped: str) -> str:
+    """Make alignment padding survive Qt's rich-text whitespace collapsing.
+
+    Qt collapses runs of spaces exactly as a browser does, and every label in
+    the GUI is ``Qt.RichText``.  The shared column helpers in core.ui_helpers
+    align by padding with spaces — ``cargo_cols`` pads the price column to
+    nine characters — so the columns the TUI lines up were arriving in the Qt
+    window with their padding squeezed to a single space, and the separators
+    in a cargo manifest did not line up with each other or with the totals
+    row below them.
+
+    Only runs of two or more, plus a leading single space, are protected.
+    Ordinary single spaces between words stay breakable, so wrapped labels
+    still wrap.
+    """
+    return _PAD_RE.sub(lambda m: "&nbsp;" * len(m.group(0)), escaped)
+
+
 def to_html(text: str, palette: dict[str, str]) -> str:
     """Convert Rich markup in ``text`` to Qt-compatible HTML.
 
@@ -87,7 +113,7 @@ def to_html(text: str, palette: dict[str, str]) -> str:
 
     for m in _TAG_RE.finditer(escaped):
         literal = m.group(0)
-        out.append(escaped[pos:m.start()])
+        out.append(_keep_padding(escaped[pos:m.start()]))
         pos = m.end()
         closing, body = m.group(1), m.group(2).strip().lower()
 
@@ -130,7 +156,7 @@ def to_html(text: str, palette: dict[str, str]) -> str:
         out.append("".join(opened))
         stack.append((body, "".join(closers)))
 
-    out.append(escaped[pos:])
+    out.append(_keep_padding(escaped[pos:]))
     # Anything still open at the end gets closed so the label's HTML is valid.
     while stack:
         _name, closer = stack.pop()

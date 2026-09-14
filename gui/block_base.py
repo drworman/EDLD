@@ -139,6 +139,10 @@ class KVRow(QWidget):
         self._key.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         self._val = QLabel()
+        # Marks this label as a value column for the stylesheet.  Set here and
+        # never touched by _apply_classes, so a value keeps its monospace face
+        # through every colour change.
+        self._val.setProperty("col", "value")
         self._val.setTextFormat(Qt.RichText)
         self._val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._val.setTextInteractionFlags(Qt.TextSelectableByMouse)

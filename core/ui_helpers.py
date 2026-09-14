@@ -572,6 +572,26 @@ def cargo_cols(count: int, unit_price: int, line_value: int) -> str:
             f"{fmt_cargo_cr(line_value):>{_CARGO_VALUE_W}}")
 
 
+#: Column headings, in the same three widths as the rows beneath them.  The
+#: unit column is headed "Price" rather than "Per t" because the panel header
+#: already names the market being quoted, which is the part that needs saying.
+_CARGO_HEADINGS = ("Tonnes", "Price", "Value")
+
+
+def cargo_header_cols() -> str:
+    """The column headings for a cargo manifest.
+
+    Built from the same widths as ``cargo_cols`` so the headings sit over the
+    columns they name.  Without them the manifest is three unlabelled numbers
+    and a reader has to infer that the middle one is per tonne and the last
+    is the line total.
+    """
+    qty, price, value = _CARGO_HEADINGS
+    return (f"{qty:>{_CARGO_QTY_W}}   "
+            f"{price:>{_CARGO_PRICE_W}}   "
+            f"{value:>{_CARGO_VALUE_W}}")
+
+
 def cargo_totals_cols(tonnage: str, total_value: int) -> str:
     """The totals line, in the same three columns as the manifest above it.
 
