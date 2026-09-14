@@ -54,7 +54,7 @@ def _read_version() -> str:
 
 PROGRAM = "ED Live Dashboard"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
-AUTHOR  = "CMDR SILVAN HOLLOWAY"
+AUTHOR  = "CMDR MERRICK CALBRUIN"
 VERSION = _read_version()
 GITHUB_REPO = "drworman/EDLD"
 DEBUG_MODE  = False

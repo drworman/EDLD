@@ -231,4 +231,4 @@ erring on the side of a longer wait.
 
 ---
 
-*Guide by CMDR SILVAN HOLLOWAY
+*Guide by CMDR MERRICK CALBRUIN

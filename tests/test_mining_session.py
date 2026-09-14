@@ -225,7 +225,7 @@ def test_wide_value_does_not_stretch_the_column():
 
     class State:
         event_time = datetime.now(timezone.utc)
-        pilot_name = "Calursus"
+        pilot_name = "MERRICK CALBRUIN"
         pilot_ship = "Krait Mk II"
         pilot_mode = "Solo"
         pilot_system = "Hyades Sector DB-X d1-112"
@@ -272,7 +272,7 @@ def test_summary_header_carries_commander_and_location():
 
     class State:
         event_time = datetime.now(timezone.utc)
-        pilot_name = "Calursus"
+        pilot_name = "MERRICK CALBRUIN"
         pilot_ship = "Krait Mk II"
         pilot_mode = "Solo"
         pilot_system = "Deciat"
@@ -301,7 +301,7 @@ def test_summary_header_carries_commander_and_location():
 
     emit_summary(Emitter(), State, [Provider()], Session())
     text = captured["text"]
-    assert "CMDR Calursus" in text
+    assert "CMDR MERRICK CALBRUIN" in text
     assert "Krait Mk II" in text
     assert "Deciat / Deciat 6 A Ring" in text
 
@@ -312,7 +312,7 @@ def test_income_reaches_the_summary():
 
     class State:
         event_time = datetime.now(timezone.utc)
-        pilot_name = "Calursus"
+        pilot_name = "MERRICK CALBRUIN"
         pilot_ship = "Krait"
         pilot_mode = "Solo"
         pilot_system = "Deciat"

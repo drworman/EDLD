@@ -200,4 +200,4 @@ Each pilot runs a completely independent game instance and EDLD instance. Journa
 
 ---
 
-*Guide by CMDR SILVAN HOLLOWAY
+*Guide by CMDR MERRICK CALBRUIN
