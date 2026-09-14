@@ -1,6 +1,358 @@
 # EDLD CHANGELOG
 
-Last updated: 20260911
+Last updated: 20260914
+
+---
+
+## Released in 20260914
+
+### Fixed: the hold was only ever as fresh as the journal
+
+Cargo.json is a live file — the game rewrites it whenever the hold changes,
+for whichever vessel changed. EDLD read it once at startup and thereafter only
+when a journal event said to, so the manifest could only ever be as current as
+the journal was.
+
+Journals lag. They are buffered, they rotate, and a directory that is synced,
+rotated, or rewritten underneath the running game leaves the file on disk
+frozen while the game carries on appending to a handle that no longer has a
+name. In a real capture the newest journal stood still for five hours — its
+last line a return to the main menu — while Cargo.json tracked 620 t of ore
+into the hold. EDLD showed an empty ship the whole time, and reported the
+commander as not in game, because nothing had told it to look at either.
+
+Cargo.json is now followed the way Market.json already was: the same watcher
+thread, the same two-second mtime check, no re-read and no refresh when
+nothing has changed. Applied strictly by vessel, as everywhere else that
+touches this file — reading it without checking which hold it describes is
+what once put SRV ore in the ship's.
+
+This does not repair the journal itself. A stalled journal still costs the
+mode, the location, and everything else only the event stream carries. It does
+mean the hold is read from the file the game keeps current, rather than
+inferred from a record that may have stopped.
+
+---
+
+### Fixed: the SRV's hold was empty until the next chunk was refined
+
+The startup replay rebuilds the ship's hold from the journals, and `on_load`
+applies `Cargo.json` over it when that file describes the Ship.  Neither did
+anything for the SRV.
+
+The SRV's hold is never listed in a journal event — those carry a count and
+nothing else — so the only record of what is in it is `Cargo.json`, and only
+while the commander is aboard.  A mining session is left in the SRV, which
+means the very case where it matters: resuming with 11 t of Monazite aboard
+and `Cargo.json` saying exactly that, the SRV manifest read empty and stayed
+empty until the next refined chunk landed.
+
+Seeded from `Cargo.json` at startup now, applied strictly by vessel — reading
+that file without checking which hold it describes is what once put SRV ore in
+the ship's.  A test asserts the ship's hold is left alone when the snapshot is
+the SRV's, so a second unguarded application cannot creep back in here.
+
+---
+
+### Fixed: the cargo replay was reading four-month-old journals
+
+`_bootstrap_from_journals` took the four most recent journals by modification
+time.  Elite's journal names are ISO timestamps and sort chronologically on
+their own; mtimes do not, and do not survive a file sync between machines.  In
+a real capture the four newest by mtime were from 19 May and the newest by
+name was from 13 September, so the replay rebuilt the hold from journals four
+months stale and never opened the current one.
+
+This had been latent.  The replay used to apply its result with `if items:`,
+so an unhelpful answer from an old journal was falsy and fell through to the
+persisted copy, which was usually about right — the wrong-file bug was hidden
+behind a second bug that happened to mask it.  Correcting the first, so an
+empty hold could stand, let the wrong file speak: no cargo after startup, and
+a capacity read from whatever ship was flown in May.
+
+`find_latest_journal()` has always chosen by name.  The cargo replay and the
+hull bootstrap in `ship_health.py`, which had the same mtime sort, now agree
+with it.
+
+---
+
+### Fixed: a dimmed or highlighted value stopped being monospace
+
+The GUI aligns its value columns by rendering them in a monospace face, which
+`QLabel[role="val"]` supplied.  But a value's colour is carried by that same
+role: `classes_to_props` turns `"val dim"` into `role="dim"` and
+`"val highlight"` into `role="highlight"`, and neither named a font family, so
+either one dropped the value back to the proportional face.  Every column the
+shared helpers had padded into line then lined up with nothing.
+
+The cargo manifest's new column headings were the visible case — the headings
+are dimmed, so Tonnes, Price and Value were set proportionally above monospace
+figures and sat over none of them.  The fault was not new and was not confined
+to cargo; the headings were simply the first place two rows that had to agree
+were coloured differently.
+
+Monospace is now keyed on a property `KVRow` sets on its value label once and
+never rewrites, rather than on the role, because the role is exactly what
+changes when the colour does.  Prose rows are untouched: they are not value
+columns and do not carry the property.
+
+The terminal dashboard was never affected — a terminal has one cell width —
+and its headings were checked against the same data to confirm it.
+
+---
+
+## Released in 20260913
+
+### Fixed: sold cargo came back after every restart
+
+The hold cannot be read from any one journal event, so it is rebuilt at
+startup by replaying the recent journals: the last event carrying a manifest
+is the baseline, and everything that moved cargo afterwards is applied on top.
+Sales were skipped, on the stated grounds that a sale emits its own cargo
+event which resets the baseline.
+
+It does emit one.  It carries no manifest.  In a real capture, selling 120 t
+of Tritium produced `Count: 127` with no Inventory, and selling the remaining
+127 t of Low Temperature Diamonds produced `Count: 0` with no Inventory.
+Neither reset anything, so both cargoes stayed in the hold across every
+restart, and a Thortveitite transfer made three hours later was added on top
+of goods that had been sold.  The panel read 326 t of a 1024 t hold with 79 t
+aboard, and reported 82M credits of cargo when 38M was there.
+
+The replay now applies `MarketSell`, `MarketBuy` and `EjectCargo` as well, and
+a Ship cargo event reading `Count: 0` empties the hold whether or not it names
+a manifest — that being the one count-only form whose contents are not in
+doubt.  A count-only event with a non-zero count is still left alone: the
+journal does not say what the count is made of, and `Cargo.json` on disk
+belongs to the present rather than to the replayed moment, which after an SRV
+session means it is the SRV's.
+
+Alongside it, a second fault in the same handful of lines: the replayed result
+was applied with `if items:`, so an empty hold — falsy — fell through to the
+persisted copy.  Even once the sales were replayed correctly, a sold-out hold
+would have kept its old contents.  The test is now against `None`.
+
+The regression test replays that capture event for event.
+
+---
+
+### Added: column headings on the cargo manifest
+
+The manifest showed three unlabelled numbers per row and left the reader to
+work out that the middle one was per tonne and the last was the line total.
+Both front ends now head the ship's hold and the SRV's with Commodity, Tonnes,
+Price and Value, built from the same column widths as the rows so the headings
+sit over what they name, and placed above the rule so it underlines them.
+
+---
+
+### Fixed: the GUI collapsed the column padding the TUI lines up with
+
+The cargo manifest lines up its three columns — tonnes, price per tonne, line
+value — by padding each to a fixed width in `core.ui_helpers`.  Both front
+ends call the same helper and receive the same string, which is why this was
+invisible from the code: the strings were never wrong.
+
+Every label in the Qt window is `Qt.RichText`, and Qt collapses runs of spaces
+exactly as a browser does, so the padding was being squeezed to a single space
+between the label and the screen.  `    57K cr` arrived as `57K cr`, the
+separators in a manifest lined up with nothing, and the totals row — whose
+price column is deliberately blank but full width, so the line still sits
+under what it totals — rendered as `| |`.
+
+`to_html` now protects runs of two or more spaces, and a leading single space,
+as non-breaking.  Ordinary single spaces between words are left alone so the
+prose rows elsewhere in the window still wrap.  This was never specific to
+cargo: any column the shared helpers pad was arriving squashed, and all of
+them now line up.
+
+The tests round-trip each value through a real `QLabel` and a `QTextDocument`
+and assert on where the separators land, because comparing the built strings
+against each other proves nothing when both front ends are handed the same
+one.
+
+---
+
+## Released in 20260912
+
+### Added: the sell table, as two files and a popup
+
+The catalogue answers what a commodity is worth on average.  It does not
+answer the question actually asked on arriving somewhere with a full hold,
+which is what this place will pay, and in what order to unload.  Market.json
+holds that answer for as long as the commander stands there, sorted by
+Frontier's own ordering rather than by anything useful.
+
+Two files now sit beside the catalogue and are rewritten on the same trigger:
+`data/cargo.commodities.md` and `data/cargo.commodities.html`.  Each carries a
+heading naming the market being quoted and a two-column table of localised
+commodity name against price, most valuable first.  The HTML is standalone —
+no stylesheet to ship beside it, and it follows the reader's light or dark
+preference rather than assuming one.
+
+Which market gets quoted comes from `cargo_price_context()`, the same resolver
+the Cargo panel prices the manifest against, so the panel and these files can
+never name different markets: a Spansh target when one is set and loaded, the
+station underfoot otherwise, and the galactic average when there is neither.
+The galactic figures come from the catalogue rather than from
+`cargo_mean_prices`, because the catalogue is the only source that carries a
+display name alongside the price, and a table of internal symbols would not be
+readable.
+
+Carriers are excluded throughout.  A fleet or squadron carrier market is
+player-run, mobile, and rewritten without notice, so docking at one leaves the
+files and the popups describing whatever was quoting beforehand, exactly as if
+the commander had not docked at all.  The catalogue still absorbs a carrier's
+commodities — identity is worth having wherever it turns up — but its prices
+never reach the sell table.  The carrier test is a substring match rather than
+a list of station types: Frontier writes `FleetCarrier`, Spansh writes
+`Drake-Class Carrier`, and a squadron carrier will be a third spelling that
+nobody has captured yet.  Nothing else in the game has "carrier" in its station
+type, so the looser test is both sufficient and does not need revisiting.  The
+Market.json reader's existing `FleetCarrier` check widens to the same rule,
+which means a squadron carrier no longer prices the manifest either — it never
+should have.
+
+Only prices an NPC will actually pay appear.  Stations list carrier-only
+commodities and quote a sell price for them regardless, and nobody in the
+galaxy will honour it: the three Titan Maw tissue samples list at 476,614,
+317,614 and 209,527 cr at an ordinary Coriolis station, which put one of them
+second in the table at almost every market in the bubble.  The tell is that
+they carry no galactic average, because there is no NPC trade in them to
+average — every other tissue sample, Titan Deep included at nearly half a
+million, has one and sells perfectly well.
+
+So the exclusion is the absence of a galactic average, not the absence of
+demand.  A station with nothing on order still pays, and filtering on demand
+would have cut the table from 367 rows to 67 and hidden most of what is worth
+carrying.  The commodities concerned are read from the catalogue rather than
+from the market in hand, which means the judgement improves as more markets
+are seen: a commodity that shows a real average anywhere drops out of the
+exclusion everywhere, and an empty catalogue excludes nothing rather than
+guessing.  Matching is on the display name, since Frontier's internal symbol
+for a Titan Maw sample is `thargoidtissuesampletype10a` and no other source
+spells it that way.  The catalogue still records them — it records everything
+— it just stops quoting them.
+
+The popup opens on a Mineable tab, with All Items behind it.  Arriving with a
+hold full of ore, the question is about ore, and the unfiltered table answers
+it badly: at a real captured market the most valuable line is Iridium at
+542,736 cr, which cannot be mined, and the first thing that can is four rows
+down.  Mineable cuts that market from 364 rows to 53.  Both tabs carry their
+count in the tab label, so the size of each is known before it is opened.
+
+What can be mined is stated in `data/mining.py`, because Frontier publishes no
+flag for it, and it is nearly all category: everything in Minerals is mined,
+plus ten named Metals — the refinery outputs — and four named Chemicals, the
+ice-ring yields and carrier tritium.  Those fourteen are exactly what appears
+in `MiningRefined` and `ProspectedAsteroid` across a real 210-journal capture;
+nothing outside Minerals turned up beyond them.  Leaning on the category is
+what keeps the table cheap: a mineral added in a future update is mined the
+day it ships without an edit, and only a new mineable metal or chemical would
+need one.
+
+Both tables stripe their rows.  Two columns a hundred rows deep are hard to
+read across without one, and the price sits at the far edge from the name.
+The stripe is a new derived palette entry, `$row-alt`: the block fill pulled
+12% toward the text colour, which lightens it on the dark palettes and darkens
+it on the light one with no per-theme case, and which custom themes inherit
+without stating anything.
+
+That figure is set by the terminal rather than by taste.  The obvious choice
+was `$title-bg`, already one step above the block fill and already what the
+panel title bars use — but one step is six points per channel, and a
+256-colour terminal quantises `#1c1810` and `#241e16` onto the same xterm
+entry.  Six of the eight palettes collapsed that way.  The stripe was
+therefore perfectly visible in the Qt window, which is always truecolor, and
+completely absent in the terminal, which is exactly how it was reported.
+Anything under a 10% blend still collides somewhere; 12% clears every palette
+with margin and still reads as about a 9% step where truecolor is available.
+A test now quantises both colours for every palette and fails if they land on
+the same entry.
+
+Neither front end got there for free.  Textual has no `:nth-child`, so the
+stripe is a class applied while composing, and the two labels in a row had to
+be made transparent or they punched the block fill back through the middle of
+it.  Qt supplies an `alternate-background-color` of its own when the
+stylesheet states none, and its default is a light grey that is unreadable on
+every dark palette here; the tables are now styled from the palette like
+everything else, header and gridlines included.  The tests assert on rendered
+colour — sampled across each row's full width in the TUI, and from the
+rendered viewport in the GUI — because a class that is applied but paints
+nothing looks exactly like working code from the source.  Rendering in
+truecolor was not enough on its own, though: that is what passed while the
+terminal showed nothing.
+
+Mineability is decided once, on the row, rather than by each surface — the
+files carry it too even though neither renders it, so a later decision to
+split them the same way needs no second opinion about what a mineral is.
+
+`Ctrl+S` opens the same table as a popup in both front ends, and closes it
+again; `Esc` closes it too.  The key was free — EDLD saves nothing on demand —
+and a second press reaches the popup's own binding rather than the app's,
+which is the arrangement `Ctrl+O` already uses for Preferences.  The GUI also
+carries it as View → Sell Table.  Both front ends ask the Cargo component for
+the table rather than building one, so all four surfaces render the same dict
+and a commander comparing the popup against the file sees one answer.
+
+The popup is built when it is opened rather than cached, so it reflects the
+market underfoot at that moment even when no Market.json has been written
+since the last time it was looked at.  The GUI window is non-modal and reused
+between openings, which means it has to be refilled rather than rebuilt — a
+window that kept its first table would quote a station left behind hours ago.
+
+Tests render both popups for real and assert where the columns landed, rather
+than that the widgets exist.  Existence was what let an off-screen footer
+survive review once already.
+
+---
+
+### Added: a running catalogue of every commodity seen
+
+Market.json is a snapshot of one station, overwritten the next time the
+commander docks, so the galactic average it carries for each commodity is
+visible while standing there and gone afterwards.  The prices were already
+being kept — `cargo.json` accumulates a name-to-price map so the manifest can
+still be priced after leaving — but only the price, with nothing to say which
+commodity it belonged to beyond a lowercase symbol, and no record of when it
+moved.
+
+EDLD now keeps `data/cargo.commodities.csv` alongside the other per-commander
+files: one row per commodity, carrying its internal symbol, Frontier's numeric
+id, both localised names, its category, and the galactic average last recorded
+for it, with the first sighting, the last price change, and a count of how many
+times the price has moved.  A commodity is written once and its row is rewritten
+whenever `MeanPrice` drifts from what is on file, so the catalogue accumulates
+across stations and sessions rather than tracking the station underfoot.
+
+It follows Market.json wherever it is written from — the existing file watcher
+picks up a market opened from the galaxy map within two seconds, and the
+`Market`, `Docked` and `Location` events update it immediately when they fire
+first.  All of them are guarded on the file's modification time, so one market
+write is one pass no matter how many of them notice it.
+
+Fleet Carrier markets are included, which is the one place this parts company
+with the manifest pricing: `_read_market_json` discards them because their
+`MeanPrice` of 0 is useless for pricing cargo, but a carrier still names real
+commodities worth cataloguing.  A zero is treated as the absence of a galactic
+average rather than a new one — it never overwrites a price already on file and
+never counts as drift — so a carrier visit cannot flatten the catalogue.  The
+same rule covers the Thargoid tissue samples, which report zero at ordinary
+station markets too: they are recorded, and their rows fill in if Frontier ever
+gives them an average.
+
+The catalogue is a side record, so it is built not to take anything with it if
+it fails.  A ledger that cannot be created leaves the Cargo component loading
+normally, an unreadable file is rebuilt from the next market, and a failed write
+leaves the previous file intact — but none of those pass quietly, which is the
+failure mode this codebase keeps paying for.  Each one is reported to the debug
+log.
+
+`_canonicalise_key` in the Cargo component now delegates to the catalogue's
+canonicaliser rather than keeping a second copy of the same regex, so the two
+cannot disagree about whether `$gold_name;` and `gold` are the same commodity —
+a disagreement there would be two rows for one commodity and no drift ever
+detected on either.
 
 ---
 

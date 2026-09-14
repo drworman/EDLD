@@ -51,7 +51,9 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | ⚠️ **Inactivity Warnings** | Alerts on kill rate drop or extended period without kills |
 | ✕ **Session Management** | Optional, opt-in auto-quit of the game on configured triggers — SLF destroyed, low fuel, or low hull. **Solo mode only**; runtime toggle with Ctrl+K |
 | 💵 **Lifetime Financial Ledger** | Journal-derived earnings and spending by category, voucher reconciliation (issued vs redeemed), and carrier-bank flow — built from 27 credit-moving event types because in-game Statistics fields like `Trading.Goods_Sold` are unreliable |
-| 📦 **Cargo** | The Ship window's first tab: the hold sorted cheapest-per-tonne first so the jettison candidate leads, with units, unit price and line value in three columns. Stolen goods flagged, limpets set apart, Spansh target-market price comparison, and the SRV's tonnage alongside when one is out |
+| 📦 **Cargo** | The Ship window's first tab: the hold sorted cheapest-per-tonne first so the jettison candidate leads, under Commodity / Tonnes / Price / Value headings, followed live from `Cargo.json` so it stays right even when the journal lags. Stolen goods flagged, limpets set apart, Spansh target-market price comparison, and the SRV's tonnage alongside when one is out |
+| 💱 **Sell Table** | Ctrl+S in either interface: what the market being quoted pays for every commodity, most valuable first, opening on a Mineable tab with All Items behind it. Written out alongside it as Markdown and HTML for use outside the app. Carrier markets are ignored throughout, and prices no NPC will honour are left out |
+| 🗃️ **Commodity Catalogue** | Every commodity ever seen in `Market.json`, recorded once with its id, names and category, and re-recorded whenever its galactic average drifts. Market.json is overwritten on the next dock; this is not |
 | ⚗️ **Engineering** | The Ship window's third tab: materials across Raw, Manufactured and Encoded categories, plus Odyssey ShipLocker contents |
 | 🚀 **Assets Tabs** | Full fleet overview in the Commander window — wallet with At-Risk holdings and net worth, stored ships with loadouts, stored modules, and a tab each for a fleet carrier and a squadron carrier, shown only when you own one |
 | 🧑 **Commander Window** | Identity, squadron, home location, PowerPlay standing and ship condition — hull, shields and fuel on the default Info tab — with rank progression and the full asset tabs alongside. Adapts to SRV, on-foot and fighter states |
@@ -147,6 +149,22 @@ bash install.sh
 `--mode textual|terminal|gui` form still works and means the same thing.
 
 If no `config.toml` exists, EDLD creates one with defaults and prints its location on startup. Set `JournalFolder` to your ED journal directory before proceeding.
+
+### Keys
+
+The same bindings work in the terminal dashboard and the desktop window. The
+desktop window carries all of them on its menus as well.
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+S` | Sell table — what this market pays, most valuable first. Press again or `Esc` to close |
+| `Ctrl+O` | Preferences |
+| `Ctrl+R` | Reset the session counters |
+| `Ctrl+L` | Clear the alert feed |
+| `Ctrl+K` | Arm or disarm session management ([guide](docs/guides/SESSION_MANAGEMENT.md)) |
+| `Ctrl+T` | End the game session immediately |
+| `Ctrl+Q` | Quit EDLD |
+| `F11` | Full screen (desktop window only) |
 
 ---
 
@@ -246,6 +264,6 @@ only when you choose to connect.
 
 <img src="images/edld_avatar_512.png" width="56" alt="EDLD"/>
 
-**ED Live Dashboard** · by CMDR SILVAN HOLLOWAY
+**ED Live Dashboard** · by CMDR MERRICK CALBRUIN
 
 </div>

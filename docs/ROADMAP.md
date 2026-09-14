@@ -6,6 +6,30 @@ Last updated: 20260906
 
 ## Recently shipped
 
+**Cargo manifest accuracy** (20260914) — the hold is now followed from
+`Cargo.json` rather than inferred from journal events, journals are selected by
+filename rather than modification time, and the SRV's hold is restored at
+startup. Each of these was a case of the manifest disagreeing with the game;
+see the changelog for what each one looked like from the outside.
+
+**Sell table and commodity catalogue** (20260912) — `Ctrl+S` in either
+interface opens what the quoted market pays for each commodity, most valuable
+first, on a Mineable tab with All Items behind it. The same table is written
+beside the catalogue as Markdown and HTML on every market read.
+
+Two decisions in there are worth keeping if this is extended. Carrier markets
+are excluded everywhere the table is concerned — they are player-run and
+mobile, and the test is a substring match on the station type rather than a
+list, because Frontier writes `FleetCarrier` and Spansh writes `Drake-Class
+Carrier`. And a commodity with no galactic average is dropped from the table
+rather than shown: stations quote a sell price for carrier-only goods that no
+NPC will honour, which otherwise put a Titan Maw tissue sample near the top of
+almost every market in the bubble.
+
+What can be mined lives in `data/mining.py` and is mostly category rather than
+a list — everything in Minerals, plus ten named Metals and four Chemicals — so
+a mineral added in a future update needs no edit.
+
 **Cross-platform desktop interface** (20260811) — a PySide6 window rendering
 the same dashboard as the terminal interface, with prebuilt binaries for Linux,
 Windows and macOS. This is what prompted the rename from ED Linux Dash to ED

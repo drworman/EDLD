@@ -223,6 +223,102 @@ Discord.WebhookURL = 'https://discord.com/api/webhooks/...'
 
 ---
 
+## How the hold is read
+
+Nothing here is configurable. It is written down because when the cargo
+manifest disagrees with the game, the reason is almost always one of these two.
+
+**Journals are read in filename order, not by modification time.** Elite names
+them with an ISO timestamp, so they sort chronologically on their own.
+Modification times do not survive a copy, a sync, or a search-and-replace
+across the directory, and EDLD once rebuilt a hold from journals four months
+stale because the four newest by mtime were the four it had touched last.
+
+**The hold itself is followed from `Cargo.json`, not inferred from events.**
+Journal events name a count and nothing else once the hold is large, so the
+manifest is reconstructed by replaying the recent journals and then taking
+`Cargo.json` — which the game rewrites whenever the hold changes — as the
+current word. That file is polled every two seconds alongside `Market.json`,
+so the manifest stays right even when the journal lags.
+
+It is applied strictly by vessel. `Cargo.json` describes whichever hold last
+changed, ship or SRV, and the two are never mixed.
+
+**A journal that stops growing while the game runs** costs everything the
+event stream carries — the game mode, the location, the session — even though
+the hold keeps updating. That is worth knowing because the usual cause is
+outside the game: a rotation, a sync, or an in-place edit of a file the game
+has open. Replacing such a file leaves the game writing to a handle that no
+longer has a name, and everything after that moment is invisible on disk.
+
+---
+
+## Market files
+
+Three files are written into the commander's data directory — the same place
+as `cargo.json` and the window layout — and rewritten whenever the game writes
+a new `Market.json`. Nothing here is configurable; they are listed so you know
+where to find them and what they mean.
+
+| File | Contents |
+|------|----------|
+| `data/cargo.commodities.csv` | Every commodity ever seen in a market |
+| `data/cargo.commodities.md` | The sell table, as Markdown |
+| `data/cargo.commodities.html` | The sell table, as a standalone HTML page |
+
+### The catalogue
+
+`Market.json` is a snapshot of one station and is overwritten the next time you
+dock, so the galactic average it carries for each commodity is visible while
+you are standing there and gone afterwards. The CSV keeps a running record
+instead: one row per commodity, written once and rewritten whenever its
+`MeanPrice` drifts.
+
+```
+name,id,name_localised,category,category_localised,mean_price,first_seen,last_updated,updates
+gold,128049154,Gold,metals,Metals,47113,2026-09-12T04:11:22Z,2026-09-12T04:11:22Z,0
+```
+
+Rows are keyed on `name`, the internal symbol, and the file is sorted by `id`
+so successive versions diff cleanly. `updates` counts how many times the price
+has moved since `first_seen`, which is the closest thing here to a volatility
+figure.
+
+A commodity is recorded even when the market reports a `MeanPrice` of 0 —
+identity is worth having wherever it turns up — but a zero never overwrites a
+price already on file, so a carrier visit cannot flatten the catalogue. Such a
+row heals itself the first time the commodity appears at a station market.
+
+### The sell table
+
+The Markdown and HTML files are two renderings of what you would be shown by
+pressing **Ctrl+S**: a heading naming the market being quoted, and a
+two-column table of commodity against price, most valuable first. The HTML is
+standalone — no stylesheet to keep beside it — and follows your reader's light
+or dark preference.
+
+Which market gets quoted is resolved the same way the Cargo panel prices your
+manifest, so the panel and these files can never name different markets: a
+Spansh target market when one is set and loaded, the station you are docked at
+otherwise, and the galactic average when there is neither.
+
+Two things are deliberately left out.
+
+**Carrier markets.** Fleet and squadron carriers are player-run, mobile, and
+rewritten without notice, so docking at one leaves the files and the popup
+describing whatever was quoting beforehand. The catalogue still records a
+carrier's commodities; its prices just never reach the sell table.
+
+**Prices no NPC will pay.** Stations list carrier-only commodities and quote a
+sell price for them that nobody in the galaxy will honour — the Titan Maw
+tissue samples list at over 470,000 cr at an ordinary starport. The tell is
+that they carry no galactic average, so any commodity the catalogue has never
+seen an average for is left out of the table. This is not a demand filter: a
+station with nothing on order still pays, and filtering on demand would hide
+most of what is worth carrying.
+
+---
+
 ## Data Contributions (opt-in)
 
 All data contribution features are **opt-in** and disabled by default.  They are configured in their own `[SECTION]` blocks and all require a restart when changed (❌).  Settings can be managed in the **Preferences → Data & Integrations** tab.
