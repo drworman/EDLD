@@ -164,7 +164,7 @@ class ShipHealthPlugin(BasePlugin):
         try:
             jdir = Path(self.core.journal_dir)
             journals = sorted(jdir.glob("Journal*.log"),
-                              key=lambda p: p.stat().st_mtime, reverse=True)
+                              reverse=True)   # by name: see cargo.py
         except Exception:
             return
 
