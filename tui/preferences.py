@@ -75,6 +75,19 @@ _RESTART_KEYS: dict[str, set[str]] = {
 
 # ── Screen ────────────────────────────────────────────────────────────────────
 
+def _coerce(raw: str, typ: type):
+    """Best-effort cast of a widget's string value, falling back to the text."""
+    raw = (raw or "").strip()
+    if typ is bool:
+        return raw.lower() in ("true", "1", "on", "yes")
+    if not raw:
+        return 0 if typ in (int, float) else ""
+    try:
+        return typ(raw)
+    except (ValueError, TypeError):
+        return raw
+
+
 class PreferencesScreen(ModalScreen):
     """Full-screen preferences overlay — Ctrl+O to open, Escape to cancel."""
 
@@ -91,6 +104,7 @@ class PreferencesScreen(ModalScreen):
         self._restart_required = False
         # Pre-compute plugin-injected tabs before compose() runs so that
         # the compose generator is pure widget-yielding with no plugin I/O.
+        self._cached_bindings = None
         self._cached_extra_tabs = self._extra_tabs()
 
     def compose(self) -> ComposeResult:
@@ -476,6 +490,13 @@ class PreferencesScreen(ModalScreen):
             section, key = _BOOL_MAP[wid]
             self._record(section, key, event.value == "true")
             return
+        bound = self._plugin_bindings().get(wid)
+        if bound:
+            section, key, typ = bound
+            raw = str(event.value)
+            self._record(section, key,
+                         raw == "true" if typ is bool else _coerce(raw, typ))
+            return
         elif wid.startswith("notif-"):
             event_key = wid[6:]
             try:
@@ -509,6 +530,11 @@ class PreferencesScreen(ModalScreen):
                 return
             self._record(section, key, coerced)
             return
+        bound = self._plugin_bindings().get(wid)
+        if bound:
+            section, key, typ = bound
+            self._record(section, key, _coerce(val, typ))
+            return
 
 
     def _record(self, section: str, key: str, value: object) -> None:
@@ -535,6 +561,41 @@ class PreferencesScreen(ModalScreen):
             self._capi_connect()
         elif bid == "btn-capi-disconnect":
             self._capi_disconnect()
+        else:
+            self._component_action(bid)
+
+    def _component_action(self, bid: str) -> None:
+        """Route a button from a component-injected tab back to its component.
+
+        The dispatch above names every button this screen builds itself, and an
+        injected tab could therefore draw a button that did nothing at all —
+        the same shape of gap that left injected settings unsaved. A component
+        handles its own button by implementing preferences_action(id) and
+        returning a short status string; if it also yielded a Label with the id
+        f"{bid}-result", the string lands there.
+        """
+        for plugin in self._core._plugins.values():
+            fn = getattr(plugin, "preferences_action", None)
+            if not callable(fn):
+                continue
+            try:
+                # Values are gathered live from the widgets, not from the
+                # pending-change map: a field the commander has typed into but
+                # not saved is exactly the one an action like "record what I am
+                # standing on" needs, and nothing has been applied yet.
+                try:
+                    result = fn(bid, self._widget_values())
+                except TypeError:
+                    result = fn(bid)
+            except Exception as exc:
+                result = f"{type(exc).__name__}: {exc}"
+            if result is None:
+                continue
+            try:
+                self.query_one(f"#{bid}-result", Label).update(str(result))
+            except Exception:
+                pass
+            return
 
     # ── Component-injected preference tabs ────────────────────────────────────
 
@@ -550,16 +611,55 @@ class PreferencesScreen(ModalScreen):
         for plugin in self._core._plugins.values():
             fn = getattr(plugin, "tui_preferences_tab", None)
             if callable(fn):
-                print(f"[EDLD] _extra_tabs: found tui_preferences_tab on {plugin.PLUGIN_NAME!r}")
                 try:
                     entry = fn()
                     if entry:
                         result.append(entry)
                 except Exception as _e:
-                    import traceback as _tb
-                    print(f"[EDLD] _extra_tabs error for {plugin.PLUGIN_NAME!r}: {_e}")
-                    _tb.print_exc()
+                    # Textual owns the terminal in this mode, so a print here
+                    # draws over the dashboard.  The debug log is the only
+                    # channel that is safe to write to from inside the app.
+                    try:
+                        from core import debug as _debug
+                        _debug.exception(
+                            f"preferences tab from {plugin.PLUGIN_NAME!r} failed",
+                            _e)
+                    except Exception:
+                        pass
         return result
+
+    def _widget_values(self) -> dict:
+        """Current contents of every Input and Select on the screen, by id."""
+        from textual.widgets import Input as _Input, Select as _Select
+
+        out: dict[str, str] = {}
+        for kind in (_Input, _Select):
+            for w in self.query(kind):
+                if w.id:
+                    out[w.id] = "" if w.value is None else str(w.value)
+        return out
+
+    def _plugin_bindings(self) -> dict:
+        """Widget id to (section, key, type), declared by the components.
+
+        The hardcoded maps below cover the tabs this screen builds itself.  A
+        component that injects a tab knows its own widget ids and its own
+        config keys, and having to also register them here meant the injection
+        hook only half worked: a plugin could draw a tab whose controls silently
+        did nothing on save.
+        """
+        if self._cached_bindings is None:
+            merged: dict = {}
+            for plugin in self._core._plugins.values():
+                fn = getattr(plugin, "preferences_bindings", None)
+                if not callable(fn):
+                    continue
+                try:
+                    merged.update(fn() or {})
+                except Exception:
+                    pass
+            self._cached_bindings = merged
+        return self._cached_bindings
 
     # ── CAPI helpers ──────────────────────────────────────────────────────────
 

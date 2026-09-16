@@ -36,7 +36,7 @@ import re
 # old format that this migration is designed to eliminate.
 STANDARD_SECTIONS: frozenset[str] = frozenset({
     "Settings", "Discord", "LogLevels", "UI",
-    "EDDN", "EDSM", "EDAstro", "Inara", "CAPI",
+    "EDDN", "EDSM", "EDAstro", "Inara", "CAPI", "SurfaceSurvey", "Overlay", "OverlayPanels",
 })
 
 # Matches any TOML section header that indicates old-format content:
@@ -448,6 +448,7 @@ def load_setting(
     category: str,
     defaults: dict,
     warn_missing: bool = True,
+    include_extra: bool = False,
 ) -> dict:
     """Resolve a settings block with profile → global → default fallback.
 
@@ -455,6 +456,20 @@ def load_setting(
       1. config[config_profile][category][key]   (if profile active)
       2. config[category][key]
       3. defaults[key]
+
+    ``include_extra`` also returns keys present in the file but absent from
+    ``defaults``.
+
+    Without it the loop below iterates ``defaults`` and nothing else, so a key
+    that is not declared as a default is invisible however plainly it is
+    written in config.toml — read back as missing, reported as missing, and
+    silently discarded on the next write that rewrites the section. That is
+    correct for a fixed schema and wrong for a section whose keys are not known
+    until runtime: the overlay names one key per panel, and panels come from
+    whichever components happen to be loaded. Those sections pass True.
+
+    Extra keys are returned exactly as found, with no type checking, because
+    there is no declared type to check them against.
     """
     settings = {}
 
@@ -489,6 +504,12 @@ def load_setting(
             value = defaults[key]
 
         settings[key] = value
+
+    if include_extra:
+        for source in (global_cat, profile_cat):
+            for key, value in source.items():
+                if key not in defaults:
+                    settings[key] = value
 
     return settings
 
@@ -570,6 +591,7 @@ class ConfigManager:
         category: str,
         defaults: dict,
         warn_missing: bool = True,
+        include_extra: bool = False,
     ) -> dict:
         """Convenience wrapper using stored config and profile."""
         return load_setting(
@@ -578,6 +600,7 @@ class ConfigManager:
             category,
             defaults,
             warn_missing,
+            include_extra,
         )
 
     def refresh(self, terminal_print: bool = True) -> bool:

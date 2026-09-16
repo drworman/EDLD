@@ -58,7 +58,13 @@ class CoreAPI:
         data_provider=None,
         trace_mode: bool = False,
         launch_argv: list[str] | None = None,
+        ui_mode: str = "",
     ):
+        #: Which front end is running: "gui", "textual" or "terminal".
+        #: Components that only make sense against a windowed session — the
+        #: overlay — need to know, because "terminal" is a scrolling log with
+        #: no window to sit beside.
+        self.ui_mode        = (ui_mode or "").lower()
         self.state          = state
         self.data           = data_provider   # DataProvider — unified source of truth
         self.active_session = active_session
@@ -164,9 +170,14 @@ class CoreAPI:
         """Shorthand for self.emitter.emit(...)."""
         self.emitter.emit(**kwargs)
 
-    def load_setting(self, category: str, defaults: dict, warn: bool = True) -> dict:
-        """Shorthand for self.cfg.load_setting(...)."""
-        return self.cfg.load_setting(category, defaults, warn)
+    def load_setting(self, category: str, defaults: dict, warn: bool = True,
+                     include_extra: bool = False) -> dict:
+        """Shorthand for self.cfg.load_setting(...).
+
+        ``include_extra`` is needed by any section whose keys are not known
+        until runtime — see core/config.load_setting.
+        """
+        return self.cfg.load_setting(category, defaults, warn, include_extra)
 
     @property
     def app_settings(self) -> dict:

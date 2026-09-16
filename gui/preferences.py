@@ -149,11 +149,24 @@ class PreferencesDialog(QDialog):
         self._tabs.addTab(self._tab_display(),  "Display")
         for tab_id, tab_label, builder in self._extra_tabs():
             try:
-                widget = builder()
+                # Builders are handed this dialog so their controls can record
+                # changes through the same _record() path as every other tab.
+                # Without it an injected tab could draw its settings but never
+                # save them, which is why nothing used this hook before.  The
+                # bare call is kept for any builder written against the old
+                # signature.
+                try:
+                    widget = builder(self)
+                except TypeError:
+                    widget = builder()
                 if widget is not None:
                     self._tabs.addTab(widget, tab_label)
-            except Exception:
-                pass
+            except Exception as exc:
+                try:
+                    from core import debug as _debug
+                    _debug.exception(f"preferences tab {tab_id!r} failed", exc)
+                except Exception:
+                    pass
         lay.addWidget(self._tabs, 1)
 
         bottom = QHBoxLayout()
@@ -179,6 +192,26 @@ class PreferencesDialog(QDialog):
         box.currentIndexChanged.connect(
             lambda _i, s=section, k=key, b=box:
             self._record(s, k, b.currentData() == "true")
+        )
+        return box
+
+    def _choice_combo(self, current: str, section: str, key: str,
+                      choices: "list[str] | tuple[str, ...]") -> QComboBox:
+        """A picker over a fixed vocabulary.
+
+        Anything with a closed set of valid values should use this rather than
+        a text field: a typed setting can be wrong and has to be validated,
+        reported and ignored, and the commander finds out by noticing that
+        nothing happened.
+        """
+        box = QComboBox()
+        for choice in choices:
+            box.addItem(str(choice).title(), str(choice))
+        current = str(current)
+        idx = next((i for i, c in enumerate(choices) if str(c) == current), 0)
+        box.setCurrentIndex(idx)
+        box.currentIndexChanged.connect(
+            lambda _i, s=section, k=key, b=box: self._record(s, k, b.currentData())
         )
         return box
 
