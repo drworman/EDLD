@@ -23,12 +23,31 @@ from core.activity import ActivityProviderMixin
 from core.emit import fmt_credits
 
 
+def _overlay_credits(value) -> str:
+    """Short credit formatting for the overlay.
+
+    Not fmt_credits(): the overlay has a fraction of the width of a dashboard
+    panel, and a full-precision balance is the single widest thing that would
+    ever appear on it.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    for limit, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if abs(v) >= limit:
+            return f"{v / limit:.2f}{suffix} cr"
+    return f"{v:.0f} cr"
+
+
 class ActivityIncomePlugin(BasePlugin, ActivityProviderMixin):
     PLUGIN_NAME         = "income"
     PLUGIN_DISPLAY      = "Income Activity"
     PLUGIN_VERSION      = "1.0.0"
     PLUGIN_DESCRIPTION  = "Tracks total session credit income and credits-per-hour rate."
     ACTIVITY_TAB_TITLE  = "Income"
+    #: Career section name, which differs from the tab title here.
+    CAREER_SECTION      = "Credits"
 
     SUBSCRIBED_EVENTS = [
         "RedeemVoucher",
@@ -123,6 +142,37 @@ class ActivityIncomePlugin(BasePlugin, ActivityProviderMixin):
             "value": fmt_credits(self.total_income),
             "rate":  self._cph(),
         }]
+
+    # ── overlay ───────────────────────────────────────────────────────────────
+
+    OVERLAY_PANELS = ("income",)
+
+    def overlay_panel(self, panel_id: str, ctx):
+        """Credits, and what this session has added to them.
+
+        The balance lives here rather than on the commander panel: it is a
+        number about money, and it belongs next to the rate that is changing
+        it. A commander who wants to see what they are earning wants to see
+        what they have.
+        """
+        if panel_id != "income":
+            return None
+        from core.overlay_panels import Panel
+
+        state = getattr(self.core, "state", None) if self.core else None
+        rows: list[tuple[str, str]] = []
+
+        balance = getattr(state, "assets_balance", None) if state else None
+        if balance is not None:
+            rows.append(("Credits:", _overlay_credits(balance)))
+
+        if self.total_income:
+            rate = self._cph()
+            earned = fmt_credits(self.total_income)
+            rows.append(("Session:", f"{earned} | {rate}" if rate else earned))
+
+        return Panel(id="income", title="INCOME", rows=rows) if rows else None
+
 
     def get_session_rows(self) -> list[dict]:
         """Every earning stream, then the total and the rate.

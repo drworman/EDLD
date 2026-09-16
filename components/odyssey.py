@@ -45,6 +45,8 @@ class ActivityOdysseyPlugin(BasePlugin, ActivityProviderMixin):
     PLUGIN_VERSION     = "2.0.0"
     PLUGIN_DESCRIPTION = "Tracks on-foot deployments, SRV use, settlements, taxis, and materials."
     ACTIVITY_TAB_TITLE = "Odyssey"
+    #: Career section name, which differs from the tab title here.
+    CAREER_SECTION      = "On foot"
 
     SUBSCRIBED_EVENTS = [
         "Disembark",

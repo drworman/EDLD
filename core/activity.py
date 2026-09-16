@@ -50,6 +50,120 @@ class ActivityProviderMixin:
         """Return True if there is any non-zero activity to display."""
         return False
 
+    # ── overlay ───────────────────────────────────────────────────────────────
+    #
+    # An activity component already answers both questions the overlay needs.
+    # ``has_activity()`` is the relevance test — it is what decides whether this
+    # activity gets a tab in the session block at all — and
+    # ``get_summary_rows()`` is already the condensed subset, because that is
+    # exactly what the Summary tab needs it to be. Asking components to
+    # reimplement either for the overlay would be writing a second answer to a
+    # question they have already answered, and the two would drift.
+    #
+    # So the default panel is the summary rows, trimmed to what fits over a
+    # game. A component overrides ``overlay_panel()`` only when the overlay
+    # wants something the dashboard does not show — cargo's two holds, the
+    # survey compass's bearings — not merely to have a panel at all.
+
+    #: How many summary rows survive the trip to the overlay. The dashboard has
+    #: a column; the overlay has a corner of someone's game.
+    OVERLAY_MAX_ROWS: int = 4
+
+    @property
+    def OVERLAY_PANELS(self) -> tuple[str, ...]:
+        """Panel ids this component offers.
+
+        Derived from the plugin name so an activity component contributes a
+        panel without declaring anything.
+        """
+        name = getattr(self, "PLUGIN_NAME", "") or ""
+        return (name,) if name else ()
+
+    #: Career section in ``core.summary_model.career_sections`` that
+    #: corresponds to this activity, when there is one. A component whose
+    #: figures are session-only leaves it None and its scope setting is never
+    #: offered, because a choice between career and session is meaningless
+    #: where only one of the two exists.
+    CAREER_SECTION: str | None = None
+
+    #: How much of each row to show. Overridden per panel from config; see
+    #: components/overlay.py.
+    OVERLAY_SCOPE: str = "session"
+
+    def overlay_career_rows(self, core) -> list[dict]:
+        """This activity's career rows, or empty if it has no career figures."""
+        # Falls back to the activity's own tab title, which matches the career
+        # section name for most of them. An activity with no matching section
+        # simply has no career figures, and that is the same answer.
+        section = getattr(self, "CAREER_SECTION", None) \
+            or getattr(self, "ACTIVITY_TAB_TITLE", None)
+        if not section or core is None:
+            return []
+        try:
+            from core.summary_model import career_sections
+            for block in career_sections(core) or []:
+                if str(block.get("title", "")) == section:
+                    return [r for r in block.get("rows", []) if r.get("value")]
+        except Exception:
+            return []
+        return []
+
+    def overlay_has_career(self, core) -> bool:
+        """Whether a career/session choice means anything for this activity.
+
+        Asked by the preferences page so the scope picker is only offered where
+        both halves exist — a dropdown choosing between career and session on
+        an activity that has only one of them is a control that does nothing.
+        """
+        return bool(self.overlay_career_rows(core))
+
+    def overlay_panel(self, panel_id: str, ctx):
+        """Default panel: this activity's rows, at the configured scope."""
+        if panel_id != getattr(self, "PLUGIN_NAME", None):
+            return None
+        scope = str(getattr(self, "OVERLAY_SCOPE", "session") or "session")
+        core = getattr(self, "core", None)
+
+        try:
+            session_rows = self.get_summary_rows() or [] \
+                if self.has_activity() else []
+        except Exception:
+            session_rows = []
+        career_rows = self.overlay_career_rows(core) if scope != "session" else []
+
+        if scope == "career":
+            rows, session_by_label = career_rows, {}
+        elif scope == "both":
+            # Career is the figure, session is the parenthetical. A commander
+            # who wants both wants to know what today added to the total, not
+            # to read two separate numbers and do the subtraction.
+            rows = career_rows or session_rows
+            session_by_label = {str(r.get("label", "")): r for r in session_rows}
+        else:
+            rows, session_by_label = session_rows, {}
+
+        if not rows:
+            return None
+
+        from core.overlay_panels import Panel
+        out: list[tuple[str, str]] = []
+        for row in rows[:max(1, int(self.OVERLAY_MAX_ROWS))]:
+            label = str(row.get("label", "") or "")
+            value = str(row.get("value", "") or "")
+            rate = row.get("rate")
+            # The rate is the half of a session row worth covering a game for —
+            # a total is knowable afterwards, a rate is only interesting now.
+            if rate:
+                value = f"{value}  {rate}"
+            twin = session_by_label.get(label)
+            if twin and twin is not row and twin.get("value"):
+                value = f"{value} (Session: {twin['value']})"
+            out.append((label, value))
+        return Panel(id=panel_id,
+                     title=str(getattr(self, "ACTIVITY_TAB_TITLE", "") or
+                               panel_id).upper(),
+                     rows=out)
+
     def _duration_seconds(self) -> float:
         """Seconds elapsed since session_start_time (wall clock).
 

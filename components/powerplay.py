@@ -114,6 +114,39 @@ class ActivityPowerplayPlugin(BasePlugin, ActivityProviderMixin):
     def has_activity(self) -> bool:
         return self.merits_earned > 0
 
+    # ── overlay ───────────────────────────────────────────────────────────────
+
+    OVERLAY_PANELS = ("powerplay",)
+
+    def overlay_panel(self, panel_id: str, ctx):
+        """Who you are pledged to, and how far up you are. Nothing else.
+
+        Unpledged commanders get no panel at all — not an empty one, not one
+        reading "None". PowerPlay is opt-in, and an overlay line that exists
+        only to say a feature is switched off is worse than the space it takes.
+
+        Deliberately not the mixin's default, which would report session merits
+        and only while some had been earned. Allegiance and rank are true the
+        moment you undock, and they are what a pledged commander would put on
+        screen.
+        """
+        if panel_id != "powerplay":
+            return None
+
+        state = getattr(self.core, "state", None) if self.core else None
+        power = (getattr(state, "pp_power", None) if state else None) or self.power
+        if not power:
+            return None
+
+        from core.overlay_panels import Panel
+
+        rank = (getattr(state, "pp_rank", None) if state else None)
+        if rank is None:
+            rank = self.rank_current
+        rows = [("", f"Rank {rank}")] if rank is not None else []
+        return Panel(id="powerplay", title=str(power), rows=rows)
+
+
     def get_summary_rows(self) -> list[dict]:
         dur  = self._duration_seconds()
         rows = []

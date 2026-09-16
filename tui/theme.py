@@ -191,6 +191,11 @@ PreferencesScreen Input:focus { border: round $accent; }
 /* Notification level selector — compact width, one per event row */
 /* Boolean On/Off selector — just wide enough for "On" / "Off" + arrow */
 .pref-bool-sel  { width: 12; }
+/* Wide enough for the longest option text plus the dropdown arrow.  12 was
+   sized for On/Off and wrapped anything longer — "top-centre" came out as
+   "Cent" / "re" across two lines, and "Reserve" as "Rese" / "rve". */
+.pref-choice    { width: 18; }
+.pref-choice-lg { width: 24; }
 
 /* Notification level selector */
 .pref-notif-sel { width: 22; }

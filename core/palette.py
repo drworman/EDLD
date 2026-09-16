@@ -53,6 +53,22 @@ PALETTES: dict[str, dict[str, str]] = {
         "$amber":    "#f8e45c",
         "$red":      "#e05c5c",
     },
+    # ── Elite Dangerous ───────────────────────────────────────────────────────
+    # The cockpit HUD's default orange. Not one of the "EDLD Default" family:
+    # those are EDLD's own identity, this one deliberately matches the game so
+    # an overlay sitting on top of it does not look like a different program.
+    "elite-orange": {
+        "$bg":       "#0a0704",
+        "$block-bg": "#150d05",
+        "$title-bg": "#1f1407",
+        "$fg":       "#ffb761",   # HUD body text
+        "$dim":      "#8a5a22",   # muted amber, for labels
+        "$accent":   "#ff7100",   # ED orange
+        "$border":   "#3a2207",
+        "$green":    "#57e389",
+        "$amber":    "#f8e45c",
+        "$red":      "#e05c5c",
+    },
     # ── Default Blue ──────────────────────────────────────────────────────────
     # Accent #3d8fd4 — blue.
     "default-blue": {
@@ -184,6 +200,7 @@ PALETTES = {name: derive(pal) for name, pal in PALETTES.items()}
 #: Display names for the built-in themes, in the order the preferences
 #: selectors present them.  Shared so the TUI and GUI offer the same list.
 THEME_CHOICES: list[tuple[str, str]] = [
+    ("Elite Dangerous",     "elite-orange"),
     ("EDLD Default",        "default"),
     ("EDLD Default Dark",   "default-dark"),
     ("EDLD Default Green",  "default-green"),
@@ -193,6 +210,33 @@ THEME_CHOICES: list[tuple[str, str]] = [
     ("EDLD Default Yellow", "default-yellow"),
     ("EDLD Default Light",  "default-light"),
 ]
+
+
+#: Colour theme names the overlay offers, plus the escape hatch.
+#:
+#: "custom" means the explicit TitleColour / LabelColour / ValueColour settings
+#: are used verbatim. Picking a theme overwrites what is drawn but not what is
+#: stored, so switching to custom brings back whatever was set before rather
+#: than whatever the last theme happened to be.
+OVERLAY_THEME_CHOICES: list[tuple[str, str]] = (
+    [("Custom", "custom")] + THEME_CHOICES
+)
+
+
+def overlay_colours(theme: str) -> dict | None:
+    """Title / label / value colours for a theme, or None for custom.
+
+    Derived from the palette rather than listed separately, so a theme added to
+    palette.py reaches the overlay without anything else being edited.
+    """
+    if not theme or theme == "custom":
+        return None
+    pal = PALETTES.get(theme)
+    if not pal:
+        return None
+    return {"TitleColour": pal.get("$accent", "#7aa2d2"),
+            "LabelColour": pal.get("$dim", "#9aa4b2"),
+            "ValueColour": pal.get("$fg", "#cfd6e4")}
 
 
 def _repo_root() -> Path:

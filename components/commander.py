@@ -574,3 +574,93 @@ class CommanderPlugin(BasePlugin):
                 state.last_sc_exit_mono = _time.monotonic()
                 state.pilot_body        = event.get("Body")
                 if gq: gq.put(("cmdr_update", None))
+    # ── overlay ───────────────────────────────────────────────────────────────
+    #
+    # This component owns commander and ship identity, so it owns the overlay
+    # panels about them.  Both are pure identity — no context gate — because
+    # what a streamer wants on camera is not conditional on what they are
+    # doing.  `auto` therefore behaves like `on` here, and that is correct
+    # rather than a missing check.
+
+    OVERLAY_PANELS = ("commander", "ship")
+
+    def overlay_panel(self, panel_id: str, ctx):
+        from core.overlay_panels import Panel
+
+        s = getattr(self.core, "state", None) if self.core else None
+        if s is None:
+            return None
+
+        if panel_id == "commander":
+            name = getattr(s, "pilot_name", None)
+            if not name:
+                return None
+            # The name is the header. A "COMMANDER" title immediately above
+            # "CMDR Merrick Calbruin" spends a line of a very small display
+            # saying the same thing twice.
+            rows = []
+            squad = getattr(s, "pilot_squadron_name", "") or ""
+            tag = getattr(s, "pilot_squadron_tag", "") or ""
+            if squad:
+                rows.append(("", f"{squad} [{tag}]" if tag else squad))
+            loc = getattr(s, "pilot_location", "") or ""
+            if loc:
+                rows.append(("", str(loc)))
+            return Panel(id="commander", title=f"CMDR {name}", rows=rows) \
+                if rows or name else None
+
+        if panel_id == "ship":
+            # Titled for what the commander is actually in. "SHIP" while
+            # sitting in an SRV is the kind of small wrongness that makes a
+            # reader stop trusting the rest of the panel, and the information
+            # needed to get it right is already in the frame's context.
+            if getattr(ctx, "in_srv", False):
+                title, vessel = "SRV", getattr(s, "srv_type", None)
+            elif getattr(ctx, "on_foot", False):
+                title, vessel = "ON FOOT", getattr(ctx, "suit_name", "") or None
+            else:
+                title, vessel = "VESSEL", None
+            ship = getattr(s, "pilot_ship", None)
+            name = getattr(s, "ship_name", None)
+            ident = getattr(s, "ship_ident", None)
+            if not (ship or name):
+                return None
+            # The ship's name is the header, the same way the commander's is.
+            # Hull and shields are live status the game already shows on the
+            # HUD in a form that cannot be missed; repeating them here spends
+            # two lines telling the commander something they are already
+            # looking at.
+            heading = f"{name} [{ident}]" if (name and ident) else (name or title)
+            rows: list[tuple[str, str]] = []
+            if vessel:
+                # What they are in right now, when it is not the ship.
+                rows.append(("", str(vessel)))
+            if ship:
+                rows.append(("", str(ship)))
+            value = getattr(s, "capi_ship_value", None)
+            if isinstance(value, dict):
+                total = value.get("total") or value.get("hull")
+                if total:
+                    rows.append(("Value", _overlay_credits(total)))
+            return Panel(id="ship", title=heading, rows=rows) if rows else None
+
+        return None
+
+
+def _overlay_credits(value) -> str:
+    """Short credit formatting for the overlay.
+
+    Deliberately not fmt_credits(): the overlay has a fraction of the width of
+    a dashboard panel, and a full-precision balance is the single widest thing
+    that would ever be on it.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    for limit, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if abs(v) >= limit:
+            return f"{v / limit:.2f}{suffix} cr"
+    return f"{v:.0f} cr"
+
+
