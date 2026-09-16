@@ -16,10 +16,29 @@ ships inside every release archive and every binary.
 | **certifi** | **MPL 2.0** | CA bundle for HTTPS in packaged builds | yes |
 | **PyInstaller** | GPL 2.0 with bootloader exception | build tool | no — not shipped |
 | **Pillow** | MIT-CMU | icon generation | no — not shipped |
+| **JetBrains Mono** | **SIL OFL 1.1** | Streamer Stats Overlay typeface | yes — `fonts/` |
+| **Euro Caps** | freeware | Streamer Stats Overlay typeface | yes — `fonts/` |
 
 Only PySide6 constrains how EDLD is packaged. See
 [docs/LICENSING.md](docs/LICENSING.md) for the full reasoning and for how each
 LGPLv3 condition is met.
+
+## JetBrains Mono
+
+Copyright 2020 The JetBrains Mono Project Authors
+<https://github.com/JetBrains/JetBrainsMono>
+
+Licensed under the SIL Open Font License, Version 1.1. The full text travels
+with the font in `fonts/OFL.txt`, which is what the licence requires. The OFL
+permits bundling with software provided the licence accompanies the font, the
+font is not sold by itself, and a modified copy is not distributed under the
+reserved family name. EDLD ships the files unmodified and sells nothing.
+
+
+## Euro Caps
+
+Freeware, ©2010. Used for the Streamer Stats Overlay's Elite-styled default.
+
 
 ## Qt for Python (PySide6)
 
