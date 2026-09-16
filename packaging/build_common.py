@@ -45,6 +45,16 @@ DATA_FILES = [
     (str(ROOT / ".github" / "FUNDING.yml"), ".github"),
     (str(ROOT / "packaging" / "icons" / "edld.png"), "packaging/icons"),
     (str(ROOT / "themes"), "themes"),
+    # Overlay typefaces. Registered with Qt at runtime from this directory, so
+    # they work without being installed system-wide. Licences travel with them:
+    # OFL.txt is beside the fonts because the OFL requires it, and
+    # THIRD-PARTY-NOTICES.md records what each one is under.
+    (str(ROOT / "fonts"), "fonts"),
+    (str(ROOT / "docs"), "docs"),
+    (str(ROOT / "README.md"), "."),
+    (str(ROOT / "CHANGELOG.md"), "."),
+    (str(ROOT / "INSTALL.md"), "."),
+    (str(ROOT / "sheets"), "sheets"),
     (str(ROOT / "example.config.toml"), "."),
     (str(ROOT / "example.layout.json"), "."),
     # The component sources ship as data as well as compiled code.
