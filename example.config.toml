@@ -240,6 +240,107 @@ Enabled                  = false
 # QuitOnLowFuel        = true
 # QuitOnLowFuelPercent = 15
 
+# ── Surface Mining Survey ─────────────────────────────────────────────────────
+# Planetary mining deposits are recorded automatically as you work them — the
+# game emits no event carrying a position, so EDLD joins each refine to where
+# Status.json says you were standing.  None of that needs configuring.
+#
+# This section is the optional other half: publishing your survey to a Google
+# Sheet and reading back what other commanders found.  Setup is in
+# sheets/README.md — you need a sheet, the Apps Script from sheets/Code.gs
+# bound to it, and the URL and token it gives you.  Experimental.
+#
+[SurfaceSurvey]
+Enabled          = false   # master switch for sharing; recording works regardless
+
+# WebAppURL      = "https://script.google.com/macros/s/.../exec"
+# Token          = ""      # the shared secret set in Code.gs; treat it as a password
+# ReporterName   = ""      # fills the reported_by column; blank publishes anonymously
+
+# Fetch          = true    # read other commanders' deposits on arriving at a body
+# MarkFindsAsTest = false  # flag everything recorded from now on as test data
+# IncludeTest    = false   # publish flagged rows too
+# BatchSize      = 200     # deposits per request; Sheets allows ~60 writes/minute
+
+# AutoConfirm    = true    # driving onto a known deposit refreshes its date
+# ConfirmMetres  = 25.0    # how close that has to be
+
+# ── Streamer Stats Overlay ────────────────────────────────────────────────────
+# Small always-on-top windows drawn over the game — the subset of the dashboard
+# worth putting on camera.  Off by default.
+#
+# Linux needs a running compositor (picom or equivalent) for transparency; i3
+# and other non-compositing window managers do not start one, and without it the
+# overlay paints an opaque panel instead.  Supported on X11, experimental on
+# Windows, and impossible on Wayland, which does not let a client request
+# always-on-top.  Nothing draws over exclusive fullscreen on any platform — run
+# the game borderless windowed.
+#
+# Check what a machine can do:  edld.py --overlay-probe
+# Ask why nothing is showing:   edld.py --overlay-doctor
+#
+[Overlay]
+Enabled       = false
+
+# Placement.  Margin is the gap between the monitor edge and the window; Pad is
+# the gap inside it, between the window edge and the text.  Window height is not
+# a setting — each window grows to fit what it is drawing.
+# Anchor        = "top-centre"   # top-left|top-centre|top-right|bottom-left|bottom-centre|bottom-right
+# Monitor       = 0              # 0-indexed; clamps to the last screen
+# Width         = 720            # width of the top bar, which sets where its zones align
+# MarginX       = 0
+# MarginY       = 40
+# PadX          = 16
+# PadY          = 8
+# DockWidth     = 260            # width of the left/right docked windows
+# DockTop       = 140            # monitor top edge to the top of a dock
+
+# Appearance.
+# ColourTheme    = "elite-orange"  # any EDLD palette, or "custom" to use the three below
+# FontFamily     = ""              # any installed family, plus anything in fonts/ or <data>/fonts/
+# Opacity        = 0.85
+# Scale          = 1.0
+# ShadowOffset   = 1               # 0-2 px; 0 disables the text shadow
+# ShadowStrength = 0.85            # multiplied by Opacity
+
+# Survey compass, when that panel is shown.
+# SpanDegrees   = 90               # width of the compass arc
+# MaxTargets    = 5                # deposits marked on it at once
+
+# ── Overlay panels ────────────────────────────────────────────────────────────
+# Which panels appear, where, and what they show.  Easier to set in
+# Preferences > Overlay than by hand — it lists every panel your components
+# offer, which is not a fixed set.
+#
+# One key per panel per attribute:
+#   PanelZone_<panel>   left | centre | right | dock-left | dock-right
+#   PanelMode_<panel>   on | off | auto   (auto lets the panel decide if it applies)
+#   PanelOrder_<panel>  1-9, position within its zone
+#   PanelScope_<panel>  session | career | both   (only where both figures exist)
+#
+[OverlayPanels]
+# HideMode    = "reserve"   # reserve keeps a hidden panel's space; collapse closes it up
+
+# Type, used by every panel.
+# TitleSize   = 12
+# BodySize    = 13
+
+# Only consulted when ColourTheme is "custom".
+# TitleColour = "#7aa2d2"
+# LabelColour = "#9aa4b2"
+# ValueColour = "#cfd6e4"
+
+# Example: commander and cargo down the left, the survey compass centred.
+# PanelZone_commander = "left"
+# PanelMode_commander = "on"
+# PanelOrder_commander = 1
+# PanelZone_cargo      = "left"
+# PanelMode_cargo      = "auto"
+# PanelOrder_cargo     = 2
+# PanelZone_survey_compass = "centre"
+# PanelMode_survey_compass = "auto"
+# PanelScope_income    = "both"     # career figure with the session in parentheses
+
 # ==============================================================================
 # Custom profiles (advanced)
 # ==============================================================================
@@ -251,6 +352,8 @@ Enabled                  = false
 # Individual settings within a profile follow the same HOT/RESTART rules above.
 # ==============================================================================
 
+# Windows example:
+[EDP1]
 Settings.JournalFolder = "C:/Users/YourName/Saved Games/Frontier Developments/Elite Dangerous"
 Discord.UserID         = 123456789098765432
 Discord.WebhookURL     = 'https://discord.com/api/webhooks/1234567890/your-webhook-token-here'

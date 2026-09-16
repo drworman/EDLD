@@ -34,8 +34,8 @@ Clearing
 --------
 "Clear Route" wipes EDLD's stored route and suppresses the current
 ``NavRoute.json`` by recording a signature of it.  The game's file is left
-alone: EDMC and other tools read it, and the game rewrites it on the next
-plot anyway.  When NavRoute.json next changes, the signature stops matching
+alone: it is shared state that other software on the machine may be reading,
+and the game rewrites it on the next plot anyway.  When NavRoute.json next changes, the signature stops matching
 and following resumes automatically.
 """
 

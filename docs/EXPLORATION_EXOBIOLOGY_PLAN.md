@@ -34,7 +34,12 @@ These hold for every line of code and documentation produced under this plan.
    codebase. In-game terminology (e.g. the *Pioneer Supplies* carrier tax, the
    *Pioneer* exploration rank) and the game publisher / journal spec are not
    attribution and are retained.
-4. **No overlay.** Neither window renders an in-game overlay. Any datum that
+4. **No overlay.** *(Superseded — see
+   [Streamer Stats Overlay](STREAMER_STATS_OVERLAY.md). The reasoning below
+   stands for the exploration and exobiology windows, which still put every
+   datum in a box rather than relying on an overlay to carry it. The overlay
+   was added later for a different purpose: the subset worth putting on camera,
+   not a replacement for having a home in the dashboard.)* Neither window renders an in-game overlay. Any datum that
    would otherwise be surfaced only via an overlay is instead presented inside
    the relevant EDLD box (see Workstream D, navigation aids).
 5. **Process rules** (unchanged): complete files only, destination table on

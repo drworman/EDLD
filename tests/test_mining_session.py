@@ -1,9 +1,9 @@
 """
 tests/test_mining_session.py — mining session tracking and summary layout.
 
-The gaps closed here came from comparing EDLD's mining component against the
-EDMC Mining Analytics plugin.  EDLD already tracked tonnage, TPH, RPM, yield
-distribution and limpet counts; what it had no notion of was:
+EDLD already tracked tonnage, TPH, RPM, yield distribution and limpet counts.
+The gaps closed here are the numbers a commander actually watches during a run
+and which none of that answered:
 
   * how many limpets are left (the thing that ends a run)
   * how full the hold is (the other thing that ends a run)

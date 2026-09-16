@@ -133,6 +133,7 @@ If no config file is found on startup, EDLD creates one with safe defaults and p
 | `cryptography` | CAPI auth and secure transport | pip |
 | `textual>=0.47` | Terminal dashboard (`--tui`) | pip |
 | `PySide6>=6.6` | Desktop window (`--gui`) — optional | pip |
+| A compositor (`picom` or equivalent) | Streamer Stats Overlay transparency on Linux — optional | distro package |
 
 Prebuilt binaries bundle all of the above, including psutil and a CA
 certificate bundle, so they have no external requirements at all.

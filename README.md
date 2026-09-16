@@ -72,6 +72,9 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | 🔌 **Plugin Architecture** | Three-tier plugin loader with per-commander data isolation, named config profiles, plugins dialog with enable/disable controls, and a `plugins/` directory for user plugins |
 | 📚 **Native Documentation Viewer** | In-app viewer for all bundled documentation |
 | 🔍 **Search Modals** | Searchable pickers for home location and Spansh target market, in both interfaces |
+| ⛏️ **Surface Mining Survey** | Planetary deposits recorded automatically as you work them — position joined from `Status.json`, because the game emits no event that carries one. Bodies surveyed from their DSS signal count, deposits confirmed by driving onto them, depletion kept as dated history rather than a deletion. Ctrl+D adds or edits the deposit underfoot, resolved by proximity |
+| 🛰️ **Shared Survey Sheet** | Publish deposits to a Google Sheet and read back what other commanders found, so the compass points at sites you have never seen. Server-side deduplication on a stable deposit id, local observation always wins over the sheet, and a bad row is retired by flagging rather than deleting. Needs no Google Cloud project — a bound Apps Script, a URL and a token (experimental) |
+| 🎥 **Streamer Stats Overlay** | The subset of the dashboard worth putting on camera, drawn over the game itself. Three zones across the top plus docked columns down each side, panels contributed by the components that own the data, each choosing career figures, session figures, or career with the session in parentheses. Windows and X11 (experimental on Windows) |
 | 🔔 **Update Notifier** | Background check for new tagged releases on GitHub; notice surfaced in the terminal, the TUI, and the desktop window |
 
 <div align="center">
@@ -110,6 +113,14 @@ bash install.sh
 ```
 
 > `psutil` has C extensions requiring system libraries — install it via your distro's package manager, not pip. See [INSTALL.md](INSTALL.md) for details.
+
+The Streamer Stats Overlay needs a **running compositor** on Linux for
+transparency — `picom` or equivalent. Window managers that do not composite,
+i3 among them, do not start one. Without it the overlay paints an opaque panel
+instead, which is readable but solid; EDLD detects which case applies and says
+so in `--overlay-probe`. The overlay is supported on X11 and is experimental on
+Windows; Wayland cannot host it at all, because a Wayland client cannot request
+always-on-top or place itself absolutely.
 
 `install.sh` offers to install PySide6 for the desktop interface. Decline it if
 you only use the terminal interfaces — it is the largest dependency by far and
@@ -163,6 +174,8 @@ desktop window carries all of them on its menus as well.
 | `Ctrl+L` | Clear the alert feed |
 | `Ctrl+K` | Arm or disarm session management ([guide](docs/guides/SESSION_MANAGEMENT.md)) |
 | `Ctrl+T` | End the game session immediately |
+| `Ctrl+D` | Add or edit the surface deposit you are parked on — which it is depends on where you are standing ([guide](docs/SURFACE_SURVEY.md)) |
+| `Ctrl+G` | Push pending deposits to the shared survey sheet |
 | `Ctrl+Q` | Quit EDLD |
 | `F11` | Full screen (desktop window only) |
 
@@ -203,6 +216,8 @@ UserID = 123456789012345678
 | [Configuration](docs/CONFIGURATION.md) | All config keys, notification levels, CLI flags, profiles, data integrations (EDDN, EDSM, EDAstro, Inara, Raven Colonial) |
 | [Terminal Output](docs/TERMINAL_OUTPUT.md) | Startup banner, event line format, sigil/tag reference, periodic summary |
 | [Theming](docs/THEMING.md) | Built-in themes, custom theme creation |
+| [Surface Mining Survey](docs/SURFACE_SURVEY.md) | Recording planetary deposits, the add/edit form, and sharing a survey with a squadron |
+| [Streamer Stats Overlay](docs/STREAMER_STATS_OVERLAY.md) | The in-game overlay: panels, placement, appearance, and diagnostics |
 | [Mission Bootstrap](docs/MISSION_BOOTSTRAP.md) | How EDLD reconstructs mission state on startup |
 | [Roadmap](docs/ROADMAP.md) | Active, near-term, and deferred work |
 | [Release Signing](docs/SIGNING.md) | How to verify release artifacts |
