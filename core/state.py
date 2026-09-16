@@ -61,9 +61,29 @@ DEBUG_MODE  = False
 
 
 # ── User data directory ───────────────────────────────────────────────────────
-# Linux: ~/.local/share/EDLD/  (symlinked from ~/.config/EDLD)
+# Linux:   $XDG_DATA_HOME/EDLD  (default ~/.local/share/EDLD), symlinked from
+#          $XDG_CONFIG_HOME/EDLD so ~/.config/EDLD keeps working.
+# Windows: %LOCALAPPDATA%\EDLD
+# macOS:   ~/Library/Application Support/EDLD
+#
+# The XDG layout was the only branch here for as long as EDLD ran only on the
+# machine it was written on.  The release pipeline has shipped Windows and
+# macOS binaries for some time, and on both of those this put the data root at
+# ~/.local/share/EDLD — a directory neither platform shows the user, backs up,
+# or expects anything to be in.
 
 def _user_data_dir() -> Path:
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA")
+        d = (Path(base) if base else Path.home() / "AppData" / "Local") / "EDLD"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    if sys.platform == "darwin":
+        d = Path.home() / "Library" / "Application Support" / "EDLD"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
     base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
     d = base / "EDLD"
     d.mkdir(parents=True, exist_ok=True)
@@ -77,6 +97,23 @@ def _user_data_dir() -> Path:
 
 
 EDLD_DATA_DIR: Path = _user_data_dir()
+
+
+# ── Shared data directory ─────────────────────────────────────────────────────
+# Facts about the galaxy, as opposed to facts about a commander.  A surface
+# mining deposit is in the same place whoever finds it, and a commodity's
+# galactic average is the same number whoever reads it off a market board, so
+# neither belongs under commanders/<fid>/.  Storing them there meant a second
+# commander started from nothing and the two copies then drifted apart.
+#
+# ``explo.db`` already sits at the data root for this reason; this is the
+# directory the rest of it moves into.
+
+def shared_data_dir() -> Path:
+    """Return the cross-commander data directory, creating it if needed."""
+    p = EDLD_DATA_DIR / "data"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 # ── Per-commander data directory ──────────────────────────────────────────────
 

@@ -160,8 +160,16 @@ class CargoPlugin(BasePlugin):
         self._ledger_mtime = 0.0
         self._ledger_lock = __import__("threading").Lock()
         try:
+            # The ledger is a galactic average, not a commander's opinion of
+            # one, so it lives in the shared data directory rather than under
+            # commanders/<fid>/.  Any per-commander copies are consolidated on
+            # the first start after the move; see core/data_migrate.py.
+            from core.data_migrate import migrate_to_shared, shared_ledger_path
+            from core.state import EDLD_DATA_DIR, shared_data_dir
+            migrate_to_shared(EDLD_DATA_DIR, shared_data_dir(),
+                              log=self._ledger_log)
             self._ledger = CommodityLedger(
-                self.storage.file_path("commodities.csv"),
+                shared_ledger_path(),
                 log=self._ledger_log,
             )
             loaded = self._ledger.load()
@@ -776,6 +784,58 @@ class CargoPlugin(BasePlugin):
                     tmp.unlink(missing_ok=True)
                 except OSError:
                     pass
+
+    # ── overlay ───────────────────────────────────────────────────────────────
+    #
+    # The cargo component owns the hold, so it owns the overlay panel about the
+    # hold.  Nothing in core/overlay_panels.py knows what a limpet is or when a
+    # hold is worth showing; returning None below is this component's own
+    # relevance test and is the whole of what `auto` mode consults.
+
+    OVERLAY_PANELS = ("cargo",)
+
+    def overlay_panel(self, panel_id: str, ctx):
+        """How full am I — the one cargo number worth covering the game for.
+
+        In an SRV both holds are reported. The SRV's own hold is what fills
+        while mining and the mothership's is what the run is actually limited
+        by, and a commander who can see only one of them is the one who drives
+        back to a full ship.
+        """
+        if panel_id != "cargo":
+            return None
+        from core.overlay_panels import Panel
+
+        s = self.core.state if hasattr(self, "core") else None
+        s = s or getattr(self, "_state", None)
+        if s is None:
+            return None
+
+        ship_used = sum(int(i.get("count", 0) or 0)
+                        for i in (getattr(s, "cargo_items", {}) or {}).values())
+        ship_cap = int(getattr(s, "cargo_capacity", 0) or 0)
+        rows: list[tuple[str, str]] = []
+
+        if bool(getattr(ctx, "in_srv", False)):
+            srv_used = int(getattr(s, "srv_cargo_count", 0) or 0)
+            # The journal never reports a surface vehicle's capacity, so it
+            # comes from the same table the dashboard uses rather than from a
+            # state field that does not exist — which is why this read "SRV 4"
+            # while the dashboard three feet away read "4/72".
+            from data.ships import srv_cargo_capacity
+            srv_cap = int(srv_cargo_capacity(getattr(s, "srv_type", "")) or 0)
+            rows.append(("SRV", f"{srv_used}/{srv_cap}" if srv_cap else str(srv_used)))
+            if ship_cap:
+                rows.append(("Ship", f"{ship_used}/{ship_cap}"))
+        elif ship_cap:
+            rows.append(("Hold", f"{ship_used}/{ship_cap}"))
+
+        if not rows:
+            # No capacity known and nothing aboard — a panel reading 0/0 is
+            # noise, not information.
+            return None
+        return Panel(id="cargo", title="CARGO", rows=rows)
+
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
