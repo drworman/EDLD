@@ -486,6 +486,35 @@ def _price_source_label(mode: str, tgt_info: dict, tgt_name: str,
     return f"{stn} · {sys_}" if stn and sys_ else (stn or sys_ or "Gal. Avg")
 
 
+def _trace_price(key, mode, gal, tgt, gal_avg, tgt_sell, docked_sell, price) -> None:
+    """Record where one manifest price came from.
+
+    Price provenance was not observable from outside: the manifest shows a
+    number and the header shows a market, and when those two disagree there is
+    nothing to say which of four inputs produced the number or whether the
+    commodity was in the market table at all. Running with --trace produced
+    nothing useful here because nothing in this path wrote a line.
+
+    Cheap enough to leave in — one formatted string per held commodity per
+    render, only when tracing is on.
+    """
+    try:
+        from core import debug as _debug
+        if not _debug.is_enabled():
+            return
+        source = ("pinned-galactic" if mode == "galactic"
+                  else "target" if (mode == "target" and tgt_sell)
+                  else "station" if (mode == "station" and docked_sell)
+                  else "fallback-mean")
+        _debug.trace(
+            f"[price] {key}: chose {price} via {source} | mode={mode} "
+            f"in_station_table={'yes' if gal else 'NO'} "
+            f"in_target_table={'yes' if tgt else 'NO'} "
+            f"docked_sell={docked_sell} tgt_sell={tgt_sell} gal_avg={gal_avg}")
+    except Exception:
+        pass
+
+
 def cargo_manifest(items: dict, ctx: dict) -> tuple[list[dict], list[dict]]:
     """Enrich, split and order one hold.
 
@@ -528,6 +557,8 @@ def cargo_manifest(items: dict, ctx: dict) -> tuple[list[dict], list[dict]]:
             price = tgt_sell or gal_avg
         else:
             price = docked_sell or gal_avg
+
+        _trace_price(key, mode, gal, tgt, gal_avg, tgt_sell, docked_sell, price)
 
         row = dict(name=name, count=count, price=price,
                    stolen=bool(info.get("stolen", False)))

@@ -1111,8 +1111,15 @@ class CAPISource:
         if not isinstance(items, list):
             items = []
         processed = {}
+        from core.commodity_ledger import canonical_name as _canon
         for c in items:
-            key = (c.get("name") or "").lower()
+            # Canonicalise exactly as the Market.json path does.  These two
+            # build the same structure and are looked up with the same keys,
+            # but only one of them was normalising: a CAPI name that differs in
+            # form from the canonical one produced an entry nothing could find,
+            # so the commodity silently fell through to the persisted galactic
+            # average while its neighbours priced correctly off the station.
+            key = _canon(c.get("name") or "")
             if not key:
                 continue
             processed[key] = {
@@ -1132,9 +1139,16 @@ class CAPISource:
             "star_system":  data.get("starsystem", ""),
             "commodities":  processed,
         }
+        # Merge rather than replace.  This is the fallback map the manifest
+        # prices against when a commodity is missing from the current market,
+        # and assigning a single station's subset over it discarded every
+        # average learned elsewhere — including for the commodities most likely
+        # to need the fallback, which are the ones this station does not trade.
         mean_prices = {k: v["mean_price"] for k, v in processed.items() if v["mean_price"]}
         if mean_prices:
-            state.cargo_mean_prices = mean_prices
+            existing = getattr(state, "cargo_mean_prices", None) or {}
+            existing.update(mean_prices)
+            state.cargo_mean_prices = existing
 
         # ── Fleet Carrier bartender (fcmaterials_capi/1) ─────────────────────
         # CAPI /market for a fleet carrier includes orders.onfootmicroresources
