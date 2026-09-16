@@ -68,6 +68,14 @@ parser.add_argument("--version", action="store_true",
                     help="Print the version and exit")
 parser.add_argument("--selftest", action="store_true",
                     help="Verify both front ends can be imported, then exit")
+parser.add_argument("--overlay-renderer", action="store_true",
+                    help=argparse.SUPPRESS)
+parser.add_argument("--overlay-probe", action="store_true",
+                    help="Report whether this machine can show the overlay, then exit")
+parser.add_argument("--overlay-doctor", action="store_true",
+                    help="Explain why the overlay is or is not drawing, then exit")
+parser.add_argument("--overlay-selftest", action="store_true",
+                    help="Draw a fixed test frame for 20 seconds, then exit")
 
 args = parser.parse_args()
 
@@ -97,6 +105,18 @@ except Exception:
 if args.version:
     print(VERSION)
     sys.exit(0)
+
+# The overlay renderer is a child of a running EDLD, re-executing this binary
+# because a frozen build has no interpreter beside it to run a module with.  It
+# must be dispatched before anything else here touches stdout, which the
+# renderer uses as its protocol channel.  --overlay-probe is the same code path
+# with the window skipped, for answering "will this work on my machine" without
+# starting EDLD at all.
+if args.overlay_renderer or args.overlay_probe or args.overlay_selftest:
+    from core.overlay_proc import main as _overlay_main
+    _flags = (["--probe"] if args.overlay_probe
+              else ["--selftest"] if args.overlay_selftest else [])
+    sys.exit(_overlay_main(_flags))
 
 # --selftest imports each front end and reports, then exits. It exists because
 # a packaged build can fail at import in ways a source checkout never does:
@@ -237,6 +257,13 @@ trace_mode  = bool(args.trace) if args.trace is not None else DEBUG_MODE
 # profile overrides.
 mgr = ConfigManager(config_dict, config_path, config_profile=args.config_profile)
 
+# Reads the live ConfigManager, so it sees the same file, profile and
+# resolution order the running app does. A doctor that built its own view of
+# the config would end up diagnosing itself.
+if args.overlay_doctor:
+    from core.overlay_doctor import run as _overlay_doctor
+    sys.exit(_overlay_doctor(mgr))
+
 
 # ── State and session objects ─────────────────────────────────────────────────
 
@@ -299,36 +326,43 @@ if not journal_file:
 
 # ── Commander name — for profile auto-detection ───────────────────────────────
 
-try:
-    for _raw in journal_file.read_text(encoding="utf-8", errors="replace").splitlines():
-        try:
-            _j = json.loads(_raw.strip())
-            if _j.get("event") in ("Commander", "LoadGame") and _j.get("Name"):
-                state.pilot_name = _j["Name"]
-                break
-        except ValueError:
-            pass
-except OSError:
-    pass
+# Scan backwards through journals, newest first.  Reading only the current
+# journal was enough right up until the game was started and left at the main
+# menu: Elite writes a new journal on launch and does not emit Commander or
+# LoadGame until a commander is actually loaded in, so the newest file is a
+# Fileheader and some Music events and nothing else.
+#
+# The FID scan below has always known this — its comment says so in as many
+# words — and the name lookup simply never had the same treatment applied. The
+# consequence was not a missing label: pilot_name is what profile
+# auto-detection keys on, what EDSM and Inara wait for before sending anything,
+# and what the overlay's commander panel needs before it will draw. One
+# unscanned file made all of them sit idle until the commander logged in.
 
-# ── Commander FID — for per-commander data directory ─────────────────────────
-# Scan backwards through journals to find FID.  The current journal may only
-# contain a Fileheader if the game just created it; prior journals are reliable.
-
-def _scan_fid_from_journals(jdir: Path) -> str:
-    """Return the Frontier account FID from the most recent journal that has one."""
+def _scan_journals(jdir: Path, field: str) -> str:
+    """Return ``field`` from Commander/LoadGame in the newest journal that has it."""
     for _jp in sorted(jdir.glob("Journal*.log"), reverse=True):
         try:
-            for _line in reversed(_jp.read_text(encoding="utf-8", errors="replace").splitlines()):
+            for _line in reversed(_jp.read_text(encoding="utf-8",
+                                                errors="replace").splitlines()):
                 try:
                     _ev = json.loads(_line.strip())
-                    if _ev.get("event") in ("Commander", "LoadGame") and _ev.get("FID"):
-                        return _ev["FID"]
+                    if _ev.get("event") in ("Commander", "LoadGame") and _ev.get(field):
+                        return _ev[field]
                 except ValueError:
                     pass
         except OSError:
             pass
     return ""
+
+
+state.pilot_name = _scan_journals(journal_dir, "Name") or None
+
+# ── Commander FID — for per-commander data directory ─────────────────────────
+
+def _scan_fid_from_journals(jdir: Path) -> str:
+    """Return the Frontier account FID from the most recent journal that has one."""
+    return _scan_journals(jdir, "FID")
 
 from core.state import set_active_fid, get_last_fid
 
@@ -500,6 +534,7 @@ core = CoreAPI(
     journal_dir=journal_dir,
     data_provider=data_provider,
     launch_argv=sys.argv,
+    ui_mode=ui_mode,
 )
 data_provider._plugin_call = core.plugin_call
 

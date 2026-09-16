@@ -53,6 +53,7 @@ from core.emit import (
     rate_per_hour,
     clip_name,
 )
+from core import surface_survey as _surface_survey
 
 
 # ── Process detection ─────────────────────────────────────────────────────────
@@ -107,6 +108,16 @@ def _max_notify_level(notify_levels: dict) -> int:
 _STATUS_JSON_POLL_INTERVAL = 0.5
 
 
+def _status_log(message: str) -> None:
+    """Report a Status.json poller fault.  Never raises: the poller is a
+    daemon thread and a logging failure must not be what stops it."""
+    try:
+        from core import debug as _debug
+        _debug.log(message, level="ERROR")
+    except Exception:
+        pass
+
+
 def _poll_status_json(
     journal_dir: Path,
     state: MonitorState,
@@ -130,6 +141,8 @@ def _poll_status_json(
     last_on_foot = False
     last_body    = ""
     last_pos_emit = 0.0
+    last_error_sig: str | None = None
+    error_repeats = 0
 
     while True:
         try:
@@ -189,6 +202,13 @@ def _poll_status_json(
                         state.surface_altitude  = data.get("Altitude")
                         state.planet_radius     = data.get("PlanetRadius")
                         body = data.get("BodyName", "") or ""
+                        # Surface mining carries no position of its own: every
+                        # deposit EDLD records is a MiningRefined event joined
+                        # against one of these samples on time.  See
+                        # core/surface_survey.py.
+                        pos = _surface_survey.position_from_status(data, time.time())
+                        if pos is not None:
+                            _surface_survey.POSITIONS.add(pos)
                     else:
                         state.surface_latitude = state.surface_longitude = None
                         state.surface_heading  = state.surface_altitude  = None
@@ -209,8 +229,22 @@ def _poll_status_json(
                         gui_queue.put(("vessel_update", None))
                         gui_queue.put(("slf_update",    None))
                         gui_queue.put(("plugin_refresh", "assets"))
-        except Exception:
-            pass
+        except Exception as exc:
+            # This was `except Exception: pass`, which is why a Status.json the
+            # poller could never parse looked exactly like a game that was not
+            # running: no hull, no fuel, no balance, no position, and nothing
+            # anywhere saying why.  A torn read of a file the game rewrites
+            # twice a second is normal and must not flood the log, so the first
+            # of each distinct fault is reported and repeats are counted.
+            sig = f"{type(exc).__name__}: {exc}"
+            if sig != last_error_sig:
+                if last_error_sig is not None and error_repeats:
+                    _status_log(f"...previous Status.json fault repeated "
+                                f"{error_repeats} more time(s)")
+                last_error_sig, error_repeats = sig, 0
+                _status_log(f"Status.json poll failed — {sig}")
+            else:
+                error_repeats += 1
         time.sleep(_STATUS_JSON_POLL_INTERVAL)
 
 
