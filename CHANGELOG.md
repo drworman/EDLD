@@ -1,6 +1,1164 @@
 # EDLD CHANGELOG
 
-Last updated: 20260914
+Last updated: 20260916
+
+---
+
+## Released in 20260916
+
+### Added: keybinds and a window for adding and editing a deposit
+
+**Ctrl+D** opens a form for the deposit underfoot. **Ctrl+G** pushes everything
+pending to the shared sheet. Both are bound identically in the TUI and the GUI,
+and the GUI also carries them on a Survey menu.
+
+One binding covers adding and editing, because the commander does not know
+which they are doing until EDLD has looked at where they are standing.
+`form_for_here()` resolves that by proximity — the same rule every other action
+in the survey uses — and returns either blanks and a "New deposit" heading or
+the stored values and an "Editing" one.
+
+Typed values reach a sheet other people read, so validation is a module of its
+own with tests rather than a few `strip()` calls in a dialog. A malformed row
+on a shared sheet is not a local mistake: it is a row somebody else fetches,
+fails to parse, and blames on their own install. Amount and density are matched
+case-insensitively against Frontier's vocabularies, rigs and signal numbers are
+range-checked, and a hand-typed commodity canonicalises to the journal's own
+spelling so it deduplicates against a captured one.
+
+An empty field means leave it alone rather than set it to nothing — editing the
+amount must not silently blank the density recorded last week. A rejected form
+stays open with the reason on it rather than discarding what was typed.
+
+The commodity cannot be changed on an existing deposit. It is part of the
+deposit's identity, and altering it would leave the id pointing at something
+else on every sheet that already has the row.
+
+Both windows build their controls from one field list and submit through one
+component method, so neither can drift from the other on what a deposit has or
+on what counts as valid.
+
+### Added: published deposits carry the body's facts
+
+A deposit was reaching the sheet with five of its twenty-three columns empty —
+coordinates and a commodity, but no planet class, gravity, atmosphere or
+volcanism, which is what tells a squadron whether a site is drivable. The
+survey only learned those from a `Scan` in the current session, and a body
+scanned months ago produces none.
+
+EDLD already had all of it. `explo.db` holds a planets table with exactly those
+columns, from the same scans; it was simply never asked. The body record is
+filled from the catalogue before a deposit is written, blanks only, so a live
+`Scan` still wins.
+
+### Added: a deposit can be flagged as test data
+
+The config switch flags everything recorded from now on and cannot reach the
+one row that was a mistake. **Flag as test** and **Unflag** act on the deposit
+underfoot, resolved by position like every other action there. Flagged rows
+stay in the local store and are held back from the sheet, so a bad row is
+retired without deleting the evidence.
+
+### Changed: the overlay is released on Linux and experimental elsewhere
+
+X11 with a compositor is tested and supported. Windows and macOS are untested
+and stay experimental — `--overlay-probe` turns a report from either into a
+capability line. Wayland remains unsupported for protocol reasons rather than
+effort ones.
+
+The compositor is documented as a dependency rather than a nicety: without one
+there is no alpha channel to composite into. EDLD falls back to an opaque panel
+so the text stays readable, but transparency needs picom or equivalent running.
+
+### Fixed: published deposits had no system name
+
+The first real row to reach a shared sheet named the body and left the system
+column empty — `Ega 3 a` with no `Ega`. A row that names the rock but not the
+system is one nobody else can use.
+
+The system name was only ever written to the body record by the `Scan` handler.
+A body scanned in an earlier session produces no `Scan` in this one, so the
+record was created by the signal census or by the deposit flush, both of which
+knew the body name and not the system. It is carried into every path that
+touches a body now, from whatever event last said where we were — and
+`FSDJump` was added to the subscriptions because in a session that starts in
+supercruise it is often the only event that says.
+
+### Added: the survey reads back, not just up
+
+The sheet was write-only. EDLD published deposits and never fetched any, which
+made the in-game compass point exclusively at sites the commander had already
+found — which the game's own HUD is already showing them, with a marker and a
+distance. That is not a feature; the shared half was the feature, and it did
+not exist.
+
+On arriving at a body, EDLD asks the sheet what is known about it and merges
+the answer into the local store. The compass then points at deposits nobody
+running this has ever seen.
+
+Scoped to one body rather than pulling the sheet down, because that is the
+question being asked, and once per body per session — arriving, leaving and
+coming back should not spend three requests to learn the same thing. There is a
+**Fetch this body** button for when it should.
+
+Imported rows are stamped as already published, so a deposit that came down
+never goes back up. Without that every commander would re-publish every other
+commander's finds on their next flush and the sheet would spend its write quota
+echoing itself.
+
+Local observation wins. An imported row only fills fields the local row does not
+have, and only advances `last_confirmed` if the sheet's is newer: what the
+commander saw with their own eyes is better evidence than what a stranger wrote
+down last month. A deposit you found worked out stays Depleted however rich
+somebody else remembers it.
+
+A sheet that cannot be reached is recorded and carried on from — it is a reason
+to have fewer deposits on the compass, not a reason to stop surveying.
+
+`sheets/Code.gs` gains the read endpoint. It reads the used range once and
+filters in memory rather than a `getRange` per row, which is the difference
+between answering instantly and timing out once a squadron sheet has a few
+thousand rows in it. Test rows are never served.
+
+### Fixed: a finished run of refines was never written
+
+Four tonnes of silver refined with EDLD running, and no deposit, no error, and
+not one log line.
+
+`_flush_pending()` ran only at the end of `_on_refined`. A run of refines
+collapses into a single pending entry that is not ready to be written until
+`_CONFIRM_INTERVAL_S` has passed — so the last refine queued the deposit, found
+it too young to write, and nothing ever ran again to try. The code had
+succeeded at every step up to the final one and then had no reason to execute.
+The silence was the worst part: every diagnostic added for this feature reports
+a failure, and this was not one.
+
+The flush is on a clock now, alongside the proximity check, and that tick runs
+whether or not proximity confirmation is switched on — the flush is not
+optional.
+
+A collapsed run also advances `refine_count` by how many refines there were
+rather than by one, so a deposit worked for an hour and one touched once are
+distinguishable.
+
+### Fixed: SRV cargo had no denominator
+
+The overlay read a `srv_cargo_capacity` state field that does not exist, so it
+showed "SRV 4" while the dashboard three feet away showed "4/72". The journal
+never reports a surface vehicle's capacity; it comes from the same table the
+dashboard uses, and is still omitted rather than guessed at for a vehicle that
+is not in it.
+
+### Added: a reachable way to record the deposit you are standing on
+
+Preferences → Survey → **Record a deposit**: commodity, amount, density, and a
+button. EDLD takes the position from the game; those three are on the HUD and
+in no journal event, so they are the only things it has to ask for. There is a
+**Mark depleted** button beside it.
+
+`record_here()` and `mark_depleted_here()` have existed and been tested since
+they were written, and nothing could call them. That was the whole gap between
+a commander parked on a Helium-3 deposit and a survey with a row in it.
+
+Component buttons now receive the screen's live widget values. Not the
+pending-change map: a field typed into but not yet saved is exactly the one an
+action like "record what I am standing on" needs, and nothing has been applied
+at that point. These are not settings and are deliberately not stored — they
+describe one rock, once.
+
+### Fixed: a hand-typed commodity did not match the journal's spelling
+
+The journal writes `$helium3_name;`; a commander types `Helium-3`. Those
+canonicalised to `helium3` and `helium-3`, so the same rock recorded by hand and
+then refined would have become two deposits. Canonicalisation now drops
+everything that is not a letter or a digit.
+
+### Changed: overlay windows grow to their content
+
+`Height` and `DockHeight` were settings, which meant a stack taller than the
+number was silently clipped — with no way to tell a panel that was missing from
+one that was merely cut off. Career figures made the stacks taller and the
+generous number became the wrong one. Both settings are gone; each window sizes
+itself to the frame it is handed.
+
+Only the height moves. Width stays a setting because it is a real choice: it
+decides where a centred zone centres and where a right zone right-aligns, and
+resizing it underneath the commander would move text they had placed.
+
+### Changed: the overlay is the Streamer Stats Overlay
+
+It is not a second dashboard and has stopped pretending to be one. EDLD already
+is a dashboard and is better at it — a second screen has room for everything and
+you can look at it whenever you like. The overlay carries the subset you cannot
+look away for, and the subset someone else is looking at. The name says which.
+
+`docs/STREAMER_STATS_OVERLAY.md` is new and is the first documentation the
+feature has had: panels, placement, the career/session choice, spacing, type
+and colour, where it will not run, and the three diagnostic commands. Indexed
+from the README, and the preferences page and plugin name use the full name.
+
+The "No overlay" decision in `docs/EXPLORATION_EXOBIOLOGY_PLAN.md` is marked
+superseded rather than rewritten. Its reasoning still stands for the
+exploration and exobiology windows, which put every datum in a box rather than
+relying on an overlay to carry it; the overlay was added later for a different
+purpose, and pretending the earlier decision had said so would lose why those
+windows are built the way they are.
+
+### Changed: the overlay's text shadow is derived from the text
+
+It was a flat black copy offset by one pixel, which is the obvious choice and
+wrong twice over. Against a tinted palette flat black reads as a separate
+colour — a black fringe on Elite orange looks like a printing error — and it
+does nothing at all for the light theme's dark ink, where the shadow has to be
+*lighter* than the text to separate it from the background.
+
+The shadow now keeps the ink's hue and moves its lightness to the far end,
+with saturation pulled down so it reads as depth rather than as a second colour
+in the palette.
+
+The lightness threshold is deliberately low rather than at the midpoint. What
+matters is not whether the ink is light in the abstract but whether it is
+lighter than what is behind it, and what is behind it is the game —
+overwhelmingly dark. A midpoint threshold gave the muted amber label colour a
+near-white shadow, which against a starfield would have been the brightest
+thing on screen.
+
+`ShadowOffset` (0-2 px, 0 disables) and `ShadowStrength` are settings in both
+front ends. The offset is capped at two because past that it stops reading as
+depth and starts reading as a second, blurry copy of the text.
+
+The derivation is a pure function taking and returning a hex string, so the
+colour it picks for every palette can be checked without a display.
+
+### Added: each overlay panel chooses career, session, or both
+
+A per-panel setting alongside zone, position and mode: Session, Career, or
+Career (Session: ). The third puts the career figure first with the session in
+parentheses, because a commander who wants both wants to know what today added
+to the total rather than to read two numbers and do the subtraction.
+
+Career rows come from `core.summary_model.career_sections`, matched to an
+activity by its tab title, so nothing needed wiring up per component — only
+Odyssey and Income name a section that differs from their tab, and they declare
+it. An activity with no matching section has no career figures, and the picker
+is simply not offered for it: a dropdown choosing between career and session
+where only one of them exists is a control that does nothing.
+
+Scope is set on the component just before it is asked for its panel, rather
+than passed through the collector, so a component that overrides
+`overlay_panel()` — cargo, the survey compass, powerplay — is unaffected and
+takes no argument it has no use for.
+
+`Career` also survives a quiet session, which `Session` by definition does not:
+a career figure is true whether or not anything happened today, so a panel set
+to Career is drawn from the first frame.
+
+### Added: a PowerPlay overlay panel
+
+The power's name as the header, the commander's rank beneath it, and nothing
+else. An unpledged commander gets no panel at all — not an empty one, not one
+reading "None". PowerPlay is opt-in, and an overlay line whose only content is
+that a feature is switched off is worse than the space it takes.
+
+It overrides the activity mixin's default rather than using it. That default
+would have reported session merits, and only once some had been earned;
+allegiance and rank are true the moment you undock and are what a pledged
+commander would actually want on screen.
+
+### Fixed: nothing reachable controlled the overlay's distance from the screen edge
+
+`OffsetY` set the gap between the monitor's top edge and the overlay window,
+defaulted to 40, and was exposed in neither front end. The setting that *was*
+exposed, labelled "Padding Y", moved text around inside a window of fixed size.
+So the obvious question — what moves the overlay down the screen — had no
+answer anyone could reach, and the control that looked like the answer was not
+it.
+
+Two layers now, named for what they are:
+
+    Margin   monitor edge  →  window edge   (moves the whole overlay)
+    Pad      window edge   →  first glyph   (breathing room in the box)
+
+Both are settings in both front ends. `OffsetX` and `OffsetY` are still read as
+a fallback, so an existing config keeps the position it had. The docks use the
+same margin as the top bar, so the three windows line up.
+
+### Changed: overlay panel content
+
+Credits moved from the commander panel to income. It is a number about money
+and belongs beside the rate that is changing it — a commander watching what
+they are earning wants to see what they have. Income now reads as a balance and
+a session line with its rate.
+
+The vessel panel is the ship's name and ident as its header, then what you are
+currently in when that is not the ship, then the type and the value. Hull and
+shields are gone: they are live status the game already shows on the HUD in a
+form that cannot be missed, and repeating them spent two lines of a very small
+display telling the commander something they were already looking at.
+
+The header stays the ship whether you are sitting in it, driving an SRV or on
+foot, so it does not move around; what you are in is the first row.
+
+### Changed: the overlay options list is alphabetical
+
+It was grouped by zone and then position, so the page read like the screen —
+but that meant a row jumped the moment its zone changed, and the setting you had
+just edited moved somewhere else in the list.
+
+### Added: Apply & Save redraws the overlay
+
+The overlay watches config.toml's modification time and reloads when it
+changes. Watched rather than hooked, because both front ends write the same
+file and neither had anything to notify a component with; it also means a
+hand-edited config takes effect the same way. Reserved panel heights are
+dropped on reload, since they describe the layout that has just been replaced
+and would otherwise hold gaps open for panels that had been moved or switched
+off.
+
+### Fixed: the commander name was read from one journal file only
+
+Elite writes a new journal the moment it launches and does not emit `Commander`
+or `LoadGame` until a commander is actually loaded in. Start the game and leave
+it at the main menu, start EDLD, and the newest journal is a `Fileheader` and a
+couple of `Music` events — so the name lookup, which read that file and only
+that file, found nothing.
+
+It is not a missing label. `pilot_name` is what config profile auto-detection
+keys on, what EDSM and Inara wait for before sending anything, and what the
+overlay's commander panel needs before it will draw. One unscanned file left
+all of them idle: `Position check skipped — journal preload did not populate
+commander name within 30 s`, `Deferring send — commander name not yet known`,
+and an overlay that reported an empty frame every half second because its only
+enabled panel had nothing to show.
+
+The FID lookup twelve lines below has always known this — its comment says the
+current journal may hold only a Fileheader and that prior journals are reliable
+— and the name lookup simply never had the same treatment. Both now share one
+scanner that walks backwards through journals, newest first, and takes the
+first file that has the field.
+
+### Changed: the commander panel's header is the commander
+
+`CMDR <name>` is the title, with squadron, balance and location beneath it. A
+`COMMANDER` heading directly above `CMDR Merrick Calbruin` spent a line of a
+very small display saying the same thing twice.
+
+### Added: docked overlay windows down the left and right edges
+
+Two more zones, `dock-left` and `dock-right`, each a window against its screen
+edge holding a single stacked column with the same 1-9 positions the top bar
+already had. The top bar keeps its three columns and its zone names —
+renaming `left` to `top-left` would have silently unplaced every panel in every
+existing config, since an unknown zone is reported and skipped.
+
+Each dock is a separate window so it can be sized and placed on its own, and
+because a frame sent an empty element list hides its window: a commander who
+docks nothing never sees them. Dock width, top offset and height are settings.
+
+Both docks lay their text out left-to-right. Right-aligning the right-hand dock
+against a narrow window would press the text into the screen edge, which is
+where it is least readable.
+
+### Changed: the overlay does not start where it cannot work
+
+Terminal mode has no window for an overlay to sit beside, a secondary instance
+is not the machine the game is running on, and a headless session has no
+display at all. None of those are a setting a commander got wrong, so the
+component checks before it reads any config and says which one applied.
+
+`CoreAPI` now carries `ui_mode`, because a component cannot ask which front end
+is running unless something tells it.
+
+### Fixed: the GUI Overlay tab compressed itself into overlapping rows
+
+The panel grid sat in its own scroll area with a stretch factor, inside a tab
+of fixed height. That scroll took the vertical space the form rows above it
+needed, so each was squeezed below its own minimum and the WINDOW and TYPE
+sections drew on top of one another, with the footnote landing across the grid.
+
+Twenty-odd settings will not fit in that tab whatever the arrangement, so the
+page scrolls as one instead: a single scroll area around the whole thing, the
+grid back in the normal flow, and a trailing stretch so the last widget does
+not absorb the slack.
+
+### Added: EDLD ships its overlay fonts
+
+JetBrains Mono and Euro Caps live in `fonts/`, which is in `DATA_FILES` so
+frozen builds carry it. The renderer registers everything it finds there with
+Qt at startup, then does the same for `<data>/fonts/` — so the shipped faces
+work out of the box and a commander can still drop their own in without
+touching fontconfig or needing root. When frozen, the shipped directory is
+found under `sys._MEIPASS`.
+
+JetBrains Mono is SIL OFL 1.1; `fonts/OFL.txt` sits beside it because the
+licence requires the text to travel with the font. Euro Caps is freeware. Both
+are recorded in THIRD-PARTY-NOTICES.md.
+
+### Added: an Elite Dangerous colour theme, and themes for the overlay
+
+`elite-orange` — the cockpit HUD's own orange, `#ff7100` on near-black. It is
+deliberately not one of the "EDLD Default" family: those are EDLD's identity,
+this one matches the game so an overlay sitting on top of it does not look like
+a different program. It is the overlay's default.
+
+The overlay takes a colour theme rather than three colours. The picker offers
+every palette in `core/palette.py` plus Custom, and the title, label and value
+colours are derived from each palette's accent, dim and foreground — so a theme
+added to `palette.py` reaches the overlay with nothing else edited.
+
+A theme overrides what is drawn, never what is stored. Switching back to Custom
+restores whatever the commander had set, rather than whatever the last theme
+happened to leave behind.
+
+### Added: fonts are discovered, not hardcoded
+
+Every `.ttf` and `.otf` in `<data>/fonts/` is registered with Qt at renderer
+startup, so Elite's own faces work by dropping the files in — no fontconfig, no
+root, no system install. The renderer reports which families it registered and
+the preferences page shows them as the font field's placeholder.
+
+Deliberately not a hardcoded list of Elite font names. The set of faces on
+offer is not something this code can know, and a name guessed wrong is a
+setting that silently does nothing.
+
+### Fixed: the first row of every overlay panel was clipped
+
+`drawText` takes a *baseline*; the layout works in tops. Passing a top as a
+baseline puts the whole ascent of the first line above the requested y, so it
+was drawn above the window and cut off — however far the window was padded from
+the screen edge, because the padding was never what was wrong.
+
+### Changed: padding is the commander's, and there is none inside the box
+
+The layout began at a hardcoded eight pixels in and sixteen across. Those are
+now `PadX` and `PadY`, the panel stack starts at zero, and the offset from the
+monitor edge is the only spacing anyone has to reason about.
+
+### Added: font family, sizes and colours
+
+Any locally installed family by name, blank for the default. Title and body
+sizes, and the three colours the panels already used — title, label, value —
+are settings rather than constants.
+
+Line height is derived from the body size rather than fixed. A commander who
+raises the font and finds the rows overlapping each other has been handed a
+setting that breaks the layout, which is worse than not offering one.
+
+### Changed: SHIP is now VESSEL, and says what you are actually in
+
+Titled for the current vehicle: SRV with the SRV's type, ON FOOT with the suit,
+VESSEL otherwise, and what you are in is listed first. "SHIP" while sitting in
+an SRV is the small wrongness that makes a reader stop trusting the rest of the
+panel, and the frame's context already carried what was needed to get it right.
+
+### Fixed: every overlay frame stopped at the thread boundary
+
+The parent was sending nine elements twice a second and logging `sent=True`,
+truthfully. The renderer was running, had reported itself ready, and drew
+nothing.
+
+`QTimer.singleShot` creates its timer in the *calling* thread. The stdin reader
+is a plain worker thread with no Qt event loop, so the timer it created had
+nothing to fire it and every frame was accepted, marshalled, and silently never
+delivered.
+
+That is also exactly why `--overlay-selftest` worked. It calls singleShot from
+the main thread, before `app.exec()`, where there is a loop to run it — so the
+one path that proved the renderer was the one path that did not use the
+mechanism the renderer actually depends on. A working selftest and a blank
+overlay were not contradictory; they were the same fact seen from two sides.
+
+Frames now cross by Qt signal, emitted from the reader and received by an
+object created on the GUI thread, which is what makes the queued connection
+land in the right place. The two `app.quit` calls made from worker threads had
+the same fault and use `QMetaObject.invokeMethod` with a queued connection.
+
+A test walks the AST of `_reader` and `_watch_parent` and fails on any
+`singleShot` in either.
+
+### Added: the overlay component identifies its own build in the trace
+
+Twelve archives in, "is that fix actually applied" has cost more round trips
+than any single defect. The component now logs its version, its placement
+count, how many are active and whether a renderer client was constructed — at
+load, unconditionally, before anything can fail. A trace log now answers which
+build produced it without a repo diff.
+
+Every frame send is logged at TRACE with its element count and whether it went
+out. INFO would drown at two frames a second; TRACE is on exactly when someone
+is diagnosing.
+
+The child reads stdin with `readline()` rather than iterating the file object.
+This was done on the theory that iteration read-ahead was holding frames in a
+buffer — a measurement showed both deliver in under 20 ms on a pipe, so that
+theory was wrong and the change is kept only because an explicit loop is
+clearer about its EOF condition.
+
+### Added: the overlay says what is in its frames
+
+`--overlay-doctor` runs before the components load, so it can report config and
+placement but never whether a frame would actually have content in it. With
+"placement looks sound" and "renderer ready" both true and nothing on screen,
+there was still no way to tell a frame carrying three panels from a frame
+carrying none.
+
+The first frame that goes out is logged with its element count and which panels
+contributed. A frame that comes back empty is logged once, with how many panels
+were asked and how many returned content — because a panel on `auto` deciding
+it does not apply is the most likely reason for an empty frame, and it is
+indistinguishable from a broken one without being told.
+
+### Fixed: the overlay window was invisible, and nothing could tell you so
+
+The renderer started, reported itself ready on xcb with two screens, and drew
+nothing anyone could see.
+
+The capability probe called ``app.isEffectivelyCompositing()``, which does not
+exist on QApplication. Wrapped in ``getattr(..., lambda: True)``, it answered
+True every time, so compositing was reported and never measured. Without a
+compositor there is no alpha channel to composite into, a
+WA_TranslucentBackground window has no meaningful backing store, and the
+overlay renders nothing at all — which is a bare i3 session with no picom, and
+is common. It also explains why the first version, which forced an opaque
+surface through setWindowOpacity, at least produced visible boxes.
+
+Compositing is now measured by asking X who owns the ``_NET_WM_CM_S0``
+selection, through libX11 which is already loaded in any X session. Without a
+compositor the window paints its own background so the text is readable — less
+pretty, and actually there. When the answer cannot be determined it errs toward
+opaque, because assuming a compositor and being wrong renders an invisible
+overlay while assuming none and being wrong renders a readable one.
+
+### Added: --overlay-selftest, and the renderer says where the window went
+
+"The renderer is running" and "there is something on screen" are different
+claims, and from outside they looked identical — the process was visible in
+``ps`` and that was the whole of the available evidence.
+
+The renderer now reports its first mapped frame back over the protocol:
+element count, whether the window is actually visible, its geometry, which
+screen it landed on, and the alpha in use. That distinguishes a window drawn
+off-screen, on the wrong monitor of two, or at zero size from one that was
+never sent anything.
+
+``--overlay-selftest`` draws a fixed frame for twenty seconds with no parent
+and no panel pipeline, so "the renderer cannot draw" and "nothing is being sent
+to it" stop being the same symptom.
+
+### Fixed: every live refine was dropped, silently
+
+190 `MiningRefined` events for Helium-3 in one real session, between LaunchSRV
+and DockSRV, with EDLD running throughout. Nothing recorded.
+
+The position join matched a Status.json sample within two seconds of the
+event's timestamp. But the game writes the journal in batches, so the gap
+between a refine happening and EDLD reading the line routinely exceeds that —
+and every refine fell through the hole.
+
+Worse, it fell through in silence. Only the replay branch logged anything, so
+the trace showed "replayed MiningRefined events carry no position" at startup
+and then nothing at all for two and a half hours of live mining. The one
+message printed was about the case that was working as designed.
+
+When the window misses and the event is recent, the current position is used
+instead. That is the right answer rather than a fallback: refining requires the
+SRV to be parked on the deposit, so where the commander is now is where the
+refine happened. It is only wrong once they have driven off, which the
+three-second freshness check already covers, and a test asserts a stale
+position is still refused.
+
+A live refine that cannot be placed now says so, once. Silence is what made
+this look like nothing happening.
+
+### Fixed: config silently discarded every overlay panel placement
+
+`load_setting()` resolves a section by iterating `defaults` and nothing else, so
+a key not declared there is invisible however plainly it is written in
+config.toml. The overlay names one key per panel and gets its panels from
+whichever components are loaded, so those keys cannot be declared in advance.
+
+Placement was written correctly every time, by both front ends, and never read
+back by either — which presented as the front ends clobbering each other, then
+as a UI that would not save, then as an overlay that would not draw.
+`--overlay-doctor` showed thirty-nine keys in the file and zero reaching the
+code.
+
+`load_setting()` takes `include_extra`, off by default so every fixed-schema
+section behaves exactly as before.
+
+### Added: --overlay-doctor
+
+Every layer of the overlay is individually tested and the thing still does not
+appear, which means the faults are in the joins: config written but not read,
+panels offered but not placed, placements that parse and resolve to nothing, a
+renderer started and handed an empty frame. From outside, every one of those
+looks the same — no overlay — and diagnosing it from a screenshot has produced
+several wrong answers.
+
+`--overlay-doctor` reads the live ConfigManager, so it sees the same file,
+profile and resolution order the running app does, and prints what each stage
+produced: which placement keys exist in config, what they parsed to, which
+panels the loaded components offer, whether any placement names a panel nothing
+provides, how old the last Status.json sample is, and a verdict naming the
+first link that breaks.
+
+A doctor that built its own view of the config would end up diagnosing itself,
+which is why it takes the manager rather than re-reading the file.
+
+### Added: record the deposit you are parked on
+
+Automatic capture creates a deposit from a `MiningRefined`, which is the only
+event the game emits that implies one. Driving onto a deposit emits nothing at
+all: across eighteen minutes of approaching and parking on one, the journal
+produced a single `ModuleInfo` and nothing else. No approach, no target, no
+signal entry. Meanwhile the HUD shows the commodity, the mineral amount and the
+density, none of which reaches any file.
+
+So a deposit seen but not yet worked cannot be captured without the commander
+saying so. `record_here()` takes the position from Status.json and asks only
+for what is on screen and in no file. It creates if there is nothing recorded
+nearby and annotates if there is, so pressing it twice corrects a reading
+rather than adding a second rock.
+
+A position older than three seconds is refused rather than used. Recording a
+deposit at a coordinate from five minutes ago would put a fictional position in
+a store whose only value is that its positions are real.
+
+### Changed: the dedupe radius is 100 m
+
+It was 75 m, sized against the positional error of the capture path. The gap
+between real deposits is the number that matters, and observed spacing on
+surveyed bodies is 400-500 m at the closest — so 100 m cannot merge two
+neighbours, and is still close enough to walk from. The rig spacing the game
+actually requires is not known; if it turns out to be consistent, this is the
+number to revisit.
+
+### Fixed: overlay panel placement could never be saved
+
+The preferences writer stores a pending change by assigning
+``target[key] = value``, so the key is written literally. A dotted
+``Panels.<id>.Zone`` therefore became a flat string key containing dots rather
+than a nested table, and nothing ever read it back. Panel placement could be
+changed in either front end, saved without complaint, and have no effect at
+all — which is why the two front ends appeared to disagree and why no overlay
+window ever surfaced: every panel stayed at its shipped default of off, with no
+way to change it.
+
+Placement uses flat ``PanelZone_<id>`` / ``PanelMode_<id>`` / ``PanelOrder_<id>``
+keys now, which survive that writer unchanged. A hand-written ``Panels`` table
+is still read, for anyone who prefers editing TOML, with flat keys winning
+field by field. A test round-trips a placement through the real config writer
+and reads it back, and another fails on any dotted key appearing in the
+component at all.
+
+### Added: deposits confirm themselves when you drive onto them
+
+The original design was "keep the deposit targeted and get within X metres".
+That cannot be built. `ShipTargeted` is the only targeting event in a full
+journal corpus and it is ships only; no surface point of interest appears in
+any journal event, and Status.json carries no target field. EDLD cannot know
+what is targeted.
+
+Position alone turns out to be enough, and is better: nothing else is within
+25 m of a deposit, there is nothing to explain to the commander, and there is
+no failure mode where they forgot to lock something.
+
+What a visit records is freshness and nothing else. How much is left is a
+judgement and stays with the commander — but freshness is the one thing about a
+deposit that decays on its own, because sites are worked out by other people,
+and it is the one thing nobody will ever update by hand. An old High is not a
+current High.
+
+Hysteresis is the whole of the engineering. The naive version fires on every
+sample inside the radius, which at two samples a second means a parked SRV
+rewrites the same row a hundred times a minute, `last_confirmed` becomes a
+record of how long somebody idled, and — since every confirmation clears
+`published_at` — that one deposit is pushed to the shared sheet on every flush
+forever. An arrival fires once and the deposit must be left, past a wider exit
+radius than the entry one, before it can fire again. The two radii differ
+deliberately: a single threshold makes a commander parked at exactly 25 m
+generate an arrival every other sample, which is the same bug with extra steps.
+
+The check runs on its own tick rather than the overlay's. A commander with the
+overlay switched off should still have their survey stay current; tying data
+collection to a display would make the data depend on whether anyone was
+looking at it.
+
+`touch_deposit()` moves the timestamp and nothing else. `annotate_deposit()`
+refuses a call with no fields — which is exactly what a visit is — because it
+exists to apply a judgement.
+
+### Fixed: the overlay was a black rectangle, and outlived the dashboard
+
+Three faults in the renderer, reported from a real run.
+
+`setWindowOpacity()` on a `WA_TranslucentBackground` window asks the compositor
+for a semi-transparent *surface*, and several compositors answer by giving the
+window an opaque one to fade. With nothing placed there was nothing to paint,
+so what reached the screen was a black rectangle over the cockpit. Opacity is
+applied to the ink now, so an empty frame is genuinely nothing.
+
+The window was shown at startup rather than when it first had content. A shown
+window with no content is still a window — a compositor, a screen recorder or a
+task switcher can all find it. It appears with its first non-empty frame and
+hides again when a frame comes back empty.
+
+And it outlived its parent. Closing stdin is the normal shutdown and the reader
+thread handles it, but a parent killed or stopped without running its unload
+path left the renderer drawing over the game with nothing feeding it. A
+watchdog now quits when `getppid()` changes.
+
+### Fixed: publishing to a sheet returned HTTP 403
+
+Two causes, both in the transport rather than in anyone's Apps Script.
+
+An `/exec` deployment answers a POST with a 302 to
+`script.googleusercontent.com`, and the standard library turns a redirected
+POST into a GET — so the request arrived at `doGet()` with no body, from a
+deployment configured correctly. Redirects now re-issue the POST.
+
+`script.google.com` also rejects unfamiliar clients, and the request announced
+itself as `EDLD-surface-survey/1.0`. It presents as a browser now. The request
+is still authenticated by the token and still goes to the user's own script;
+the alternative is a feature that only works from a browser.
+
+### Fixed: preferences UI faults reported from a real run
+
+The TUI Survey tab had no Test button — the screen's button dispatch named
+every button it builds itself, so an injected tab could draw one that did
+nothing. Components handle their own buttons through `preferences_action()`
+now, and the Test button runs the same code in both front ends rather than two
+implementations that would eventually disagree about what counts as success.
+
+TUI dropdowns were sized for "On"/"Off", so "top-centre" wrapped to "Cent"/"re"
+and "Reserve" to "Rese"/"rve".
+
+The GUI overlay tab drew three form rows per panel on a page that does not
+scroll — thirty-six rows once a dozen components contributed, which overlapped
+into unreadable text. It is one row per panel with three pickers side by side,
+inside a scroll area.
+
+### Removed: the dead surface_frame path
+
+Replaced by the survey compass panel and referenced by nothing but its own
+tests.
+
+### Added: panel ordering, without editing config.toml
+
+Position within a zone is a picker in both front ends rather than an integer
+only reachable by hand-editing config. It is a closed vocabulary like zone and
+mode, so it gets the same treatment.
+
+Two panels given the same position fall back to panel id — stable and
+alphabetical, and deliberately boring. The alternative reorder-by-insertion
+renumbers panels the commander never touched, and a tie broken by whatever
+order the config happened to parse in would reshuffle the overlay between
+launches, which is worse than a dull rule.
+
+The preferences page now lists panels grouped by zone, left to right, in the
+order they will actually stack, so the page reads the way the screen will look.
+
+### Changed: overlay panels come from what components already compute
+
+The first cut had each component write a fresh relevance test and a fresh row
+set for the overlay. That was wrong, and it was wrong in a way that would have
+kept costing: an activity component already answers both questions. It has
+`has_activity()`, which is what decides whether the activity gets a tab in the
+session block at all, and `get_summary_rows()`, which is already the condensed
+subset because that is exactly what the Summary tab needs it to be. Writing
+either again for the overlay is a second answer to a question already answered,
+and the two would drift the first time one was updated alone.
+
+`ActivityProviderMixin` now supplies the panel. Nine components contribute one
+with nothing added to them — combat, exobiology, exploration, income, mining,
+missions, odyssey, powerplay, trade — and any future activity component does
+too. A component overrides `overlay_panel()` only when the overlay wants
+something the dashboard does not show: cargo's two holds, the survey compass's
+bearings. Not merely to have a panel at all.
+
+Where a summary row carries a rate, the rate goes on the overlay with it. A
+total is knowable after the session; a rate is only interesting while it is
+happening, which is the half worth covering a game for.
+
+### Changed: closed vocabularies get pickers
+
+Zone, mode, hide-mode and anchor were text fields. They have three, three, two
+and six valid values respectively, and the dialog has had a combo helper all
+along — there was no reason to hand-roll text entry, and a typed setting can be
+wrong, which means validating it, reporting it, ignoring it, and leaving the
+commander to work out why nothing happened. `_choice_combo()` in the GUI and
+`Select` in the TUI. The TUI panel rows were read-only labels; a row telling
+you what a setting is, in a window whose purpose is changing settings, is the
+worst of both. They are pickers now.
+
+### Changed: the overlay is its own component, with its own preferences tab
+
+It used to live inside `surface_mining`, which was only ever true of the first
+thing it drew. It shows cargo, commander and ship identity now, and whatever
+else components contribute; owning it from a mining component would have made
+every future panel a mining feature. `components/overlay.py` owns the window,
+the tick loop and the layout, and nothing else — every panel's data belongs to
+the component that produced it, including the survey compass, which is now a
+contributed `survey_compass` panel like any other.
+
+Overlay settings moved with it to a dedicated Overlay tab in both front ends.
+Leaving a copy behind on the Survey tab would have given two pages writing the
+same config keys, and whichever was opened last would appear to win.
+
+Panels ship placed but switched off. An overlay that decides for you what to
+cover the game with is not a feature.
+
+New panels: `cargo` (both holds in an SRV), `commander` (name, squadron,
+balance, location) and `ship` (name, ident, type, value, hull). Those two are
+pure identity with no context gate, so `auto` behaves as `on` for them — that
+is correct rather than a missing check, because what a streamer wants on camera
+is not conditional on what they are doing.
+
+The repo's existing AST guard caught the leftover `OVERLAY_DEFAULTS` reference
+during the move, before it could raise on first open.
+
+### Fixed: one commodity priced off the galactic average while its neighbours priced off the station
+
+Reported as Low Temp. Diamonds showing 96K in a hold where Tritium and
+Bromellite were showing the station's actual sell prices. 96,438 is the
+galactic average; the station was paying 179,090.
+
+The manifest resolves a price as `station sell price, or the stored galactic
+average`. That fallback is right — it is what keeps the panel populated at a
+carrier or before a market has loaded — but it is also completely silent, so a
+commodity missing from the station table produces a plausible number instead of
+an error, and sitting next to two correct rows it reads as a price rather than
+a miss.
+
+Two things could put a commodity in that state, and both are fixed.
+
+`core/data.py` built the CAPI market table with `name.lower()` while
+`components/cargo.py` built the Market.json table with `canonical_name()`.
+Both structures are read with the same keys, so any CAPI name whose lowercased
+form differs from its canonical one produced an entry nothing could look up.
+
+The same handler then did `state.cargo_mean_prices = mean_prices`, replacing
+the whole fallback map with the current station's subset. Every average learned
+anywhere else was discarded on arrival — including, necessarily, the averages
+for commodities this station does not trade, which are exactly the ones most
+likely to need the fallback. It merges now.
+
+### Added: price provenance under --trace
+
+`--trace` produced nothing useful for the above because nothing in the pricing
+path wrote a line. It now records, per held commodity per render, the chosen
+price, which of the four inputs produced it, and whether the commodity was
+present in the station and target tables at all. That last flag is the one that
+distinguishes "this station pays the average" from "this commodity was not
+found", which from the outside look identical.
+
+### Added: overlay panels, three zones, and who owns what — experimental
+
+The overlay was built as a surface-mining feature that happened to draw on
+screen: blank unless you were in an SRV near a recorded deposit. That is a
+special case of what an overlay should be, not an overlay. This is the general
+form.
+
+Panels belong to the components that own the data. A component declares the
+panel ids it can produce and implements `overlay_panel(id, ctx)`, returning
+None when its panel does not apply right now. That None *is* the relevance
+test — `core/overlay_panels.py` knows nothing about limpets or bio signals, and
+adding a panel touches no overlay code at all. Cargo is the first one: how full
+the hold is, and both holds when in an SRV, because the run is limited by the
+mothership and a commander who can see only the SRV is the one who drives back
+to a full ship.
+
+Three fixed anchors across the top — left, centre, right — each holding an
+independent vertical stack. No free placement and no drag: that would mean
+persisting per-monitor geometry, surviving resolution changes, and a drag mode
+that has to defeat click-through to work, all before anyone has found out which
+panels are worth keeping on. Zones are anchors rather than boxes, so a stack is
+as tall as its contents and nothing can wander into the middle of the viewport.
+There is no overflow rule because a stack too tall to fit is visible the moment
+it happens.
+
+When an `auto` panel is not eligible the stack either closes up or holds the
+space, and that is a setting rather than a decision. `collapse` is denser but
+the panels below move, and something that moves has to be re-found rather than
+glanced at. `reserve` keeps every panel where it was put at the cost of gaps,
+which is steadier to read and the better default with the overlay on camera.
+Reserved height is the height the panel last actually had, carried between
+frames — reserving a guess would make the stack jump the first time a panel
+appeared, which is the exact thing reserving exists to prevent.
+
+The layout works in anchor points because it has no font metrics; turning "this
+x is the right edge" into a draw position happens in the renderer, where there
+is a QFontMetrics. Without that every zone would have drawn left-aligned and
+the right-hand stack would have run off the screen.
+
+One context is built per frame and handed to every panel. A panel reading live
+state directly could answer from a position half a second newer than its
+neighbour used, and the overlay would disagree with itself.
+
+An invalid zone or mode in config is reported and skipped rather than coerced
+to a default, because a typo that silently relocates a panel is worse than one
+that says so.
+
+### Fixed: the Survey tab still did not appear in GUI mode (third attempt)
+
+`ConfigManager.load_setting()` takes `warn_missing`; only the `core_api`
+wrapper takes `warn`. The GUI builder called the former with `warn=False`,
+which raises TypeError, which the preferences tab loop catches and logs — so
+the page silently did not exist. The TUI composer reaches the same settings
+through the core wrapper, which is why it kept working and why this looked
+like a rendering problem rather than a broken call.
+
+That is three failures of one shape: the component calling something the GUI
+side did not offer in the form it was offered, with the exception swallowed by
+the loop that builds the tabs. None of them could have been caught by testing
+the component alone, because each was a disagreement *between* two files.
+
+`tests/test_preferences_contract.py` now reads the real signatures out of
+`gui/preferences.py`, `core/config.py` and `core/core_api.py` with `ast` — no
+Qt, no Textual, no display — and binds the component's calls against them.
+Every `dlg.` attribute the builder reaches for must exist on
+`PreferencesDialog`; every helper call must be one the real helper would
+accept; both discovery methods must be callable with no arguments; and
+`ConfigManager.load_setting` must not be called from a builder at all. The
+first version of that last check passed against the reintroduced bug — it
+grepped tokens joined by spaces, so the substring never matched. It is an AST
+check now, and it has been verified to fail with the bug present and pass with
+it fixed.
+
+### Fixed: the Survey tab was invisible in GUI mode, and its rows in both
+
+Three defects, and the last two were hiding each other.
+
+`gui/preferences.py` calls `gui_preferences_tab()` with **no arguments** to
+discover a tab, and only the builder it returns receives the dialog. The
+component treated the discovery call as the build call and returned `None` when
+handed no dialog, so the tab was never registered. TUI has a different discovery
+path and showed the page fine, which is why this presented as a GUI-only
+problem. The test written alongside asserted the broken behaviour, because the
+test and the code came from the same wrong idea about the contract.
+
+`get_tab_rows()` is only called for components registered through
+`core.register_session_provider()`. Defining the method is not enough — an
+unregistered component renders nowhere in either front end regardless of what it
+returns. The component now inherits `ActivityProviderMixin`, declares a tab
+title, and registers in `on_load()`.
+
+Registering it immediately surfaced the third: a dead call to `best_parking()`,
+left behind when rig placement was removed. It survived a full pass of the test
+suite because the method containing it was never invoked — the one code path
+that would have raised was the one the second defect had disabled. Tests now
+execute `get_tab_rows()` and the discovery calls rather than asserting they
+exist.
+
+The on-screen overlay in this entry is marked **experimental** and ships
+switched off. It is verified on X11 only — there is no Windows or macOS machine
+here to test against — and it stays in the development branch until it has
+survived contact with play. `--overlay-probe` reports what any given machine can
+actually do, which is what a bug report from one of them should carry.
+
+### Added: a Survey tab in preferences, and a working hook to put it there
+
+One tab with three sections — store, sharing, overlay — rather than three tabs.
+The injection hook gives a component one tab, and these are settings a commander
+configures in one sitting.
+
+Getting it there meant fixing the hook, which only half worked. On the TUI side
+an injected tab's controls were collected through a hardcoded widget-id map
+inside `tui/preferences.py`, so a component could draw a tab whose settings were
+silently discarded on save unless somebody had also edited the front end. A
+component knows its own widget ids and its own config keys, so it now declares
+them with `preferences_bindings()` and the screen asks. On the GUI side builders
+were called with no arguments and so had no route to the dialog's `_record()`,
+which is why nothing had ever used that hook; they are now handed the dialog,
+with the bare call kept for anything written against the old signature. A test
+asserts every declared binding names a config key that actually exists, because
+a binding pointing at a missing key fails invisibly — the control moves, Apply
+succeeds, the value is gone by the next load.
+
+The overlay row reports what the renderer is doing rather than what the config
+says. "Enabled" and "working on this machine" are different claims and only the
+second is worth printing, so the status line distinguishes off, enabled but
+unconfigurable, enabled but not yet started, and the capability summary the
+renderer actually returned.
+
+The sheet Test button tests what is in the boxes, not what was loaded when the
+window opened. A test that checks the saved credentials tells you nothing about
+the ones you have just typed in.
+
+### Fixed: the TUI preferences screen printed to stdout
+
+`_extra_tabs()` announced each component it found and printed a traceback when
+one failed. Textual owns the terminal in that mode, so both drew over the
+dashboard. They go to the debug log now.
+
+### Added: an overlay of EDLD's own, on the platforms that can carry one — experimental
+
+EDLD draws its own rather than speaking to somebody else's. Hooking into an
+existing overlay tool would mean every EDLD user installing that tool first,
+which is a poor answer to "why would I run this", and the established one is
+GPLv3 against EDLD's MIT.
+
+The renderer is a child process rather than a thread. Qt wants its event loop on
+the main thread and EDLD's main thread is already the terminal's, the TUI's or
+the dashboard's depending on mode; a child gives all three the same overlay,
+keeps a renderer crash from taking the dashboard with it, and leaves the TUI
+without a runtime Qt dependency. Frames go over stdin as newline-delimited JSON.
+A socket was the obvious choice and is the wrong one — binding a localhost
+listener raises a Windows Firewall prompt, collides with whatever else wanted
+the port, and survives a parent that died badly. A pipe does none of that and
+the child exits when the parent closes it.
+
+Capabilities are measured rather than asserted. The renderer tries to be
+translucent, click-through and always-on-top, reports what it actually managed,
+and the parent logs it. Click-through is treated as mandatory: an overlay that
+swallows mouse input over the cockpit presents as the game having locked up, and
+nothing about that points the user at EDLD. Wayland reports unavailable outright
+instead of half-working, because an ordinary Wayland client cannot request
+always-on-top or place itself absolutely at all, and a window that appears
+somewhere arbitrary and then sinks behind the game is worse than none. Exclusive
+fullscreen defeats every overlay on every platform and cannot be detected from
+outside the game; it is documented rather than worked around.
+
+`--overlay-probe` runs the whole capability path and prints the result without
+starting EDLD, so "will this work on my machine" is answerable in one command.
+
+The protocol owns the child's stdout, so the real descriptor is duplicated away
+and kept private while `sys.stdout` is pointed at stderr. This is not
+hypothetical: EDLD's own import graph prints to stdout when an optional
+dependency is missing, which lands between process start and the first protocol
+line. The parent tolerates it by skipping anything that is not JSON, but a
+stray print added later would have become a protocol bug rather than a stray
+print.
+
+What it draws is deliberately almost nothing. In an SRV, within 20 km of a
+deposit already recorded on this body: a compass tape with the bearings, the
+nearest one named with its range, and how many of the body's mining signals are
+still unfound. Everywhere else — docked, in supercruise, in the ship, on a body
+with nothing recorded — it is blank. There is no header, no logo and no idle
+state, because an overlay that is always on is wallpaper and stops being read. A
+mark behind the commander is dropped rather than pinned to the edge of the tape,
+since a mark at the edge reads as "over there" when the truth is "behind you".
+
+Bearings are driven from the Status.json position ring on a half-second tick
+rather than from journal events, because they have to track a moving SRV and no
+journal event fires while driving in a straight line. A position older than
+three seconds means the game has stopped writing Status.json, and the overlay
+clears rather than leaving bearings that are now fiction.
+
+### Added: recording what a deposit is actually like
+
+Automatic capture gets the position, the commodity, and the fact that a deposit
+is there. It cannot get how much is left or how dense the seam is, because
+nothing in the journal says — those are the commander's assessment and there was
+no way to record one. The store had the columns and nothing wrote to them.
+
+`mark_here()` resolves the deposit by position rather than by selection: the
+commander standing on the thing they are describing is both the natural way to
+do it and the one that needs no list to pick from. Matching uses the same
+proximity rule that records a deposit in the first place, so a judgement cannot
+attach itself to a neighbour, and unlike the recording path it ignores the
+commodity — you do not have to name what you are standing on.
+
+Blank fields leave stored values alone, so setting the amount does not wipe a
+density recorded last week, and re-setting a value to what it already was is not
+treated as a change. Any real change clears `published_at`, so the correction
+reaches the sheet on the next flush; a fix that stays local while the squadron
+keeps reading the old number is worse than no fix.
+
+Marking a deposit Depleted stamps the depletion log, the same as the explicit
+path already did.
+
+Two separate test-data switches, because they answer different questions.
+"Flag my finds as test data" marks everything recorded from now on, for while
+you are setting up. "Publish test rows too" decides whether flagged rows leave
+the machine at all. Default is flag nothing, publish nothing flagged.
+
+### Added: the survey can publish to a Google Sheet
+
+Optional, off by default, and separate from the store. What EDLD records stays
+in `mining.db` on the machine that recorded it; this is the other half, for
+commanders who want a squadron reading their finds.
+
+Writing to Sheets needs OAuth or a service account — an API key authenticates
+reads of public data and cannot write at all. Both alternatives cost the user a
+Google Cloud project, and neither can ship in an open-source binary, because an
+embedded client secret is a published one. So the receiver is an Apps Script
+web app bound to the target spreadsheet: `sheets/Code.gs`, with the walkthrough
+in `sheets/README.md`. No project, no OAuth, no Google client library, and what
+a squadron leader hands out is a URL and a token.
+
+The duplicate check lives in the script rather than in EDLD, because only the
+sheet knows what is in the sheet. Several commanders write to a squadron sheet
+and none of them can see the others' local stores, so a client-side check would
+still have two people who found the same rock on the same evening both
+appending it, each correct about what they had seen. The script takes a document
+lock and the second one updates the first one's row. EDLD's side of the contract
+is the deposit id — the geometry is resolved here, where the body radius is
+known, and the script matches a twelve-character string.
+
+An existing row is only overwritten by a report carrying a newer
+`last_confirmed`, so a commander replaying an old session cannot walk back a
+fresher reading; blank cells are filled in regardless of age.
+
+Nothing is marked published until the script has confirmed it. A transport
+error, an HTML error page from an uncaught server-side fault, a rejected token,
+or a response that accounts for fewer rows than were sent all leave the deposits
+pending for the next flush. The failure this is guarding against is the one
+where the HTTP request completes and the rows are marked sent on the strength of
+that, which is how a shared sheet quietly stops filling up.
+
+Deposits go out when the commander leaves a body rather than as they are mined.
+Sheets permits roughly sixty writes a minute and one real session produced 608
+refine events, so a send per event would be rate limited inside the first minute
+of a rig run.
+
+The deployment URL carries the deployment id in its path, which is half of what
+is needed to write to somebody's spreadsheet, so only the hostname is ever
+logged. `Token` is redacted from the debug header by name.
+
+The column order is a positional contract between `Code.gs` and
+`core/sheets_publish.py` — a field added to one and not the other lands in the
+wrong column rather than raising anything, so a test asserts the two lists match.
+
+### Changed: galactic facts moved out of the commander directory
+
+Some of what EDLD stores is a fact about a commander and some of it is a fact
+about the galaxy. A commodity's galactic average is the same number whoever
+reads it off a market board, and a surface deposit is in the same place whoever
+finds it. Both were being written under `commanders/<fid>/`, so a second
+commander started from nothing and the two copies then drifted with nothing to
+say which was current. `explo.db` has always sat at the data root for this
+reason; the rest now joins it in a shared `data/` directory.
+
+The commodity ledger move is a merge rather than a file move, because each
+commander directory may hold its own copy. Per commodity the earliest
+`first_seen` wins, the latest `last_updated` wins and carries its `mean_price`
+with it, and the observation counts are summed. That last one is the trap: the
+obvious merge picks a winning row and takes its counters along, silently
+discarding the other commander's count, and the number that comes out still
+looks entirely plausible. Every merge logs its row count so the arithmetic can
+be checked afterwards. Source files are left where they are.
+
+### Fixed: the data directory was Linux-shaped on every platform
+
+`_user_data_dir()` had one branch, and it was the XDG one. That was true of the
+machine EDLD was written on and of nothing else the release pipeline builds for.
+Windows and macOS binaries were putting the config, the databases and every
+plugin's state in `~/.local/share/EDLD` — a directory neither platform shows the
+user, backs up, or expects anything to be in. It now resolves to `%LOCALAPPDATA%`
+on Windows and `~/Library/Application Support` on macOS, with the XDG path and
+its `~/.config/EDLD` symlink unchanged on Linux.
+
+### Fixed: a Status.json the poller could not read looked like a closed game
+
+The Status poller ended in `except Exception: pass`. Status.json is the live
+source for hull, shields, fuel, balance and surface position, and it is also the
+freshness signal for whether the game is running at all, so a payload the poller
+could never parse presented as a commander who had quit — every one of those
+values frozen, and nothing anywhere saying why. The poller now reports the first
+occurrence of each distinct fault and counts repeats, which keeps a torn read of
+a file the game rewrites twice a second from flooding the log while still making
+a persistent fault visible.
 
 ---
 
