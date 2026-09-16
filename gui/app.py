@@ -282,6 +282,22 @@ class EdldWindow(QMainWindow):
         self._ksw_kill.triggered.connect(self.action_kill_session)
         session_menu.addAction(self._ksw_kill)
 
+        survey_menu = bar.addMenu("Sur&vey")
+        self._survey_deposit = QAction("Add / Edit &Deposit Here…", self)
+        self._survey_deposit.setShortcut(QKeySequence("Ctrl+D"))
+        self._survey_deposit.triggered.connect(self.action_deposit)
+        survey_menu.addAction(self._survey_deposit)
+        self._survey_push = QAction("&Push to Shared Sheet", self)
+        self._survey_push.setShortcut(QKeySequence("Ctrl+G"))
+        self._survey_push.triggered.connect(self.action_push_survey)
+        survey_menu.addAction(self._survey_push)
+
+        # Disabled when the component is not loaded, the same way the
+        # session-management entries are.
+        _has_survey = self._core._plugins.get("surface_mining") is not None
+        self._survey_deposit.setEnabled(_has_survey)
+        self._survey_push.setEnabled(_has_survey)
+
         # Both session-management entries are disabled when the component is
         # not loaded, matching the TUI's check_action() gate.
         has_ksw = self._core._plugins.get("ksw") is not None
@@ -418,6 +434,25 @@ class EdldWindow(QMainWindow):
     def action_clear_alerts(self) -> None:
         self._core.plugin_call("alerts", "clear_alerts")
         self._refresh_block("block-status")
+
+    def action_deposit(self) -> None:
+        """Add or edit the deposit underfoot.
+
+        One entry for both: which it is depends on where the commander is
+        standing, and they should not have to know before choosing it.
+        """
+        plugin = self._core._plugins.get("surface_mining")
+        if plugin is None or not hasattr(plugin, "form_for_here"):
+            return
+        from gui.deposit_dialog import DepositDialog
+        DepositDialog(plugin, self).exec()
+
+    def action_push_survey(self) -> None:
+        """Send everything pending to the shared sheet, now."""
+        plugin = self._core._plugins.get("surface_mining")
+        if plugin is None or not hasattr(plugin, "publish_now"):
+            return
+        self.statusBar().showMessage(plugin.publish_now(), 8000)
 
     def action_toggle_ksw(self) -> None:
         """Toggle session management if the component is loaded."""

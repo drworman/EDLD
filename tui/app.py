@@ -120,6 +120,8 @@ class EdldTui(App):
         Binding("ctrl+s", "sell_table",     "Sell Table"),
         Binding("ctrl+k", "toggle_ksw",     "Session Mgmt", show=True),
         Binding("ctrl+t", "kill_session",   "Quit Game",    show=True),
+        Binding("ctrl+d", "deposit",        "Deposit",      show=True),
+        Binding("ctrl+g", "push_survey",    "Push Survey",  show=False),
     ]
 
     def __init__(self, core: "CoreAPI", program: str, version: str,
@@ -322,6 +324,25 @@ class EdldTui(App):
 
     def action_options(self) -> None:
         self.push_screen(PreferencesScreen(self._core))
+
+    def action_deposit(self) -> None:
+        """Add or edit the deposit underfoot.
+
+        One binding for both: which it is depends on where the commander is
+        standing, and they should not have to know before pressing a key.
+        """
+        plugin = self._core._plugins.get("surface_mining")
+        if plugin is None or not hasattr(plugin, "form_for_here"):
+            return
+        from tui.deposit_screen import DepositScreen
+        self.push_screen(DepositScreen(self._core, plugin))
+
+    def action_push_survey(self) -> None:
+        """Send everything pending to the shared sheet, now."""
+        plugin = self._core._plugins.get("surface_mining")
+        if plugin is None or not hasattr(plugin, "publish_now"):
+            return
+        self.notify(plugin.publish_now(), title="Survey")
 
     def action_sell_table(self) -> None:
         """Open the sell table, or close it if it is already open.
