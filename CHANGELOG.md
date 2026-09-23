@@ -44,6 +44,30 @@ case-insensitively and drops anything unrecognised, and the import normalises
 amount and density to the vocabulary, discarding what it cannot place: a wrong
 value is worse than a blank one a later sighting can fill in.
 
+### Fixed: saving a deposit with a signal number raised TypeError
+
+The form offered a Signal # field and `annotate_deposit()` had no such
+parameter, so filling it in and pressing Save failed — after everything else
+had been typed. Nothing checks that pairing at import time; the form builds its
+controls from one list and the store declares its parameters in another, and
+the two had drifted.
+
+`signal_no` is accepted now, and a test asserts every field the form can
+produce is one the store takes, so the next field added to either side cannot
+quietly fail on the one that matters.
+
+### Fixed: the deposit window filled the terminal
+
+Three of the style classes it asked for did not exist, so it had no width, no
+border and no centring — and it inherited the preferences row rules, which size
+the label column at 45%. Inside the preferences container that is the house
+style; in a window spanning the whole terminal it put every label a thousand
+pixels from its control.
+
+It has its own container rule now: a fixed, centred, bordered box with a
+narrower label column. A test asserts every class and id the window uses is
+styled somewhere, because an unstyled name fails silently and only looks wrong.
+
 ### Fixed: Ctrl+D just after a refine offered to add a deposit already on its way
 
 A refine queues its deposit and does not write it until the confirm interval
