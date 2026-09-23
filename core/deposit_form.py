@@ -16,6 +16,13 @@ Everything is optional except the commodity on a new deposit, and an empty
 field means "leave it alone" rather than "set it to nothing" — a commander
 editing the amount should not silently blank the density they recorded last
 week.
+
+Amount and "Depleted on" divide the work: Amount says *whether* a site is
+worked out, and the date says *when*. They are not two ways of saying the same
+thing, and a button that only ever stamped today would have been — selecting
+Depleted in the Amount list already does that. The date exists so a site worked
+out last week can be recorded as such, and so the one already in the store can
+be seen and corrected.
 """
 
 from __future__ import annotations
@@ -51,8 +58,8 @@ FIELDS: tuple[Field, ...] = (
           "how much is left"),
     Field("density_observed", "Density", "choice", DENSITY_LEVELS,
           "what you actually found"),
-    Field("density_claimed", "Advertised", "choice", DENSITY_LEVELS,
-          "what the body's signals promised"),
+    Field("depleted_on", "Depleted on", "text",
+          hint="YYYY-MM-DD, blank unless worked out"),
     Field("rigs", "Rigs", "int", hint=f"0-{MAX_RIGS}"),
     Field("signal_no", "Signal #", "int", hint=f"1-{MAX_SIGNAL_NO}"),
     Field("is_test", "Test data", "bool", hint="held back from the sheet"),
@@ -105,8 +112,7 @@ def clean(raw: dict, *, require_commodity: bool = False) -> Cleaned:
         errors["commodity"] = "Commodity is required for a new deposit"
 
     for key, allowed, label in (("amount", AMOUNT_LEVELS, "Amount"),
-                                ("density_observed", DENSITY_LEVELS, "Density"),
-                                ("density_claimed", DENSITY_LEVELS, "Advertised")):
+                                ("density_observed", DENSITY_LEVELS, "Density")):
         text = str(raw.get(key, "") or "").strip()
         if not text:
             continue
@@ -119,6 +125,19 @@ def clean(raw: dict, *, require_commodity: bool = False) -> Cleaned:
     _clean_int(raw.get("rigs", ""), 0, MAX_RIGS, "Rigs", values, errors, "rigs")
     _clean_int(raw.get("signal_no", ""), 1, MAX_SIGNAL_NO, "Signal #",
                values, errors, "signal_no")
+
+    stamp = str(raw.get("depleted_on", "") or "").strip()
+    if stamp:
+        from datetime import date, datetime
+        try:
+            when = datetime.strptime(stamp, "%Y-%m-%d").date()
+        except ValueError:
+            errors["depleted_on"] = "Depleted on must be a date, YYYY-MM-DD"
+        else:
+            if when > date.today():
+                errors["depleted_on"] = "Depleted on cannot be in the future"
+            else:
+                values["depleted_on"] = when.isoformat()
 
     flag = raw.get("is_test", None)
     if flag not in (None, ""):
@@ -143,7 +162,7 @@ def prefill(deposit: dict | None) -> dict:
                      or deposit.get("commodity", "") or "",
         "amount": deposit.get("amount", "") or "",
         "density_observed": deposit.get("density_observed", "") or "",
-        "density_claimed": deposit.get("density_claimed", "") or "",
+        "depleted_on": (deposit.get("depleted_on", "") or "")[:10],
         "rigs": "" if deposit.get("rigs") in (None, "") else str(deposit["rigs"]),
         "signal_no": "" if deposit.get("signal_no") in (None, "")
                      else str(deposit["signal_no"]),

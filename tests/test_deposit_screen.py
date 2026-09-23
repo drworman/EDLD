@@ -28,7 +28,7 @@ from core.deposit_form import FIELDS, prefill
 
 STORED = {"commodity": "helium3", "commodity_display": "Helium-3",
           "amount": "High", "density_observed": "Medium",
-          "density_claimed": "", "rigs": 4, "signal_no": 3, "is_test": 1}
+          "rigs": 4, "signal_no": 3, "is_test": 1}
 
 
 class _Plugin:
@@ -234,14 +234,12 @@ def test_saving_every_field_at_once_actually_writes(tmp_path, monkeypatch):
 
     assert "recorded" in p.submit_form({"commodity": "Low Temp. Diamonds"})
     msg = p.submit_form({"amount": "High", "density_observed": "Medium",
-                         "density_claimed": "High", "rigs": "2",
-                         "signal_no": "11", "is_test": ""})
+                         "rigs": "2", "signal_no": "11", "is_test": ""})
     assert "updated" in msg, msg
 
     row = p._db.deposits_on(1234, 7)[0]
     assert row["amount"] == "High"
     assert row["density_observed"] == "Medium"
-    assert row["density_claimed"] == "High"
     assert row["rigs"] == 2
     assert row["signal_no"] == 11
 

@@ -60,9 +60,32 @@ def test_an_amount_outside_the_vocabulary_is_named_in_the_error():
     assert "Depleted" in err and "High" in err
 
 
-def test_density_and_advertised_are_separate_fields():
-    v = clean({"density_observed": "High", "density_claimed": "Low"}).values
-    assert v["density_observed"] == "High" and v["density_claimed"] == "Low"
+def test_advertised_density_is_gone():
+    """It was the density of the fresh deposit, which is what Density already
+    records — two controls for one measurement."""
+    assert "density_claimed" not in [f.key for f in FIELDS]
+    assert "density_claimed" not in clean({"density_claimed": "High"}).values
+
+
+def test_a_depletion_date_is_accepted():
+    assert clean({"depleted_on": "2026-09-14"}).values["depleted_on"] \
+        == "2026-09-14"
+
+
+@pytest.mark.parametrize("bad", ["14/09/2026", "2026-13-01", "yesterday",
+                                 "2026-09-32"])
+def test_a_date_that_is_not_a_date_is_refused(bad):
+    assert "depleted_on" in clean({"depleted_on": bad}).errors
+
+
+def test_a_future_depletion_date_is_refused():
+    """A site cannot have been worked out tomorrow, and the reset-period
+    arithmetic would be nonsense if it could."""
+    assert "depleted_on" in clean({"depleted_on": "2099-01-01"}).errors
+
+
+def test_a_blank_date_is_left_alone():
+    assert "depleted_on" not in clean({"depleted_on": ""}).values
 
 
 def test_depleted_is_not_a_density():
@@ -100,7 +123,8 @@ def test_an_empty_field_is_absent_rather_than_blank():
     """Editing the amount must not silently blank the density recorded last
     week."""
     v = clean({"commodity": "Silver", "amount": "High",
-               "density_observed": "", "rigs": "", "signal_no": ""}).values
+               "density_observed": "", "rigs": "", "signal_no": "",
+               "depleted_on": ""}).values
     assert "amount" in v
     for absent in ("density_observed", "rigs", "signal_no"):
         assert absent not in v
@@ -139,10 +163,10 @@ def test_no_errors_is_an_empty_line():
 def test_prefill_round_trips_an_existing_deposit():
     stored = {"commodity": "helium3", "commodity_display": "Helium-3",
               "amount": "High", "density_observed": "Medium",
-              "density_claimed": "", "rigs": 4, "signal_no": 3, "is_test": 1}
+              "rigs": 4, "signal_no": 3, "is_test": 1}
     form = prefill(stored)
     assert form["commodity"] == "Helium-3" and form["rigs"] == "4"
-    assert form["is_test"] == "true" and form["density_claimed"] == ""
+    assert form["is_test"] == "true" and form["depleted_on"] == ""
 
     back = clean(form).values
     assert back["amount"] == "High" and back["rigs"] == 4
@@ -208,3 +232,11 @@ def test_a_rejection_keeps_the_window_open():
                  ROOT / "gui" / "deposit_dialog.py"):
         src = path.read_text(encoding="utf-8")
         assert 'startswith(("recorded", "updated"))' in src, path.name
+
+
+def test_prefill_shows_a_date_already_on_record():
+    """The date lives in its own table, so a site already known to be worked
+    out would otherwise show blank — and saving would re-stamp it with today."""
+    form = prefill({"commodity": "silver", "commodity_display": "Silver",
+                    "amount": "Depleted", "depleted_on": "2026-09-14T00:00:00Z"})
+    assert form["depleted_on"] == "2026-09-14"

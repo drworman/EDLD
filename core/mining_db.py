@@ -419,6 +419,7 @@ class MiningDB:
                          density_claimed: str = "",
                          rigs: int | None = None,
                          signal_no: int | None = None,
+                         depleted_on: str = "",
                          is_test: bool | None = None) -> bool:
         """Apply a commander's assessment to a deposit.  Returns whether it changed.
 
@@ -441,7 +442,7 @@ class MiningDB:
             updates["signal_no"] = int(signal_no)
         if is_test is not None:
             updates["is_test"] = 1 if is_test else 0
-        if not updates:
+        if not updates and not depleted_on:
             return False
 
         now = _utcnow()
@@ -451,14 +452,29 @@ class MiningDB:
                                (dep_id,)).fetchone()
             if row is None:
                 return False
-            if all(str(row[k]) == str(v) for k, v in updates.items()):
+            if updates and all(str(row[k]) == str(v) for k, v in updates.items()) \
+                    and not depleted_on:
                 return False
+            if not updates:
+                updates["amount"] = "Depleted"
             updates["last_confirmed"] = now
             updates["published_at"] = ""
             sets = ", ".join(f"{k}=?" for k in updates)
             conn.execute(f"UPDATE deposits SET {sets} WHERE deposit_id=?",
                          (*updates.values(), dep_id))
-            if updates.get("amount") == "Depleted":
+            # A supplied date says when the site was worked out; without one,
+            # selecting Depleted means today. The two are not alternatives —
+            # Amount says whether, the date says when — so a date implies
+            # Depleted even if the Amount field was left alone.
+            if depleted_on:
+                stamp = f"{depleted_on}T00:00:00Z"
+                conn.execute(
+                    "INSERT OR REPLACE INTO depletion_log(deposit_id, noted_at, note) "
+                    "VALUES(?,?,?)", (dep_id, stamp, f"Worked out {depleted_on}"))
+                if row["amount"] != "Depleted":
+                    conn.execute("UPDATE deposits SET amount='Depleted' "
+                                 "WHERE deposit_id=?", (dep_id,))
+            elif updates.get("amount") == "Depleted":
                 conn.execute(
                     "INSERT OR REPLACE INTO depletion_log(deposit_id, noted_at, note) "
                     "VALUES(?,?,?)", (dep_id, now, f"Worked out {now[:10]}"))

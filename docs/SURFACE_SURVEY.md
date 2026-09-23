@@ -38,9 +38,16 @@ twelfth" is worth more to whoever reads it next than a missing row.
 editing: which it is depends on where you are standing, resolved by proximity,
 and you do not have to know before pressing it.
 
-Amount, density, advertised density, rig count and signal number are validated
+Amount, density, rig count, signal number and the depletion date are validated
 against the game's own vocabularies, so a typed row and a captured one are
-indistinguishable downstream. An empty field means *leave it alone*, not *set it
+indistinguishable downstream.
+
+Amount and **Depleted on** divide the work rather than duplicating it: Amount
+says *whether* a site is worked out, the date says *when*. Choosing Depleted in
+the Amount list stamps today; supplying a date records a site worked out
+earlier, and implies Depleted whether or not the Amount field was touched. The
+date is what a reset-period calculation would be built on, so it is worth
+getting right rather than always being the moment somebody noticed. An empty field means *leave it alone*, not *set it
 to nothing* — editing the amount will not blank a density recorded last week.
 
 The commodity cannot be changed on an existing deposit: it is part of the

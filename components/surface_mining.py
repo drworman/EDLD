@@ -658,7 +658,18 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
             return prefill(None), (f"New deposit at {pos.latitude:.5f}, "
                                    f"{pos.longitude:.5f}")
         name = near.get("commodity_display") or near.get("commodity", "")
-        return prefill(near), f"Editing {name} ({near['deposit_id']})"
+        # The depletion date lives in its own table, so it has to be fetched
+        # rather than read off the row — without it the field would show blank
+        # on a site already known to be worked out, and saving would silently
+        # re-stamp it with today.
+        try:
+            history = self._db.depletion_history(near["deposit_id"])
+        except Exception:
+            history = []
+        record = dict(near)
+        if history:
+            record["depleted_on"] = history[-1]["noted_at"]
+        return prefill(record), f"Editing {name} ({near['deposit_id']})"
 
     def submit_form(self, raw: dict) -> str:
         """Apply a filled-in form to the deposit underfoot, adding if absent.

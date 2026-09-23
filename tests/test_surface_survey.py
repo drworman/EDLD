@@ -860,3 +860,25 @@ def test_validation_errors_come_back_instead_of_a_write(tmp_path, monkeypatch):
 def test_the_form_refuses_a_stale_position(tmp_path, monkeypatch):
     p = _plugin_at(tmp_path, monkeypatch, age=300)
     assert "no live position" in p.submit_form({"commodity": "Silver"})
+
+
+def test_a_depletion_date_marks_the_deposit_worked_out(tmp_path, monkeypatch):
+    """Amount says whether, the date says when — so a date implies Depleted
+    even when the Amount field was left alone."""
+    p = _plugin_at(tmp_path, monkeypatch)
+    p.submit_form({"commodity": "Silver", "amount": "High"})
+    assert "updated" in p.submit_form({"depleted_on": "2026-09-14"})
+
+    row = p._db.deposits_on(1234, 7)[0]
+    assert row["amount"] == "Depleted"
+    history = p._db.depletion_history(row["deposit_id"])
+    assert history[-1]["noted_at"].startswith("2026-09-14")
+
+
+def test_the_form_reads_back_the_recorded_depletion_date(tmp_path, monkeypatch):
+    p = _plugin_at(tmp_path, monkeypatch)
+    p.submit_form({"commodity": "Silver"})
+    p.submit_form({"depleted_on": "2026-09-14"})
+    form, _heading = p.form_for_here()
+    assert form["depleted_on"] == "2026-09-14"
+    assert form["amount"] == "Depleted"
