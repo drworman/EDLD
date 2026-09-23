@@ -66,11 +66,13 @@ var COLUMNS = [
   'first_seen',
   'last_confirmed',
   'reported_by',
-  'is_test'
+  'is_test',
+  'depleted_on'
 ];
 
 /** Fields a later report is allowed to overwrite on an existing row. */
 var MUTABLE = [
+  'depleted_on',
   'density_claimed', 'density_observed', 'amount', 'rigs', 'refine_count',
   'last_confirmed', 'signal_no', 'planet_class', 'gravity', 'body_radius_m',
   'atmosphere', 'volcanism', 'system', 'body'
@@ -257,6 +259,18 @@ function _sheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
+
+  // A sheet created before a column was added keeps its old header, and the
+  // header is only written when the sheet is empty — so an existing squadron
+  // sheet would have silently dropped every value past its last column. Widen
+  // it in place instead. Columns are only ever appended, never reordered, so
+  // the existing data stays where it is.
+  var have = sheet.getLastColumn();
+  if (have > 0 && have < COLUMNS.length) {
+    sheet.getRange(1, have + 1, 1, COLUMNS.length - have)
+         .setValues([COLUMNS.slice(have)])
+         .setFontWeight('bold');
+  }
 
   if (sheet.getLastRow() === 0) {
     sheet.getRange(1, 1, 1, COLUMNS.length).setValues([COLUMNS]);

@@ -147,7 +147,7 @@ existing row.
 `planet_class` · `gravity` · `body_radius_m` · `atmosphere` · `volcanism` ·
 `signal_no` · `commodity` · `latitude` · `longitude` · `density_claimed` ·
 `density_observed` · `amount` · `rigs` · `refine_count` · `first_seen` ·
-`last_confirmed` · `reported_by` · `is_test`
+`last_confirmed` · `reported_by` · `is_test` · `depleted_on`
 
 `density_claimed` is what the body's own signals advertised. `density_observed`
 is what was actually found. They are separate columns because a site can be

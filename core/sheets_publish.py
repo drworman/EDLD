@@ -104,6 +104,7 @@ COLUMNS = (
     "last_confirmed",
     "reported_by",
     "is_test",
+    "depleted_on",
 )
 
 
@@ -245,6 +246,12 @@ def row_from_deposit(
         "last_confirmed": dep.get("last_confirmed", ""),
         "reported_by": dep.get("reported_by") or reporter,
         "is_test": int(dep.get("is_test", 0) or 0),
+        # When the site was last seen worked out. It lives in its own table
+        # rather than on the deposit row, so the query feeding this fetches it
+        # — and it belongs on the sheet because it is the one fact about a
+        # deposit that any commander can contribute and every commander needs:
+        # a site somebody emptied last week is a wasted trip.
+        "depleted_on": (dep.get("depleted_on", "") or "")[:10],
     }
 
 

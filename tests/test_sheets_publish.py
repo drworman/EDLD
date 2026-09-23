@@ -312,3 +312,21 @@ def test_an_empty_body_fetches_cleanly():
     opener, _ = _responder({"ok": True, "deposits": []})
     rows, err = SheetsPublisher(URL, "tok", opener=opener).fetch_body(1, 2)
     assert rows == [] and err == ""
+
+
+# ── the depletion date travels ────────────────────────────────────────────────
+
+def test_the_depletion_date_is_a_published_column():
+    """It is the one fact about a deposit that any commander can contribute and
+    every commander needs: a site somebody emptied last week is a wasted trip."""
+    assert "depleted_on" in COLUMNS
+    assert COLUMNS[-1] == "depleted_on", "columns are positional; append only"
+
+
+def test_the_date_is_published_as_a_plain_day():
+    row = row_from_deposit(_dep(depleted_on="2026-09-14T00:00:00Z"))
+    assert row["depleted_on"] == "2026-09-14"
+
+
+def test_a_deposit_that_was_never_depleted_publishes_blank():
+    assert row_from_deposit(_dep())["depleted_on"] == ""
