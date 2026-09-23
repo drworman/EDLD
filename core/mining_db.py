@@ -564,6 +564,21 @@ class MiningDB:
                     "SELECT * FROM deposits WHERE deposit_id=?",
                     (dep_id,)).fetchone()
 
+                # Amount and density are closed vocabularies. An imported row
+                # is written as the sheet spells it, and a sheet is a document
+                # people edit by hand — so "high" or "Very High" can arrive and
+                # would then be stored as a value nothing downstream accepts.
+                # Matched case-insensitively; anything unrecognised is dropped
+                # rather than kept, because a wrong value is worse than a blank
+                # one a later sighting can fill in.
+                row = dict(row)
+                for _key, _allowed in (("amount", AMOUNT_LEVELS),
+                                       ("density_observed", DENSITY_LEVELS),
+                                       ("density_claimed", DENSITY_LEVELS)):
+                    _raw = str(row.get(_key, "") or "").strip()
+                    row[_key] = next((a for a in _allowed
+                                      if a.lower() == _raw.lower()), "")
+
                 if existing is None:
                     conn.execute(
                         "INSERT INTO deposits("

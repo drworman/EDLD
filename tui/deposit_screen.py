@@ -41,10 +41,42 @@ class DepositScreen(ModalScreen):
                 with Horizontal(classes="pref-row"):
                     yield Label(field.label, classes="key")
                     if field.kind == "choice":
-                        yield Select([(c, c) for c in field.choices],
-                                     value=current or None,
-                                     id=f"dep-{field.key}",
-                                     classes="pref-choice", allow_blank=True)
+                        # The value is omitted entirely when there is nothing
+                        # to select, rather than passed as None or BLANK.
+                        #
+                        # Textual validates a Select's value on mount, not on
+                        # construction, so a None here raised
+                        # InvalidSelectValueError the moment the screen was
+                        # pushed — and an unhandled exception in a mount
+                        # handler takes the whole app down. That is why this
+                        # presented as EDLD vanishing on a keypress rather than
+                        # as one broken field. Every field is blank on a new
+                        # deposit, so it was certain to happen the first time
+                        # anyone added one.
+                        #
+                        # The blank sentinel has moved between Textual releases
+                        # — it is Select.NULL in some and Select.BLANK in
+                        # others, and in at least one version BLANK is a plain
+                        # False that the validator then rejects. Leaving the
+                        # argument off uses whichever default that release
+                        # considers blank, across the range requirements.txt
+                        # allows.
+                        kwargs = {"id": f"dep-{field.key}",
+                                  "classes": "pref-choice",
+                                  "allow_blank": True}
+                        # Matched case-insensitively against the options, and
+                        # dropped if it matches none. A stored value that is
+                        # not an option crashes the same way None did, and one
+                        # can reach the store: deposits imported from a shared
+                        # sheet are written as the sheet spells them, so
+                        # another commander hand-editing a cell to "high" or
+                        # "Very High" would take this window down on whoever
+                        # opened it next.
+                        chosen = next((c for c in field.choices
+                                       if c.lower() == current.lower()), None)
+                        if chosen:
+                            kwargs["value"] = chosen
+                        yield Select([(c, c) for c in field.choices], **kwargs)
                     elif field.kind == "bool":
                         yield Select([("No", ""), ("Yes", "true")],
                                      value=current or "",

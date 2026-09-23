@@ -633,6 +633,13 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
         """
         from core.deposit_form import prefill
 
+        # A refine queues its deposit and does not write it until the confirm
+        # interval has passed, so pressing Ctrl+D moments after mining the
+        # first unit would have offered to add a deposit that was already on
+        # its way in. Flushing first makes the window describe what is actually
+        # there.
+        self._flush_pending(force=True)
+
         pos = POSITIONS.latest()
         if pos is None or (time.time() - pos.ts) > _POSITION_STALE_S:
             return prefill(None), "No live position — is the game running?"
