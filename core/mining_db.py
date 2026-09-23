@@ -537,7 +537,10 @@ class MiningDB:
         """Deposits changed since they were last published, oldest first."""
         conn = self._connect()
         sql = ("SELECT d.*, b.system_name, b.body_name, b.planet_class, "
-               "b.gravity, b.radius_m, b.atmosphere, b.volcanism "
+               "b.gravity, b.radius_m, b.atmosphere, b.volcanism, "
+               # The most recent depletion, from the log rather than the row.
+               "(SELECT MAX(noted_at) FROM depletion_log l "
+               " WHERE l.deposit_id = d.deposit_id) AS depleted_on "
                "FROM deposits d LEFT JOIN bodies b "
                "ON d.system_address=b.system_address AND d.body_id=b.body_id "
                "WHERE d.published_at=''")
@@ -620,8 +623,31 @@ class MiningDB:
                          str(row.get("last_confirmed", "") or now),
                          str(row.get("reported_by", "") or ""),
                          now))
+                    stamp = str(row.get("depleted_on", "") or "").strip()[:10]
+                    if stamp:
+                        conn.execute(
+                            "INSERT OR REPLACE INTO depletion_log"
+                            "(deposit_id, noted_at, note) VALUES(?,?,?)",
+                            (dep_id, f"{stamp}T00:00:00Z",
+                             f"Worked out {stamp}"))
                     added += 1
                     continue
+
+                # Latest wins, the same way last_confirmed does. Sites reset
+                # and are worked out again, so the freshest sighting of an
+                # empty one describes the current state; an older date would
+                # keep asserting a depletion that has since been undone.
+                stamp = str(row.get("depleted_on", "") or "").strip()[:10]
+                if stamp:
+                    mine = conn.execute(
+                        "SELECT MAX(noted_at) FROM depletion_log "
+                        "WHERE deposit_id=?", (dep_id,)).fetchone()[0] or ""
+                    if stamp > str(mine)[:10]:
+                        conn.execute(
+                            "INSERT OR REPLACE INTO depletion_log"
+                            "(deposit_id, noted_at, note) VALUES(?,?,?)",
+                            (dep_id, f"{stamp}T00:00:00Z",
+                             f"Worked out {stamp}"))
 
                 changes: dict = {}
                 for field_name in ("commodity_display", "density_claimed",

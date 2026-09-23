@@ -882,3 +882,48 @@ def test_the_form_reads_back_the_recorded_depletion_date(tmp_path, monkeypatch):
     form, _heading = p.form_for_here()
     assert form["depleted_on"] == "2026-09-14"
     assert form["amount"] == "Depleted"
+
+
+def test_the_depletion_date_reaches_the_sheet(db):
+    """It lives in depletion_log, not on the deposit row, so the publish query
+    has to fetch it — otherwise it would be dropped on the way out."""
+    from core.sheets_publish import row_from_deposit
+
+    dep, _ = db.record_deposit(1234, 7, "monazite", 10.0, 20.0, refined=True)
+    db.annotate_deposit(dep, depleted_on="2026-09-14")
+    assert row_from_deposit(db.unpublished()[0])["depleted_on"] == "2026-09-14"
+
+
+def test_an_imported_depletion_date_is_recorded(db):
+    db.import_deposits([{
+        "deposit_id": "shared01", "system_address": 1234, "body_id": 7,
+        "commodity": "monazite", "latitude": 11.0, "longitude": 21.0,
+        "depleted_on": "2026-09-14", "last_confirmed": "2026-09-14T00:00:00Z"}])
+    assert db.depletion_history("shared01")[-1]["noted_at"].startswith("2026-09-14")
+
+
+def test_a_newer_depletion_date_wins_and_an_older_one_does_not(db):
+    """Sites reset and are worked out again, so the freshest sighting of an
+    empty one describes the current state; an older date would keep asserting a
+    depletion that has since been undone."""
+    dep, _ = db.record_deposit(1234, 7, "monazite", 10.0, 20.0, refined=True)
+    db.annotate_deposit(dep, depleted_on="2026-09-14")
+
+    db.import_deposits([{"deposit_id": dep, "system_address": 1234, "body_id": 7,
+                         "commodity": "monazite", "latitude": 10.0,
+                         "longitude": 20.0, "depleted_on": "2026-09-20"}])
+    assert db.depletion_history(dep)[-1]["noted_at"].startswith("2026-09-20")
+
+    db.import_deposits([{"deposit_id": dep, "system_address": 1234, "body_id": 7,
+                         "commodity": "monazite", "latitude": 10.0,
+                         "longitude": 20.0, "depleted_on": "2026-01-01"}])
+    assert db.depletion_history(dep)[-1]["noted_at"].startswith("2026-09-20")
+
+
+def test_the_apps_script_widens_a_sheet_that_predates_a_column():
+    """The header is only written when the sheet is empty, so an existing
+    squadron sheet would have silently dropped every value past its last
+    column."""
+    src = (ROOT / "sheets" / "Code.gs").read_text(encoding="utf-8")
+    assert "getLastColumn()" in src
+    assert "COLUMNS.slice(have)" in src

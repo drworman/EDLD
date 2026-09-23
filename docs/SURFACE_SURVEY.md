@@ -47,7 +47,14 @@ says *whether* a site is worked out, the date says *when*. Choosing Depleted in
 the Amount list stamps today; supplying a date records a site worked out
 earlier, and implies Depleted whether or not the Amount field was touched. The
 date is what a reset-period calculation would be built on, so it is worth
-getting right rather than always being the moment somebody noticed. An empty field means *leave it alone*, not *set it
+getting right rather than always being the moment somebody noticed.
+
+It is published to the shared sheet and read back from it, because it is the
+one fact about a deposit that any commander can contribute and every commander
+needs — a site somebody emptied last week is a wasted trip, and only the person
+who found it empty knows. The most recent date wins on a merge, unlike every
+other field where local observation does: sites reset and are worked out again,
+so the freshest sighting of an empty one describes the current state. An empty field means *leave it alone*, not *set it
 to nothing* — editing the amount will not blank a density recorded last week.
 
 The commodity cannot be changed on an existing deposit: it is part of the
