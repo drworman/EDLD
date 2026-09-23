@@ -495,6 +495,19 @@ class SheetsPublisher:
             return [], result.error
         return list(result.deposits), ""
 
+    def delete(self, deposit_id: str) -> PublishResult:
+        """Remove one deposit from the sheet.
+
+        A row, not a tombstone. Imported deposits are stamped as published and
+        never re-sent, so the only copy that could put it back is the one held
+        by whoever recorded it — and that is the commander doing the deleting.
+        A commander who imported it will simply not see it again after their
+        next fetch.
+        """
+        with self._lock:
+            return self._post({"token": self._token,
+                               "delete": {"deposit_id": str(deposit_id)}})
+
     def publish(
         self,
         deposits: Iterable[dict],

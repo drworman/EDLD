@@ -106,6 +106,13 @@ function doPost(e) {
       return _json(_read(body.fetch));
     }
 
+    // Removal. EDLD only ever asks for this when the commander is standing at
+    // the deposit, which is the closest thing to proof that they know what
+    // they are removing.
+    if (body.delete) {
+      return _json(_remove(body.delete));
+    }
+
     var deposits = body.deposits;
     if (!deposits || !deposits.length) {
       return _json({ ok: true, added: 0, updated: 0, unchanged: 0 });
@@ -154,6 +161,30 @@ function _read(query) {
     out.push(dep);
   }
   return { ok: true, deposits: out };
+}
+
+
+function _remove(query) {
+  var lock = LockService.getDocumentLock();
+  if (!lock.tryLock(30000)) return { ok: false, error: 'sheet busy, try again' };
+  try {
+    var id = String(query.deposit_id || '').trim();
+    if (!id) return { ok: false, error: 'deposit_id required' };
+    var sheet = _sheet();
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { ok: true, added: 0, updated: 0, unchanged: 0 };
+
+    var ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = ids.length - 1; i >= 0; i--) {
+      if (String(ids[i][0] || '').trim() === id) {
+        sheet.deleteRow(i + 2);
+        return { ok: true, added: 0, updated: 1, unchanged: 0 };
+      }
+    }
+    return { ok: true, added: 0, updated: 0, unchanged: 0 };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 

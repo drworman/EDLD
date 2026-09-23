@@ -752,7 +752,9 @@ def test_a_published_deposit_names_its_system(tmp_path, monkeypatch):
 def test_a_refined_deposit_names_its_system_too(tmp_path, monkeypatch):
     p, _mod, event = _refine_plugin(tmp_path, monkeypatch, event_age=1.0)
     p._system_name = "Ega"
-    p._body_name = "Ega 3 a"
+    # Matches the position fixture's body: a name that disagrees with
+    # Status.json is now refused, which is the point of the guard.
+    p._body_name = "B"
     p.on_event(event, None)
     p._flush_pending(force=True)
     assert p._db.unpublished()[0]["system_name"] == "Ega"
@@ -927,3 +929,139 @@ def test_the_apps_script_widens_a_sheet_that_predates_a_column():
     src = (ROOT / "sheets" / "Code.gs").read_text(encoding="utf-8")
     assert "getLastColumn()" in src
     assert "COLUMNS.slice(have)" in src
+
+
+# ── a surface scan is not a change of address ─────────────────────────────────
+
+def test_a_surface_scan_does_not_move_the_commander(tmp_path, monkeypatch):
+    """Scanning two bodies back to back while parked in an SRV on the first
+    filed every later refine against the second. Three deposits landed on a
+    body that had never been approached, carrying the coordinates of the one
+    underneath."""
+    p = _plugin_at(tmp_path, monkeypatch)
+    p._system_address, p._body_id, p._body_name = 999, 37, "Igbonii A 2 c"
+
+    for body_id, name in ((37, "Igbonii A 2 c"), (36, "Igbonii A 2 b")):
+        p.on_event({"event": "SAASignalsFound", "SystemAddress": 999,
+                    "BodyID": body_id, "BodyName": name,
+                    "Signals": [{"Type": "$PlanetaryMiningLocation_Name;",
+                                 "Count": 9}]}, None)
+
+    assert p._body_id == 37, "the scan must not become the current body"
+    assert p._body_name == "Igbonii A 2 c"
+
+
+def test_both_scanned_bodies_are_still_surveyed(tmp_path, monkeypatch):
+    """The census is about the scanned body; only the commander's position is
+    left alone."""
+    p = _plugin_at(tmp_path, monkeypatch)
+    p._system_address, p._body_id, p._body_name = 999, 37, "Igbonii A 2 c"
+    for body_id, name in ((37, "Igbonii A 2 c"), (36, "Igbonii A 2 b")):
+        p.on_event({"event": "SAASignalsFound", "SystemAddress": 999,
+                    "BodyID": body_id, "BodyName": name,
+                    "Signals": [{"Type": "$PlanetaryMiningLocation_Name;",
+                                 "Count": 9}]}, None)
+    assert p._db.survey(999, 37)["signal_count"] == 9
+    assert p._db.survey(999, 36)["signal_count"] == 9
+    assert p._db.body(999, 36)["body_name"] == "Igbonii A 2 b"
+
+
+def test_a_refine_is_refused_when_the_game_names_a_different_body(
+        tmp_path, monkeypatch):
+    """Status.json names the body underneath. If the tracked identity
+    disagrees, a deposit written now carries the right coordinates under the
+    wrong body — refuse rather than guess."""
+    p, _mod, event = _refine_plugin(tmp_path, monkeypatch, event_age=1.0)
+    p._body_name = "Igbonii A 2 c"
+    from core.surface_survey import POSITIONS, Position
+    import time as _t
+    POSITIONS.clear()
+    POSITIONS.add(Position(ts=_t.time(), latitude=10.0, longitude=20.0,
+                           heading=0.0, body_name="Igbonii A 2 b",
+                           radius_m=1.5e6, in_srv=True))
+    said: list[str] = []
+    p._log = said.append
+    p.on_event(event, None)
+    p._flush_pending(force=True)
+    assert p._db.deposits_on(1234, 7) == []
+    assert any("not recording" in m for m in said)
+
+
+def test_a_refine_is_recorded_when_they_agree(tmp_path, monkeypatch):
+    p, _mod, event = _refine_plugin(tmp_path, monkeypatch, event_age=1.0)
+    p._body_name = "B"          # the position fixture uses body_name "B"
+    p.on_event(event, None)
+    p._flush_pending(force=True)
+    assert len(p._db.deposits_on(1234, 7)) == 1
+
+
+# ── deletion ──────────────────────────────────────────────────────────────────
+
+def test_deleting_removes_the_deposit_and_its_history(db):
+    dep, _ = db.record_deposit(1234, 7, "deuterium", 10.0, 20.0, refined=True)
+    db.annotate_deposit(dep, depleted_on="2026-09-14")
+    assert db.delete_deposit(dep) is True
+    assert db.deposits_on(1234, 7) == []
+    assert db.depletion_history(dep) == []
+
+
+def test_deleting_something_that_is_not_there_is_false(db):
+    assert db.delete_deposit("nosuchthing") is False
+
+
+def test_delete_requires_standing_at_the_site(tmp_path, monkeypatch):
+    """A deposit on the sheet is somewhere other commanders will fly to, so a
+    stray click on a list would be somebody else's wasted trip."""
+    p = _plugin_at(tmp_path, monkeypatch)
+    assert "no recorded deposit" in p.delete_here()
+
+
+def test_delete_removes_the_deposit_under_you(tmp_path, monkeypatch):
+    p = _plugin_at(tmp_path, monkeypatch)
+    p.record_here("Deuterium")
+    assert "deleted Deuterium" in p.delete_here()
+    assert p._db.deposits_on(1234, 7) == []
+
+
+def test_delete_is_refused_on_a_stale_position(tmp_path, monkeypatch):
+    p = _plugin_at(tmp_path, monkeypatch, age=300)
+    assert "no live position" in p.delete_here()
+
+
+def test_a_sheet_failure_does_not_block_the_local_removal(tmp_path, monkeypatch):
+    """Otherwise a row known to be bad survives on the machine that knows it."""
+    p = _plugin_at(tmp_path, monkeypatch)
+    p.record_here("Deuterium")
+    dep = p._db.deposits_on(1234, 7)[0]["deposit_id"]
+    p._db.mark_published([dep])
+
+    class _Pub:
+        def delete(self, dep_id):
+            from core.sheets_publish import PublishResult
+            return PublishResult(error="sheet busy, try again")
+
+    p._publisher = _Pub()
+    msg = p.delete_here()
+    assert "sheet not updated" in msg
+    assert p._db.deposits_on(1234, 7) == []
+
+
+def test_an_unpublished_deposit_needs_no_sheet_request(tmp_path, monkeypatch):
+    p = _plugin_at(tmp_path, monkeypatch)
+    p.record_here("Deuterium")
+
+    class _Pub:
+        called = False
+
+        def delete(self, dep_id):
+            _Pub.called = True
+
+    p._publisher = _Pub()
+    p.delete_here()
+    assert _Pub.called is False
+
+
+def test_the_script_can_remove_a_row():
+    src = (ROOT / "sheets" / "Code.gs").read_text(encoding="utf-8")
+    assert "function _remove(" in src and "deleteRow" in src
+    assert "body.delete" in src

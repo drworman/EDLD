@@ -123,6 +123,7 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
         self._replayed_unpositioned  = 0
         self._replay_warned          = False
         self._live_miss_warned       = False
+        self._body_mismatch_warned   = False
 
         # Sheet publishing.  Off unless configured; see core/sheets_publish.py.
         self._publisher   = None
@@ -213,6 +214,7 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
             self._on_scan(event)
         elif name in ("Location", "FSDJump", "ApproachBody", "Touchdown",
                       "SupercruiseExit"):
+            self._body_mismatch_warned = False
             was = (self._system_address, self._body_id)
             self._track_body(event)
             if name == "ApproachBody" and (self._system_address, self._body_id) != was:
@@ -368,22 +370,32 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
                 hotspots.append(f"{nm}:{sig.get('Count', 0)}")
         if count <= 0 and not hotspots:
             return
-        self._system_address = int(sa)
-        self._body_id        = int(bid)
-        self.fetch_body()
-        if event.get("BodyName"):
-            self._body_name = str(event["BodyName"])
+        # Deliberately does NOT change which body the commander is on.
+        #
+        # A surface scan is about a body you may be nowhere near — they are
+        # done from orbit, often several in a row. Adopting the scanned body as
+        # the current one meant that scanning two bodies back to back while
+        # parked in an SRV on the first filed every later refine against the
+        # second: three deposits landed on a body the commander had never
+        # approached, carrying the coordinates of the one they were standing
+        # on.
+        #
+        # Where the commander is comes from ApproachBody, Location, Touchdown
+        # and SupercruiseExit — events about the ship rather than about a
+        # telescope.
+        scanned = str(event.get("BodyName", "") or "")
+        self.fetch_body(int(sa), int(bid))
         try:
             self._db.upsert_body(int(sa), int(bid),
                                  system_name=self._system_name or None,
-                                 body_name=self._body_name or None)
+                                 body_name=scanned or None)
             if count > 0:
                 self._db.record_survey(int(sa), int(bid), count,
                                        ",".join(sorted(hotspots)))
-                self._log(f"{self._body_name or bid}: "
+                self._log(f"{scanned or bid}: "
                           f"{count} mining location signal(s)")
         except Exception as exc:
-            self._log(f"survey record failed for {self._body_name or bid}: "
+            self._log(f"survey record failed for {scanned or bid}: "
                       f"{type(exc).__name__}: {exc}")
 
     # ── deposits ──────────────────────────────────────────────────────────────
@@ -428,6 +440,20 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
                 self._log(f"live MiningRefined could not be placed ({age}); "
                           f"position={'none' if pos is None else 'not in SRV'} "
                           f"— deposits are not being recorded")
+            return
+
+        if pos.body_name and self._body_name \
+                and pos.body_name != self._body_name:
+            # Status.json names the body underneath the commander. If the
+            # tracked identity disagrees with it, the id is stale or wrong and
+            # a deposit written now would carry the right coordinates under the
+            # wrong body — which is exactly the failure that put three of them
+            # on a body nobody had visited. Refuse rather than guess.
+            if not self._body_mismatch_warned:
+                self._body_mismatch_warned = True
+                self._log(f"tracked body is {self._body_name!r} but the game "
+                          f"says {pos.body_name!r}; not recording until they "
+                          f"agree")
             return
 
         if self._system_address is None or self._body_id is None:
@@ -732,6 +758,53 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
         self._log(f"{verb} {dep_id} from the deposit form")
         return f"{verb} {dep_id}"
 
+    def delete_here(self) -> str:
+        """Remove the deposit underfoot, locally and from the shared sheet.
+
+        Restricted to being at the site, like every other action here, and for
+        a stronger reason than convenience: a deposit that reached the sheet is
+        something other commanders will fly to, and being able to remove one
+        from a list would make a stray click somebody else's wasted trip.
+        Standing on it is the closest thing to proof the commander knows what
+        they are removing.
+
+        This is for a row that should never have existed — a wrong commodity, a
+        position filed under the wrong body. A site that is merely empty should
+        be marked Depleted instead: that is information the next commander
+        wants, and deleting it invites them to rediscover it.
+        """
+        pos = POSITIONS.latest()
+        if pos is None or (time.time() - pos.ts) > _POSITION_STALE_S:
+            return "no live position — is the game running?"
+        if self._system_address is None or self._body_id is None:
+            return "no body identified yet"
+
+        radius = pos.radius_m or self._db.body_radius(self._system_address,
+                                                      self._body_id)
+        try:
+            near = self._db.nearest_deposit(self._system_address, self._body_id,
+                                            pos.latitude, pos.longitude, radius)
+        except Exception as exc:
+            return f"could not read the store: {type(exc).__name__}: {exc}"
+        if near is None:
+            return "no recorded deposit within range of this position"
+
+        dep_id = near["deposit_id"]
+        name = near.get("commodity_display") or near.get("commodity", "")
+        shared = ""
+        if self._publisher and near.get("published_at"):
+            # Only rows that actually reached the sheet are worth a request,
+            # and a failure there must not stop the local removal — otherwise a
+            # bad row survives on the machine that knows it is bad.
+            result = self._publisher.delete(dep_id)
+            shared = (" and from the sheet" if result.ok
+                      else f" (sheet not updated — {result.error})")
+
+        if not self._db.delete_deposit(dep_id):
+            return f"{name} was already gone"
+        self._log(f"deleted {dep_id} ({name}){shared}")
+        return f"deleted {name}{shared}"
+
     def flag_here(self, is_test: bool) -> str:
         """Mark the deposit underfoot as test data, or clear the mark.
 
@@ -991,6 +1064,9 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
         if action_id == "btn-srv-depleted":
             return self.mark_depleted_here()
 
+        if action_id == "btn-srv-delete":
+            return self.delete_here()
+
         if action_id in ("btn-srv-test-on", "btn-srv-test-off"):
             return self.flag_here(action_id.endswith("-on"))
 
@@ -1150,7 +1226,8 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
             rec_row.addWidget(fetch_btn)
             rec_row.addWidget(record_btn)
             rec_row.addWidget(depleted_btn)
-            for _label, _act in (("Flag as test", "btn-srv-test-on"),
+            for _label, _act in (("Delete here", "btn-srv-delete"),
+                                 ("Flag as test", "btn-srv-test-on"),
                                  ("Unflag", "btn-srv-test-off")):
                 _b = QPushButton(_label)
                 _b.clicked.connect(
@@ -1275,6 +1352,7 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
             with Horizontal(classes="pref-row"):
                 yield Button("Record here", id="btn-srv-record")
                 yield Button("Mark depleted", id="btn-srv-depleted")
+                yield Button("Delete here", id="btn-srv-delete")
                 yield Button("Flag as test", id="btn-srv-test-on")
                 yield Button("Unflag", id="btn-srv-test-off")
                 yield Label("", id="btn-srv-record-result", classes="pref-note")

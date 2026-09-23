@@ -666,6 +666,22 @@ class MiningDB:
             conn.commit()
         return added, updated
 
+    def delete_deposit(self, dep_id: str) -> bool:
+        """Remove a deposit and its depletion history. Returns whether it went.
+
+        Deletion is for a row that should never have existed — a bad commodity,
+        a position filed under the wrong body — not for a site that is empty.
+        An empty site is Depleted, which is information somebody else wants;
+        deleting it throws that away and invites the next commander to rediscover
+        it.
+        """
+        conn = self._connect()
+        with self._lock:
+            conn.execute("DELETE FROM depletion_log WHERE deposit_id=?", (dep_id,))
+            cur = conn.execute("DELETE FROM deposits WHERE deposit_id=?", (dep_id,))
+            conn.commit()
+            return bool(cur.rowcount)
+
     def mark_published(self, ids: Iterable[str]) -> int:
         ids = [i for i in ids if i]
         if not ids:
