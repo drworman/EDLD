@@ -165,3 +165,96 @@ def test_the_form_shows_a_just_refined_deposit_as_an_edit(tmp_path, monkeypatch)
               if isinstance(n, ast.FunctionDef) and n.name == "form_for_here")
     body = ast.get_source_segment(src, fn) or ""
     assert "_flush_pending(force=True)" in body
+
+
+# ── the form and the store agree on what a deposit has ────────────────────────
+
+def test_every_field_the_form_produces_is_one_the_store_accepts():
+    """The form produced signal_no and annotate_deposit had no such parameter,
+    so filling that field in and pressing Save raised TypeError — after the
+    commander had typed everything else. Nothing validates this pairing at
+    import time; only a test does."""
+    import inspect
+
+    from core.deposit_form import FIELDS, clean
+    from core.mining_db import MiningDB
+
+    sample = {f.key: ("High" if f.kind == "choice" else
+                      "1" if f.kind == "int" else
+                      "true" if f.kind == "bool" else "Silver")
+              for f in FIELDS}
+    produced = set(clean(sample).values)
+    accepted = set(inspect.signature(MiningDB.annotate_deposit).parameters)
+
+    # commodity is handled separately: it sets a new deposit's identity and is
+    # deliberately refused on an edit.
+    produced -= {"commodity", "commodity_display"}
+    assert produced <= accepted, \
+        f"the form produces {sorted(produced - accepted)}, which the store rejects"
+
+
+def test_saving_every_field_at_once_actually_writes(tmp_path, monkeypatch):
+    """End to end through the component, with nothing left blank — the shape
+    of the save that failed."""
+    import importlib.util
+    import time as _t
+
+    import core.mining_db as mdb
+    import core.state as state_mod
+    from core.surface_survey import POSITIONS, Position
+
+    monkeypatch.setattr(state_mod, "EDLD_DATA_DIR", tmp_path)
+    monkeypatch.setattr(state_mod, "shared_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(mdb, "_instance", None)
+
+    spec = importlib.util.spec_from_file_location(
+        "sm_save", ROOT / "components" / "surface_mining.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    class _Core:
+        _plugins: dict = {}
+
+        def register_session_provider(self, p):
+            pass
+
+        def load_setting(self, section, defaults, warn=False, include_extra=False):
+            d = dict(defaults)
+            d["AutoConfirm"] = False
+            return d
+
+    p = mod.SurfaceMiningPlugin()
+    p.on_load(_Core())
+    p._system_address, p._body_id = 1234, 7
+    p._db.upsert_body(1234, 7, radius_m=1.5e6)
+    POSITIONS.clear()
+    POSITIONS.add(Position(ts=_t.time(), latitude=10.0, longitude=20.0,
+                           heading=0.0, body_name="B", radius_m=1.5e6,
+                           in_srv=True))
+
+    assert "recorded" in p.submit_form({"commodity": "Low Temp. Diamonds"})
+    msg = p.submit_form({"amount": "High", "density_observed": "Medium",
+                         "density_claimed": "High", "rigs": "2",
+                         "signal_no": "11", "is_test": ""})
+    assert "updated" in msg, msg
+
+    row = p._db.deposits_on(1234, 7)[0]
+    assert row["amount"] == "High"
+    assert row["density_observed"] == "Medium"
+    assert row["density_claimed"] == "High"
+    assert row["rigs"] == 2
+    assert row["signal_no"] == 11
+
+
+def test_the_window_has_the_styles_it_asks_for():
+    """Three classes it used did not exist, so the dialog had no width and
+    filled the terminal with a 45% label column."""
+    css = (ROOT / "tui" / "theme.py").read_text(encoding="utf-8")
+    src = (ROOT / "tui" / "deposit_screen.py").read_text(encoding="utf-8")
+    import re
+
+    used = set(re.findall(r'classes="([a-z-]+)"', src))
+    used |= set(re.findall(r'id="(deposit-dialog)"', src))
+    for name in sorted(used):
+        assert f".{name}" in css or f"#{name}" in css, \
+            f"{name} is not styled anywhere"

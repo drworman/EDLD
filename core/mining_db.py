@@ -418,6 +418,7 @@ class MiningDB:
                          density_observed: str = "",
                          density_claimed: str = "",
                          rigs: int | None = None,
+                         signal_no: int | None = None,
                          is_test: bool | None = None) -> bool:
         """Apply a commander's assessment to a deposit.  Returns whether it changed.
 
@@ -436,6 +437,8 @@ class MiningDB:
             updates["density_claimed"] = density_claimed
         if rigs is not None:
             updates["rigs"] = int(rigs)
+        if signal_no is not None:
+            updates["signal_no"] = int(signal_no)
         if is_test is not None:
             updates["is_test"] = 1 if is_test else 0
         if not updates:

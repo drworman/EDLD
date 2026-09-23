@@ -156,6 +156,37 @@ PreferencesScreen {
     color: $amber;
 }
 
+/* The deposit window.  It reuses the preferences row styles, which size the
+   label column at 45% — fine inside #prefs-outer, and a chasm in a modal that
+   had no container rule at all and so filled the terminal.  A fixed, centred
+   box keeps the labels next to their controls at any width. */
+DepositScreen {
+    align: center middle;
+}
+
+#deposit-dialog {
+    width: 76;
+    height: auto;
+    max-height: 90%;
+    padding: 1;
+    background: $block-bg;
+    border: solid $accent;
+}
+
+#deposit-dialog .key { width: 30%; }
+
+.pref-title {
+    padding: 0 1;
+    color: $accent;
+    text-style: bold;
+}
+
+.pref-buttons {
+    height: 3;
+    padding: 1 1 0 1;
+    align: right middle;
+}
+
 /* Each pref row is height: auto so text-input rows expand to 3 rows naturally */
 .pref-row {
     padding: 0 1;

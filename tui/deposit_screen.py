@@ -32,7 +32,7 @@ class DepositScreen(ModalScreen):
         self._form, self._heading = plugin.form_for_here()
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="pref-dialog", id="deposit-dialog"):
+        with Vertical(id="deposit-dialog"):
             yield Label("SURFACE DEPOSIT", classes="pref-title")
             yield Label(self._heading, id="deposit-heading", classes="pref-note")
 
