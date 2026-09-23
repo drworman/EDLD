@@ -44,6 +44,92 @@ case-insensitively and drops anything unrecognised, and the import normalises
 amount and density to the vocabulary, discarding what it cannot place: a wrong
 value is worse than a blank one a later sighting can fill in.
 
+### Fixed: a surface scan moved the commander to the scanned body
+
+Scanning two bodies back to back while parked in an SRV on the first filed
+every later refine against the second. Three deposits landed on a body that had
+never been approached, carrying the coordinates of the one underneath — a
+Deuterium site on top of a valid Low Temp. Diamond one.
+
+`_on_saa_signals` set the tracked body to whatever it had just scanned. A
+surface scan is about a body you may be nowhere near; they are done from orbit,
+often several in a row. It records the census for the scanned body now and
+leaves the commander where they are. Where that is comes from `ApproachBody`,
+`Location`, `Touchdown` and `SupercruiseExit` — events about the ship rather
+than about a telescope.
+
+A second guard backs it up: Status.json names the body underneath, and a refine
+is refused when that disagrees with the tracked identity. A deposit written
+during a disagreement carries the right coordinates under the wrong body, which
+is precisely what happened, and no amount of care in one code path prevents
+another from drifting.
+
+### Added: deleting a deposit, from the site
+
+For a row that should never have existed — a wrong commodity, a position filed
+under the wrong body. A site that is merely empty should be marked Depleted
+instead: that is information the next commander wants, and deleting it invites
+them to rediscover it.
+
+Restricted to standing at the deposit, like every other action in the survey,
+and for a stronger reason than convenience. A deposit on the shared sheet is
+somewhere other commanders will fly to, so being able to remove one from a list
+would make a stray click into somebody else's wasted trip.
+
+It propagates. Only rows that actually reached the sheet cost a request, and a
+sheet that cannot be reached does not stop the local removal — otherwise a row
+known to be bad survives on the machine that knows it is bad. Deletion sticks
+because imported deposits are stamped as published and never re-sent: the only
+copy that could put it back belongs to whoever recorded it, and that is the
+commander doing the deleting.
+
+### Added: the depletion date is shared
+
+`depleted_on` is a published column now, read back on import like everything
+else. It lives in its own table rather than on the deposit row, so the publish
+query fetches it — otherwise it was recorded locally and dropped on the way
+out, which is the half of the feature that matters least.
+
+It is the one fact about a deposit that any commander can contribute and every
+commander needs: a site somebody emptied last week is a wasted trip, and only
+the person who found it empty knows.
+
+The most recent date wins on a merge, unlike every other field where local
+observation does. Sites reset and are worked out again, so the freshest
+sighting of an empty one describes the current state; an older date would keep
+asserting a depletion that has since been undone.
+
+A sheet created before this column keeps its old header, and the script only
+writes a header when the sheet is empty — so an existing squadron sheet would
+have silently dropped every value past its last column. It is widened in place
+instead. Columns are only ever appended, never reordered, so existing data
+stays where it is.
+
+### Changed: the deposit window records when a site was worked out
+
+The **Advertised** field is gone. It held the density the body's signals
+promised, which on reflection is the density of the fresh deposit — the same
+measurement Density already records, so it was two controls for one number.
+
+**Depleted on** takes its place: a date, validated, refused if it is in the
+future. A button reading "Mark Depleted" would have been the same redundancy
+in a different shape, because choosing Depleted in the Amount list already
+stamps today.
+
+Amount and the date divide the work instead of overlapping. Amount says whether
+a site is worked out; the date says when. Supplying a date records a site
+worked out last week and implies Depleted whether or not Amount was touched.
+
+The date lives in its own table rather than on the deposit row, so the window
+fetches it — without that a site already known to be worked out would have
+shown the field blank, and saving would have silently re-stamped it with today.
+That date is what a reset-period calculation gets built on, so it is worth
+being the day it happened rather than the day somebody noticed.
+
+The `density_claimed` column stays in the store and on the sheet: rows imported
+from other commanders may carry it, and dropping the field a form offers is not
+a reason to discard data already collected.
+
 ### Fixed: saving a deposit with a signal number raised TypeError
 
 The form offered a Signal # field and `annotate_deposit()` had no such
