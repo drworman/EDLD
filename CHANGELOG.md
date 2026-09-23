@@ -1,6 +1,56 @@
 # EDLD CHANGELOG
 
-Last updated: 20260916
+Last updated: 20260922
+
+---
+
+## Released in 20260922
+
+### Fixed: Ctrl+D closed EDLD instead of opening the deposit window
+
+Textual validates a Select's value when the widget mounts, not when it is
+constructed. The deposit form passed `None` for a choice field with nothing
+selected, which raised `InvalidSelectValueError` inside a mount handler — and
+an unhandled exception there takes the whole application down. So a bad default
+on one field presented as EDLD vanishing on a keypress rather than as a broken
+control.
+
+Every field is blank on a new deposit, which made it certain the first time
+anyone pressed Ctrl+D on unrecorded ground. Nothing was written to the
+diagnostic log, because Textual tears the app down before the exception hook
+runs; the log simply stops mid-frame.
+
+The value is now omitted entirely when there is nothing to select. Not `None`,
+and not the blank sentinel either: that has moved between Textual releases — it
+is `Select.NULL` in some and `Select.BLANK` in others, and in at least one
+version `BLANK` is a plain `False` that the validator then rejects. Leaving the
+argument off uses whichever default a given release considers blank, across the
+range `requirements.txt` allows.
+
+`tests/test_deposit_screen.py` mounts the screen in a headless app rather than
+constructing it, for the new-deposit case, the fully-populated case, a
+partially-filled one, and each choice field blank on its own. Building the
+widget was never going to catch this; only mounting it does. The desktop
+dialog was checked for the same fault and does not have it — an unknown value
+there falls back to the blank entry.
+
+Chasing the same failure further found a second way in that the first fix did
+not close. Any stored choice value that is not exactly an option crashes
+identically — `high`, `Very High`, `vhigh` — and one can reach the store:
+`import_deposits` wrote sheet values verbatim, and a sheet is a document people
+edit by hand, so another commander's cell would have taken the window down on
+whoever opened it next rather than on whoever typed it. The widget now matches
+case-insensitively and drops anything unrecognised, and the import normalises
+amount and density to the vocabulary, discarding what it cannot place: a wrong
+value is worse than a blank one a later sighting can fill in.
+
+### Fixed: Ctrl+D just after a refine offered to add a deposit already on its way
+
+A refine queues its deposit and does not write it until the confirm interval
+has passed, so pressing Ctrl+D moments after mining the first unit described
+unrecorded ground and invited a second row for the same rock. The pending queue
+is flushed before the window is filled, so it now opens on the deposit that is
+actually there.
 
 ---
 
