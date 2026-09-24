@@ -413,10 +413,15 @@ class EdldWindow(QMainWindow):
             return
         try:
             block.refresh_data()
-        except Exception:
+        except Exception as exc:
             # A block that throws must not take the dashboard down with it;
-            # the same guard the TUI applies around refresh_data().
-            pass
+            # the same guard the TUI applies around refresh_data().  It is
+            # reported, once, rather than swallowed.
+            from core.ui_helpers import report_block_fault
+            faults = getattr(self, "_block_faults", None)
+            if faults is None:
+                faults = self._block_faults = set()
+            report_block_fault(self._core, block_id, exc, faults)
 
     def _refresh_all(self) -> None:
         if self._preload_active():

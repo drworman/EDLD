@@ -645,3 +645,43 @@ def srv_tonnage(used: int, capacity: int) -> str:
     capacity, so for some vehicles there is no honest denominator to print.
     """
     return f"{used}/{capacity} t" if capacity else f"{used} t"
+
+
+# ── Window redraw faults ──────────────────────────────────────────────────────
+
+def report_block_fault(core, block_id: str, exc: BaseException,
+                       seen: set) -> None:
+    """Record that a dashboard window threw while redrawing.
+
+    Both front ends guard each window's refresh_data() so one faulty window
+    cannot take the dashboard down.  The guard used to be ``except: pass``,
+    which made the fault invisible: the desktop Crew / Alerts window raised
+    on every redraw whenever crew was hired, which also stopped its alert
+    feed updating, and nothing anywhere said so.
+
+    Reported once per window and fault — to the debug log with the
+    traceback, and as a standing fault in the Alerts feed — because a redraw
+    runs many times a second and would otherwise flood both.
+    """
+    key = (block_id, type(exc).__name__, str(exc))
+    if key in seen:
+        return
+    seen.add(key)
+    try:
+        from core import debug
+        debug.exception(f"window {block_id} failed to redraw", exc)
+    except Exception:
+        pass
+    window = block_id.removeprefix("block-").replace("-", "_")
+    # Two DOM ids are abbreviations of their window's name.
+    window = {"nav": "navigation", "ship": "ship_info"}.get(window, window)
+    try:
+        from core.layout_model import BLOCK_DISPLAY
+        name = BLOCK_DISPLAY.get(window) or window.replace("_", " ").title()
+    except Exception:
+        name = window
+    try:
+        core.plugin_call("alerts", "push_fault", "⚠",
+                         f"{name} window failed to redraw — see log")
+    except Exception:
+        pass

@@ -257,10 +257,20 @@ class EdldTui(App):
     def _refresh_block(self, block_id: str) -> None:
         try:
             block = self.query_one(f"#{block_id}")
-            if hasattr(block, "refresh_data"):
-                block.refresh_data()
         except Exception:
-            pass
+            return          # window not placed in the current layout
+        if not hasattr(block, "refresh_data"):
+            return
+        try:
+            block.refresh_data()
+        except Exception as exc:
+            # One faulty window must not take the dashboard down, but it is
+            # reported, once, rather than swallowed.
+            from core.ui_helpers import report_block_fault
+            faults = getattr(self, "_block_faults", None)
+            if faults is None:
+                faults = self._block_faults = set()
+            report_block_fault(self._core, block_id, exc, faults)
 
     def _refresh_all(self) -> None:
         if self._preload_active():
