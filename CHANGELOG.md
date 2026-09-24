@@ -1,6 +1,237 @@
 # EDLD CHANGELOG
 
-Last updated: 20260922
+Last updated: 20260923
+
+---
+
+## Unreleased
+
+### Added: a Radio tab in the Crew / Alerts window
+
+Radio Sidewinder, Hutton Orbital Radio and Radio Skvortsov can now be played
+from inside EDLD, in both the terminal dashboard and the desktop window: a
+station list, Play/Stop, volume down and up, mute, and the song title where the
+station sends one. Nothing plays until Play is pressed. The last station chosen
+is selected again at the next launch but not started, and volume, mute and
+that station are kept in `radio.json` in the data directory rather than in
+`config.toml`, so turning the volume down never rewrites a hand-commented
+config.
+
+Stations live in a new `[Radio]` section as two keys each, `Name_<Id>` and
+`Url_<Id>`. Profiles add, rename, repoint or hide stations with the usual
+dotted keys, and an empty URL is how a default is hidden, since deleted default
+keys are put back at startup like any other. The flat layout is not a style
+choice: `config_to_toml`, which Preferences saves with, writes only scalars
+under bare keys, so an array of stations would have been flattened to a string
+and a station name with a space in it could not have been a key. Either would
+have lost every added station the first time anyone pressed Apply & Save.
+`[Radio]` is also now a standard section, without which migration and backfill
+would have treated it as a profile. The list follows hot-reload, and a station
+hidden or repointed while it plays is stopped. `docs/CONFIGURATION.md`
+documents all of it.
+
+Playback is `core/radio.py`, one player shared by both front ends, with
+miniaudio (MIT) doing the decoding and output, so there is no player to install.
+It plays MP3, Ogg Vorbis and FLAC, and follows `.m3u` and `.pls` addresses. All
+three default stations are MP3. miniaudio's own Icecast client was not used: it
+connects twice, and its second connection is given no SSL context, so in a
+frozen build HTTPS would have failed in a background thread after the first
+connection had reported success, after which its reader waits for data forever.
+That is a station that says it is playing and makes no sound. The reader here
+makes one connection and returns end-of-stream when it stops, and every way a
+station can fail arrives in the tab as a message instead: AAC, AAC+, Opus and
+HLS streams by name, a web page where a stream was expected, an HTTP error, an
+unreachable host, a rejected certificate, a stall, a dropped connection, data
+that will not decode, and no audio device. miniaudio falls back to a null
+device that accepts audio and plays nothing when a machine has no output; that
+is refused as "no audio output device found". A `[Radio]` entry that cannot be
+used is listed under Config in the tab rather than left out without comment.
+
+The window's own rule was that an alert needing a tab change is an alert
+missed, so any new alert brings the Crew / Alerts tab back to the front while
+the radio carries on. Alerts already standing when the window opens do not.
+
+Both tabs draw the same view from one `RadioController`, and a test checks
+their controls match. Everything the terminal tab shows is passed as plain
+text rather than markup: song titles come from the station, and a problem line
+quoting `[Radio]` lost the word entirely when Textual read it as a tag, while
+one containing `[/b]` would have raised.
+
+`tests/test_radio.py` drives the real decoder and the real audio callback
+against a local Icecast-style server through miniaudio's null backend, which
+consumes samples in real time without a sound card, and covers each failure
+above.
+
+miniaudio is bundled in all three binaries, so the radio works without
+installing anything. Playback is otherwise only exercised by pressing Play, so
+a binary missing miniaudio's compiled half would have shipped looking fine;
+`--selftest`, which the release workflow runs against each platform's binary,
+now decodes a short embedded MP3 through the same reader and decoder a station
+uses, needing neither a network nor a sound card.
+
+### Added: add and delete radio stations from the Radio tab
+
+A **+** and **−** beside the station list, in both interfaces. **+** opens a
+form for a name, a stream address, and where to keep it — Global (preselected)
+or the profile loaded now, which is disabled when there is none. **−** deletes
+the selected station after a confirmation that says exactly what will change,
+and stops it first if it is playing. A default station is hidden by blanking
+its address rather than deleted, since deleted default lines come back at the
+next launch. The new station is selected but not started. The logic lives in
+`RadioController`, shared by both forms, so validation messages, the Id made
+from the name, and what a delete touches are identical in each.
+
+Both write `config.toml` through a new `edit_config_keys()` rather than
+`ConfigManager.save()`, which regenerates the file from parsed values and would
+have thrown away every comment in a file most people copied from the commented
+example — as the side effect of adding a radio station. The new editor works
+line by line like the defaults backfill: a key is replaced where it stands with
+its alignment kept, a new one goes at the end of its table, a profile's keys go
+under `[EDP1.Radio]` if the file has that table and as dotted lines under
+`[EDP1]` otherwise. Line editing cannot see all of TOML, so the result is
+parsed and compared with the intended document before anything is written, and
+anything else is refused with the file left byte-for-byte as it was; the write
+itself goes through a temporary file and keeps the file's permissions, since
+it can hold credentials. That check caught a real case while this was being
+built: deleting the last dotted `Radio.*` key removes the table outright,
+which the comparison now treats the same as an emptied `[EDP1.Radio]`.
+
+After a write the config is re-read at once through a new
+`ConfigManager.reload_now()`. Waiting for hot-reload would not do: it compares
+modification times, and two edits inside the filesystem's timestamp resolution
+look like one.
+
+The desktop theme gained a radio-button style. These are the first radio
+buttons in the desktop window, and without one the platform draws the
+indicator in the window colour, so the unchecked choice was invisible.
+
+### Added: a dashboard template for the shared survey sheet
+
+`sheets/Mining_Dashboard.xlsx` is a starting spreadsheet for squadrons that
+publish their survey: import it into Google Drive, save it as a Google Sheet,
+and bind `Code.gs` to it as before. It arrives with an empty `Deposits` tab
+carrying the header row, so the receiver writes straight into it, and with
+placeholders on the Settings tab for the squadron and the commander who
+maintains it, from which the dashboard takes its title.
+
+The Dashboard tab is the read side for people who open the sheet rather than
+run EDLD. Choose a system, a commodity or both, and a table of matching
+deposits appears — body, gravity, mining site, amount, density, rigs and when
+it was worked out. Rows alternate in colour, High amounts and densities are
+highlighted and Low ones dimmed, and depleted deposits are struck through.
+Deposits flagged as test data are left out, as they are from EDLD's own reads.
+
+The table sorts by any column, from Sort By and Order beside the filters or by
+clicking a header, and the sorted header carries ▲ or ▼. Amount and Density
+sort by rank — Depleted, Low, Medium, High — rather than alphabetically. The
+sort is done inside the table's formula: the table is one `FILTER` expression,
+and Sheets cannot reorder a formula's output in place, so Data → Sort range
+over it either fails or is undone at the next recalculation.
+
+It is styled after the game's HUD, with five colour presets — Classic HUD,
+Federation, Empire, Alliance and Thargoid — and a Custom set of twelve hex
+codes on the Settings tab, plus a choice of title and body font. Sheets cannot
+colour a cell from a formula, so something has to turn those codes into
+formatting: that is `sheets/Dashboard.gs`, a second script beside `Code.gs` in
+the same project, which re-applies the theme whenever Settings changes and
+adds the click-to-sort. Without it the template shows Classic HUD and sorts
+from the dropdowns only.
+
+An xlsx cell cannot hold `FILTER`, `LET` or an array literal over ranges, so
+the template stores those formulas in the wrapper Google's own xlsx export
+uses, which Sheets unwraps on import. **ED Dashboard → Repair dashboard
+formulas** rewrites them if an import ever does not. Both the template and the
+repair take the formula text from `FORMULAS` in `Dashboard.gs`, so they cannot
+disagree.
+
+`sheets/build_dashboard.py` generates the template, stamping it with the
+`version` file's datestamp. The table picks `Deposits` columns by letter, so
+it depends on `COLUMNS` in `Code.gs` the way `core/sheets_publish.py` does, and
+nothing would raise if they drifted; the dashboard would show the wrong field.
+`tests/test_sheets_dashboard.py` checks every letter against `COLUMNS`, the
+sort rank against `AMOUNT_LEVELS` and `DENSITY_LEVELS` in `core/mining_db.py`,
+the script's fallback palette against the template's, and that the committed
+template is what the build produces now. openpyxl, which the build and the
+last check use, is in `requirements-dev.txt`; it is never bundled.
+
+### Fixed: the binaries carried none of their dependencies' licence texts
+
+Textual, Rich, discord-webhook, requests, psutil and a dozen packages beneath
+them are MIT, BSD or Apache 2.0. Permissive, but each sets one condition: its
+copyright and licence text accompany every copy, plus the NOTICE file for
+Apache. A binary is a copy of every package inside it, and PyInstaller bundles
+the code while leaving the package metadata, where those texts live, behind.
+`licenses/` held only the GPL and LGPL texts for Qt, so every release so far
+has shipped the rest without them.
+
+The build now copies each bundled package's licence files from the build
+environment's own metadata into `licenses/third-party/<package>-<version>/`,
+following `requirements.txt` and everything it pulls in, so the texts always
+match the versions actually shipped and a new dependency cannot be forgotten.
+A bundled package with no licence file stops the build. `--selftest` fails a
+frozen binary that carries none, and `tests/test_dependencies.py` checks the
+collector finds one for every bundled package.
+
+### Changed: the requirements files match what EDLD imports
+
+`requirements.txt` declared cryptography, which nothing imports. It was listed
+in the notices as "Frontier CAPI token storage", which was never true: CAPI
+tokens are stored as plain JSON in the commander's data directory. It is gone
+from the requirements, `install.sh`, and the install commands and tables in
+`README.md` and `INSTALL.md`. Rich, which the terminal blocks import directly,
+is now declared rather than assumed to arrive with Textual.
+
+`requirements-dev.txt` declared Pillow for `scripts/generate_icons.py`, which
+does not exist; the icons are committed. It is gone. pytest and pyflakes, which
+the tests need, are added, and so is PyPA's `packaging`, which the licence
+collector uses. `tests/test_dependencies.py` compares both files with the
+imports in both directions: an undeclared import fails, and so does a declared
+package nothing imports.
+
+### Fixed: `scripts/build_local.sh --dir` failed before building
+
+It passed `-D` to PyInstaller alongside `packaging/edld.spec`, and PyInstaller
+refuses layout options when given a spec file, so the directory build exited
+with a usage error every time. The spec now chooses the layout from
+`EDLD_ONEDIR=1`, which the script sets, and the script finds the executable
+inside `dist/EDLD/` where that layout puts it. The build's preflight also
+checks for miniaudio now.
+
+### Fixed: a CAPI token file that failed to save said nothing
+
+`_save_tokens` swallowed any error. A refreshed token that could not be written
+worked for the rest of that run and then demanded a new Frontier login at the
+next launch, with nothing recorded to say why. Failures to save or read the
+token file are now written to the debug log, as the exception only; no token
+content is logged.
+
+### Fixed: the desktop Crew / Alerts window stopped updating with crew hired
+
+`gui/blocks/status.py` called `fmt_crew_active` without importing it, so every
+redraw raised as soon as hired crew had a hire date. The Active and Paid rows
+never filled in, and because alerts are drawn after crew, the window's alert
+feed stopped updating too. The terminal window has its own copy of the helper
+and was unaffected.
+
+### Fixed: accepting a massacre mission never refreshed the dashboard
+
+`_on_massacre_accepted` read `settings`, a local of the event handler it was
+lifted out of, to check for a full stack. Every live acceptance raised there,
+after the "Accepted massacre mission" line and before the "Stack full" notice
+and the dashboard repaint, so a full stack was never announced and the
+Objectives window only caught up at the next unrelated event.
+
+### Fixed: a window that failed to redraw said nothing
+
+Both front ends guard each window's redraw so one fault cannot take the
+dashboard down, and both guards were `except Exception: pass`. That is why the
+two faults above went unnoticed. A redraw fault is now written to the debug log
+with its traceback and shown as a standing fault in the Alerts feed, once per
+window and fault since redraws run many times a second.
+
+`tests/test_undefined_names.py` runs pyflakes over the whole tree and fails on
+any undefined name, and would have caught both. It skips where pyflakes is not
+installed.
 
 ---
 

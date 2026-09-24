@@ -62,7 +62,8 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | 📈 **Career Summary** | Lifetime headline figures from every Career tab in one place, built from the same shared model as the session view so both read identically at their own scope |
 | 🔧 **Ship Window** | The vessel's name, ident and type heading three tabs — Cargo, Modules and Engineering. Modules are sorted by power priority then by health ascending, so anything needing repair surfaces first. Built for neutron hopping |
 | 🔭 **Exploration Window** | Honk / scan / map state and each body's current and max-if-mapped cartographic value, with that body's exobiology — signals, sampled flora, clonal-distance aid and predicted genera — nested directly beneath it |
-| 👥 **Crew / Alerts Window** | NPC crew roster and ship-launched fighter status with correct variant identification, sharing a window with the alert feed beneath it — the two are rarely busy at once |
+| 👥 **Crew / Alerts Window** | NPC crew roster and ship-launched fighter status with correct variant identification, sharing a window with the alert feed beneath it — the two are rarely busy at once. A Radio tab sits behind it, and any new alert brings Crew / Alerts back to the front |
+| 📻 **Radio** | Radio Sidewinder, Hutton Orbital Radio and Radio Skvortsov in the Crew / Alerts window's Radio tab, in both interfaces — station list, play/stop, volume and mute, with the song title where the station sends one. Add and delete stations from the tab itself (globally or for the current profile), or by hand in `[Radio]`. Never starts on its own |
 | 💰 **At-Risk Holdings Tracker** | Persistent cross-session tracker for unredeemed bounties, combat bonds, trade vouchers, cartography, and exobiology. Survives session resets, zeroed on death |
 | 🛡️ **Unified Data Provider** | Single source of truth for all game state — CAPI › journal › Status.json |
 | 🔐 **CAPI Authentication** | OAuth2 to Frontier's Companion API for authoritative fleet roster, market prices, fleet carrier finance, and squadron identity |
@@ -73,7 +74,7 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | 📚 **Native Documentation Viewer** | In-app viewer for all bundled documentation |
 | 🔍 **Search Modals** | Searchable pickers for home location and Spansh target market, in both interfaces |
 | ⛏️ **Surface Mining Survey** | Planetary deposits recorded automatically as you work them — position joined from `Status.json`, because the game emits no event that carries one. Bodies surveyed from their DSS signal count, deposits confirmed by driving onto them, depletion kept as dated history rather than a deletion. Ctrl+D adds or edits the deposit underfoot, resolved by proximity |
-| 🛰️ **Shared Survey Sheet** | Publish deposits to a Google Sheet and read back what other commanders found, so the compass points at sites you have never seen. Server-side deduplication on a stable deposit id, local observation always wins over the sheet, and a bad row is retired by flagging rather than deleting. Needs no Google Cloud project — a bound Apps Script, a URL and a token (experimental) |
+| 🛰️ **Shared Survey Sheet** | Publish deposits to a Google Sheet and read back what other commanders found, so the compass points at sites you have never seen. Server-side deduplication on a stable deposit id, local observation always wins over the sheet, and a bad row is retired by flagging rather than deleting. Needs no Google Cloud project — a bound Apps Script, a URL and a token. An optional [dashboard template](sheets/README.md#the-dashboard) gives the sheet a filterable, sortable, HUD-themed view for those reading it rather than running EDLD (experimental) |
 | 🎥 **Streamer Stats Overlay** | The subset of the dashboard worth putting on camera, drawn over the game itself. Three zones across the top plus docked columns down each side, panels contributed by the components that own the data, each choosing career figures, session figures, or career with the session in parentheses. Windows and X11 (experimental on Windows) |
 | 🔔 **Update Notifier** | Background check for new tagged releases on GitHub; notice surfaced in the terminal, the TUI, and the desktop window |
 
@@ -94,21 +95,21 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 ### Linux (Arch)
 ```bash
 sudo pacman -S python-psutil
-pip install discord-webhook cryptography --break-system-packages
+pip install discord-webhook textual miniaudio --break-system-packages
 ./install.sh
 ```
 
 ### Linux (Debian / Ubuntu)
 ```bash
 sudo apt install python3-psutil
-pip install discord-webhook cryptography --break-system-packages
+pip install discord-webhook textual miniaudio --break-system-packages
 bash install.sh
 ```
 
 ### Linux (Fedora)
 ```bash
 sudo dnf install python3-psutil
-pip install discord-webhook cryptography --break-system-packages
+pip install discord-webhook textual miniaudio --break-system-packages
 bash install.sh
 ```
 
@@ -217,6 +218,7 @@ UserID = 123456789012345678
 | [Terminal Output](docs/TERMINAL_OUTPUT.md) | Startup banner, event line format, sigil/tag reference, periodic summary |
 | [Theming](docs/THEMING.md) | Built-in themes, custom theme creation |
 | [Surface Mining Survey](docs/SURFACE_SURVEY.md) | Recording planetary deposits, the add/edit form, and sharing a survey with a squadron |
+| [Survey Sheet Setup](sheets/README.md) | The Apps Script receiver, sharing access with a squadron, and the dashboard template |
 | [Streamer Stats Overlay](docs/STREAMER_STATS_OVERLAY.md) | The in-game overlay: panels, placement, appearance, and diagnostics |
 | [Mission Bootstrap](docs/MISSION_BOOTSTRAP.md) | How EDLD reconstructs mission state on startup |
 | [Roadmap](docs/ROADMAP.md) | Active, near-term, and deferred work |
