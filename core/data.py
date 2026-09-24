@@ -179,6 +179,16 @@ def _http_post(url: str, data: dict, timeout: int = 20) -> dict:
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read())
 
+def _log_token_fault(action: str, exc: BaseException) -> None:
+    """Record a CAPI token file failure without any token material."""
+    try:
+        from core import debug
+        debug.log(f"[CAPI] could not {action} capi_tokens.json: "
+                  f"{type(exc).__name__}: {exc}", level="WARN")
+    except Exception:
+        pass
+
+
 def _http_get(url: str, token: str, timeout: int = 20) -> dict:
     class _NR(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -522,14 +532,20 @@ class CAPISource:
         try:
             raw = self._storage.read_json("capi_tokens.json")
             return raw if isinstance(raw, dict) else {}
-        except Exception:
+        except Exception as exc:
+            # Unreadable tokens mean re-authorising; say why.  Exception type
+            # and message only — never the file's contents.
+            _log_token_fault("read", exc)
             return {}
 
     def _save_tokens(self, tokens: dict) -> None:
         try:
             self._storage.write_json(tokens, "capi_tokens.json")
-        except Exception:
-            pass
+        except Exception as exc:
+            # Previously swallowed: a refreshed token that failed to save
+            # worked for this run and then demanded a fresh login next launch,
+            # with nothing recorded to say why.
+            _log_token_fault("save", exc)
 
     def _enqueue(self, endpoint_or_none, force: bool) -> None:
         try:
