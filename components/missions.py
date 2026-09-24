@@ -181,7 +181,7 @@ class MissionsPlugin(BasePlugin):
                 emoji="📋", sigil="*  MISS",
                 timestamp=event.get("_logtime"), loglevel=notify["MissionUpdate"],
             )
-            full_stack = settings.get("FullStackSize", 20)
+            full_stack = core.app_settings.get("FullStackSize", 20)
             if total_now == full_stack and state.stack_value > 0:
                 _sl = f"Stack full ({total_now} missions) — {fmt_credits(state.stack_value)}"
                 core.emitter.emit(
