@@ -21,6 +21,7 @@ requirement is met by publishing the complete source.  See docs/LICENSING.md.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 #: Repository root, derived from this file's own location.  PyInstaller
@@ -83,6 +84,106 @@ def _ca_bundle() -> list[tuple[str, str]]:
 
 DATA_FILES += _ca_bundle()
 
+
+# ── Licence texts of everything bundled ───────────────────────────────────────
+#
+# MIT, BSD, Apache and the rest are permissive, but not unconditional: each
+# requires its copyright and licence text to accompany every copy, and a
+# binary is a copy of every package inside it.  Apache 2.0 additionally
+# requires its NOTICE file.  PyInstaller bundles the code and leaves the
+# dist-info — where those texts live — behind, so without this step the
+# binaries carried none of them.
+#
+# Collected from the build environment's own metadata rather than kept by
+# hand, so the texts always match the versions actually shipped, and a new
+# dependency (or a new transitive one) cannot be forgotten.  A bundled
+# distribution with no licence file stops the build: shipping it without one
+# is the failure this exists to prevent, and it would otherwise be silent.
+
+#: Qt's licences are the LGPL/GPL texts already in licenses/ (see
+#: docs/LICENSING.md); its wheels carry no separate licence file.
+_LICENCE_EXEMPT = {"pyside6", "pyside6-essentials", "pyside6-addons", "shiboken6"}
+
+#: Bundled though not in requirements.txt: psutil is a distro package for
+#: source installs (see requirements-dev.txt), certifi is the CA bundle.
+_EXTRA_BUNDLED = ["psutil", "certifi"]
+
+_LICENCE_FILE = re.compile(r"(LICEN[CS]E|COPYING|NOTICE|AUTHORS)", re.IGNORECASE)
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def runtime_requirements() -> list[str]:
+    """Top-level distribution names from requirements.txt, plus _EXTRA_BUNDLED."""
+    names: list[str] = []
+    for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        names.append(re.split(r"[\s<>=!~;\[]", line, maxsplit=1)[0])
+    return names + _EXTRA_BUNDLED
+
+
+def bundled_distributions() -> dict:
+    """Every installed distribution the binary will carry, by normalised name.
+
+    The requirement closure of runtime_requirements(), following only
+    dependencies whose environment markers apply to this build machine —
+    which is the set PyInstaller will actually find and bundle.
+    """
+    import importlib.metadata as md
+    # PyPA's "packaging", not this directory: it has no __init__.py, so the
+    # installed regular package wins the import.  Declared in
+    # requirements-dev.txt (PyInstaller depends on it as well).
+    from packaging.requirements import Requirement
+
+    found: dict = {}
+    stack = list(runtime_requirements())
+    while stack:
+        name = stack.pop()
+        key = _norm(name)
+        if key in found:
+            continue
+        try:
+            dist = md.distribution(name)
+        except md.PackageNotFoundError:
+            found[key] = None               # optional and not installed here
+            continue
+        found[key] = dist
+        for spec in dist.requires or []:
+            req = Requirement(spec)
+            if req.marker is not None and not req.marker.evaluate({"extra": ""}):
+                continue
+            stack.append(req.name)
+    return {k: v for k, v in found.items() if v is not None}
+
+
+def licence_files() -> list[tuple[str, str]]:
+    """(source, bundle_dir) pairs placing each licence under
+    licenses/third-party/<name>-<version>/.  Raises SystemExit if any bundled
+    distribution has none."""
+    out: list[tuple[str, str]] = []
+    missing: list[str] = []
+    for key, dist in sorted(bundled_distributions().items()):
+        if key in _LICENCE_EXEMPT:
+            continue
+        files = [f for f in (dist.files or [])
+                 if ".dist-info" in str(f) and _LICENCE_FILE.search(f.name)]
+        if not files:
+            missing.append(f"{key} {dist.version}")
+            continue
+        dest = f"licenses/third-party/{key}-{dist.version}"
+        out += [(str(dist.locate_file(f)), dest) for f in files]
+    if missing:
+        raise SystemExit(
+            "No licence file found for bundled distribution(s): "
+            + ", ".join(missing)
+            + ".  Add the text to licenses/ by hand and exempt it in "
+              "packaging/build_common.py, or do not bundle it.")
+    return out
+
 #: Qt modules EDLD never touches.  Excluding them roughly halves the binary
 #: and removes components with their own licensing questions.
 QT_EXCLUDES = [
@@ -135,6 +236,7 @@ OTHER_EXCLUDES = [
     "matplotlib",
     "numpy",
     "pandas",
+    "pyflakes",
     "pytest",
     "scipy",
     "setuptools",
@@ -218,6 +320,12 @@ HIDDEN_IMPORTS = (
         # the shipped binary keeps game-process detection and session
         # management.
         "psutil",
+        # The Radio tab imports miniaudio inside a try/except, for the same
+        # reason and with the same risk as psutil above.  _miniaudio is its
+        # compiled cffi half, imported by name from miniaudio.py.
+        "core.radio",
+        "miniaudio",
+        "_miniaudio",
     ]
 )
 
@@ -228,7 +336,7 @@ def analysis_kwargs(extra_hidden: list[str] | None = None) -> dict:
         "scripts": [str(ROOT / "edld.py")],
         "pathex": [str(ROOT)],
         "binaries": [],
-        "datas": [d for d in DATA_FILES if Path(d[0]).exists()],
+        "datas": [d for d in DATA_FILES if Path(d[0]).exists()] + licence_files(),
         "hiddenimports": HIDDEN_IMPORTS + list(extra_hidden or []),
         "hookspath": [],
         "hooksconfig": {},

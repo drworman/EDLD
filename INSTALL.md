@@ -12,7 +12,7 @@ Arch ships current versions of everything EDLD needs.
 
 ```bash
 sudo pacman -S python-psutil
-pip install discord-webhook cryptography textual --break-system-packages
+pip install discord-webhook textual miniaudio --break-system-packages
 ```
 
 ```bash
@@ -32,7 +32,7 @@ nano ~/.local/share/EDLD/config.toml   # set JournalFolder at minimum
 
 ```bash
 sudo apt install python3-psutil
-pip install discord-webhook cryptography textual --break-system-packages
+pip install discord-webhook textual miniaudio --break-system-packages
 ```
 
 ```bash
@@ -52,7 +52,7 @@ nano ~/.local/share/EDLD/config.toml
 
 ```bash
 sudo dnf install python3-psutil
-pip install discord-webhook cryptography textual --break-system-packages
+pip install discord-webhook textual miniaudio --break-system-packages
 ```
 
 ---
@@ -130,8 +130,8 @@ If no config file is found on startup, EDLD creates one with safe defaults and p
 |------------|---------|----------------|
 | `python-psutil` | Process utilities | Package manager |
 | `discord-webhook` | Discord notifications | pip |
-| `cryptography` | CAPI auth and secure transport | pip |
 | `textual>=0.47` | Terminal dashboard (`--tui`) | pip |
+| `miniaudio>=1.71` | Radio tab playback (MP3, Ogg Vorbis, FLAC) — optional | pip |
 | `PySide6>=6.6` | Desktop window (`--gui`) — optional | pip |
 | A compositor (`picom` or equivalent) | Streamer Stats Overlay transparency on Linux — optional | distro package |
 
@@ -160,7 +160,7 @@ A `FAIL` line names the missing piece. To check the individual packages
 instead:
 
 ```bash
-python3 -c "import discord_webhook, cryptography, textual; print('Core OK')"
+python3 -c "import discord_webhook, textual, miniaudio; print('Core OK')"
 python3 -c "import psutil;  print('psutil OK')"    # game-process detection
 python3 -c "import PySide6; print('Desktop OK')"   # only if you want --gui
 ```

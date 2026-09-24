@@ -97,7 +97,8 @@ echo "  all required paths present"
 # ── Build tooling ────────────────────────────────────────────────────────────
 "$PY" - <<'EOF' || die "Build dependencies missing. Run: pip install -r requirements-dev.txt"
 import importlib.util, sys
-missing = [m for m in ("PyInstaller", "PySide6", "textual", "psutil", "certifi")
+missing = [m for m in ("PyInstaller", "PySide6", "textual", "psutil", "certifi",
+                       "miniaudio")
            if importlib.util.find_spec(m) is None]
 if missing:
     print("  missing modules: " + ", ".join(missing), file=sys.stderr)
@@ -109,7 +110,8 @@ EOF
 say "Building"
 rm -rf build dist
 if [ "$ONEDIR" -eq 1 ]; then
-  "$PY" -m PyInstaller packaging/edld.spec --noconfirm --clean -D
+  # Chosen inside the spec: PyInstaller rejects -D alongside a .spec file.
+  EDLD_ONEDIR=1 "$PY" -m PyInstaller packaging/edld.spec --noconfirm --clean
 else
   "$PY" -m PyInstaller packaging/edld.spec --noconfirm --clean
 fi
@@ -119,6 +121,13 @@ case "$OS" in
   macos)   BIN="dist/EDLD"; [ -d "dist/EDLD.app" ] && APP="dist/EDLD.app" ;;
   *)       BIN="dist/EDLD" ;;
 esac
+# The directory layout puts the executable inside dist/EDLD/.
+if [ "$ONEDIR" -eq 1 ]; then
+  case "$OS" in
+    windows) BIN="dist/EDLD/EDLD.exe" ;;
+    *)       BIN="dist/EDLD/EDLD" ;;
+  esac
+fi
 [ -e "$BIN" ] || die "Build produced no $BIN — see the PyInstaller output above."
 chmod +x "$BIN" 2>/dev/null || true
 echo "  built: $BIN ($(du -h "$BIN" | cut -f1))"

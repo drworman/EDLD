@@ -18,6 +18,7 @@ console=False on Windows, where src/win_console.py reattaches stdout on demand
 for the terminal modes.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -42,12 +43,23 @@ elif sys.platform == "darwin" and ICNS.is_file():
 # binary is run from a shell.
 _console = sys.platform != "win32"
 
+# One file by default, as released.  EDLD_ONEDIR=1 builds the directory layout
+# instead, for inspecting what went into the bundle.  It has to be chosen here:
+# PyInstaller refuses --onedir/--onefile on the command line when given a spec,
+# which is how scripts/build_local.sh --dir used to fail before building
+# anything.
+_onedir = os.environ.get("EDLD_ONEDIR") == "1"
+
+# Onefile packs binaries and data into the executable; onedir leaves them for
+# COLLECT to lay out beside it.
+_packed = [] if _onedir else [a.binaries, a.datas]
+
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
+    *_packed,
     [],
+    exclude_binaries=_onedir,
     name=APP_NAME,
     debug=False,
     bootloader_ignore_signals=False,
@@ -70,7 +82,11 @@ exe = EXE(
     icon=icon,
 )
 
-if sys.platform == "darwin":
+if _onedir:
+    coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False,
+                   name=APP_NAME)
+
+if sys.platform == "darwin" and not _onedir:
     app = BUNDLE(
         exe,
         name=f"{APP_NAME}.app",

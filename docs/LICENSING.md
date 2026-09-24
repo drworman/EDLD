@@ -18,15 +18,26 @@ proprietary. Keep the copyright notice.
 | Textual | MIT | yes |
 | Rich | MIT | yes |
 | discord-webhook | MIT | yes |
-| cryptography | Apache 2.0 | yes |
+| requests (via discord-webhook) | Apache 2.0 | yes |
 | psutil | BSD 3-Clause | yes |
 | certifi | MPL 2.0 | yes — CA bundle, shipped unmodified as data |
-| PyInstaller | GPL 2.0 with bootloader exception | build tool only, not shipped |
+| miniaudio (pyminiaudio) | MIT; bundled C libraries public domain / MIT-0 | yes |
+| cffi | MIT | yes |
+| PyInstaller | GPL 2.0 with bootloader exception | bootloader only, under its exception |
 
 Only PySide6 constrains how EDLD is packaged. certifi is MPL 2.0, whose
 copyleft is file-level: it attaches to the covered files, not to a work that
 ships alongside them, and the bundle is included unmodified as data. It places
 no condition on EDLD's own licence.
+
+miniaudio, which plays the Radio tab, is MIT, and the C libraries compiled
+into it (miniaudio, dr_mp3, dr_flac, stb_vorbis) are public domain or MIT No
+Attribution. Bundling it places no condition on EDLD beyond carrying its
+licence text, which the build does. That is why it was chosen over the usual
+alternatives: libmpv and python-mpv are GPL unless built specifically as LGPL,
+VLC is LGPL, and both would need a player installed or bundled on every
+platform. QtMultimedia is LGPL like the rest of Qt, but it is desktop-only and
+pulls FFmpeg into the binary.
 
 ## Why PySide6 and not PyQt
 
@@ -119,8 +130,16 @@ Not acceptable: GPL or AGPL, which would force EDLD's own licence to change, and
 anything with a non-commercial or field-of-use restriction, which would stop it
 being open source at all.
 
-Record every addition in `THIRD-PARTY-NOTICES.md`, and add the licence text to
-`licenses/` if the licence requires a copy to accompany distribution.
+Record every addition in `THIRD-PARTY-NOTICES.md`.
+
+Licence texts do not need adding by hand. Permissive licences are not
+unconditional — MIT, BSD and the rest require the copyright and licence text to
+accompany every copy, Apache 2.0 its NOTICE file too — and a binary is a copy
+of every package inside it. The build copies each bundled package's licence
+files from its installed metadata into `licenses/third-party/`, following
+`requirements.txt` and everything it pulls in, and stops if one has none. A
+package whose wheel carries no licence file needs its text added to
+`licenses/` by hand and an exemption in `packaging/build_common.py`, as Qt has.
 
 ## Elite Dangerous
 

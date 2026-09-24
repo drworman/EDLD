@@ -16,7 +16,11 @@
 # ── pip ──────────────────────────────────────────────────────────────────────
 #
 discord-webhook>=1.3.0
-cryptography>=41.0.0
+#
+# Radio tab (Crew / Alerts window).  MIT; decodes MP3, Ogg Vorbis and FLAC and
+# plays through the system's audio output, with no player to install.  EDLD
+# runs without it — the Radio tab says it is missing.
+miniaudio>=1.71
 #
 # ── UI frontends ─────────────────────────────────────────────────────────────
 #
@@ -26,6 +30,9 @@ cryptography>=41.0.0
 #
 # Textual TUI (--tui, the default terminal dashboard):
 textual>=0.47.0
+# Rich arrives with Textual, but the terminal blocks import it directly, so it
+# is declared rather than assumed.  13.3.3 is the floor Textual 0.47 requires.
+rich>=13.3.3
 #
 # PySide6 desktop window (--gui).  Qt for Python, LGPL v3 — see
 # docs/LICENSING.md.  Comment this out if you only ever use the terminal

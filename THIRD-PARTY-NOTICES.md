@@ -9,15 +9,29 @@ ships inside every release archive and every binary.
 |---|---|---|---|
 | **PySide6 / Qt** | **LGPL v3** | desktop interface (`--gui`) | yes |
 | **Textual** | MIT | terminal dashboard (`--tui`) | yes |
-| **Rich** | MIT | pulled in by Textual | yes |
+| **Rich** | MIT | terminal dashboard markup | yes |
 | **discord-webhook** | MIT | Discord notifications | yes |
-| **cryptography** | Apache 2.0 | Frontier CAPI token storage | yes |
+| **requests** | Apache 2.0 | pulled in by discord-webhook | yes |
+| **miniaudio** (pyminiaudio) | MIT | Radio tab playback | yes |
+| **miniaudio / dr_libs / stb_vorbis** (C, inside pyminiaudio) | public domain or MIT-0 | audio output; MP3, FLAC, Vorbis decoding | yes |
+| **cffi** | MIT | pulled in by miniaudio | yes |
 | **psutil** | BSD 3-Clause | game-process detection, session management | yes |
 | **certifi** | **MPL 2.0** | CA bundle for HTTPS in packaged builds | yes |
-| **PyInstaller** | GPL 2.0 with bootloader exception | build tool | no — not shipped |
-| **Pillow** | MIT-CMU | icon generation | no — not shipped |
+| **PyInstaller** | GPL 2.0 with bootloader exception | build tool | bootloader only, under its exception |
 | **JetBrains Mono** | **SIL OFL 1.1** | Streamer Stats Overlay typeface | yes — `fonts/` |
 | **Euro Caps** | freeware | Streamer Stats Overlay typeface | yes — `fonts/` |
+
+Packages that come in only as dependencies of these — urllib3, idna,
+charset-normalizer, markdown-it-py, mdurl, mdit-py-plugins, Pygments,
+platformdirs, typing-extensions, pycparser — are MIT, BSD, Apache 2.0 or PSF,
+all permissive. Their exact set varies with the versions a build picks up.
+
+**Every bundled package's own licence text ships inside each binary**, under
+`licenses/third-party/<package>-<version>/`, copied at build time from the
+package metadata of the build environment, so the texts always match the
+versions actually shipped. Apache 2.0 NOTICE files are included the same way.
+A package with no licence file stops the build rather than shipping without
+one. See `licence_files()` in `packaging/build_common.py`.
 
 Only PySide6 constrains how EDLD is packaged. See
 [docs/LICENSING.md](docs/LICENSING.md) for the full reasoning and for how each
@@ -78,6 +92,17 @@ certifi package included in each binary.
 
 Copyright © Giampaolo Rodola. BSD 3-Clause. Used to detect whether the game is
 running, and by the session-management component to stop it.
+
+## miniaudio
+
+pyminiaudio: Copyright © Irmen de Jong. MIT licence.
+<https://github.com/irmen/pyminiaudio>
+
+It compiles in David Reid's miniaudio library and dr_mp3 and dr_flac, and Sean
+Barrett's stb_vorbis. Each is dual-licensed public domain (Unlicense) or
+MIT No Attribution, so none places any condition on EDLD or its binaries. Used
+by the Radio tab to decode station streams and play them through the system's
+audio output. See `core/radio.py`.
 
 ## Textual and Rich
 

@@ -133,8 +133,8 @@ section "Installing pip packages"
 # for it, and the terminal interfaces work perfectly without it.
 PIP_PACKAGES=(
     "discord-webhook>=1.3.0:discord_webhook"
-    "cryptography>=41.0.0:cryptography"
     "textual>=0.47.0:textual"
+    "miniaudio>=1.71:miniaudio"
 )
 
 INSTALL_GUI="no"

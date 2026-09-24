@@ -9,8 +9,10 @@
 # shipped inside an artefact.  See docs/LICENSING.md.
 pyinstaller>=6.3.0
 
-# Icon generation (scripts/generate_icons.py).
-Pillow>=10.0.0
+# Requirement and marker parsing for the licence collector in
+# packaging/build_common.py.  PyInstaller depends on it too; declared because
+# the build calls it directly.
+packaging>=22.0
 
 # psutil is a distro-package install for people running from source, because of
 # its C extensions — which is why it is not in requirements.txt.  A frozen
@@ -27,3 +29,15 @@ psutil>=5.9.0
 # EDDN, EDSM, EDAstro, Inara and Spansh stop working with no visible error.
 # See core/certs.py.
 certifi>=2024.2.2
+
+# Tests.  pytest runs the suite; pyflakes backs tests/test_undefined_names.py,
+# which fails on any name a module uses but never defines.  Neither is ever
+# bundled — pytest is in the build's excludes, and nothing imports pyflakes.
+pytest>=7.4
+pyflakes>=3.0
+
+# The Google Sheets dashboard template.  sheets/build_dashboard.py writes
+# sheets/Mining_Dashboard.xlsx with it, and tests/test_sheets_dashboard.py
+# reads the committed template back (skipping where it is absent).  Never
+# bundled: nothing EDLD runs imports it.
+openpyxl>=3.1
