@@ -9,6 +9,7 @@ config.toml
 # These files contain sensitive cryptographic material — never commit them.
 *.key
 *.pub
+!signing/id_ed25519_signing.pub
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
