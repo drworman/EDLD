@@ -37,6 +37,7 @@ import re
 STANDARD_SECTIONS: frozenset[str] = frozenset({
     "Settings", "Discord", "LogLevels", "UI",
     "EDDN", "EDSM", "EDAstro", "Inara", "CAPI", "SurfaceSurvey", "Overlay", "OverlayPanels",
+    "Radio",
 })
 
 # Matches any TOML section header that indicates old-format content:
@@ -172,6 +173,7 @@ def backfill_config_defaults(config_path: Path) -> list[str]:
         "UI":        CFG_DEFAULTS_UI,
         "LogLevels": CFG_DEFAULTS_NOTIFY,
         "CAPI":      CFG_DEFAULTS_CAPI,
+        "Radio":     CFG_DEFAULTS_RADIO,
     }
     # SessionMgmt's defaults are owned by the component that reads them;
     # imported late to keep core/ from depending on components/ at import time.
@@ -359,6 +361,20 @@ CFG_DEFAULTS_CAPI = {
     "Enabled": False,   # set True automatically after first successful auth
 }
 
+# Stations for the Radio tab (Crew / Alerts window), two keys per station:
+# Name_<Id> is what the list shows, Url_<Id> the stream.  Any other Id is a
+# user's own station; it is read with include_extra, so these are the defaults
+# rather than the schema.  See core/radio.py for why the layout is flat.
+CFG_DEFAULTS_RADIO = {
+    "Name_RadioSidewinder": "Radio Sidewinder",
+    "Url_RadioSidewinder":
+        "https://radiosidewinder.out.airtime.pro:8000/radiosidewinder_b",
+    "Name_HuttonOrbital":   "Hutton Orbital Radio",
+    "Url_HuttonOrbital":    "https://quincy.torontocast.com/hutton",
+    "Name_RadioSkvortsov":  "Radio Skvortsov",
+    "Url_RadioSkvortsov":   "https://cast1.torontocast.com:3225/stream",
+}
+
 CFG_DEFAULTS_COLONISATION = {
     # Raven Colonial API key for ravencolonial.com project tracking.
     # Leave blank to disable API integration (local tracking still works).
@@ -516,6 +532,168 @@ def load_setting(
 
 # ── ConfigManager ─────────────────────────────────────────────────────────────
 
+# ── In-place key edits ────────────────────────────────────────────────────────
+
+class ConfigEditError(Exception):
+    """An edit that could not be made safely.  config.toml is left untouched."""
+
+
+def _header_path(line: str) -> tuple[str, ...] | None:
+    """The table path of a ``[a.b]`` header line, or None if not a header.
+    An array-of-tables header returns an empty tuple: a boundary, never a
+    match."""
+    s = line.strip()
+    if s.startswith("[["):
+        return ()
+    m = re.match(r"^\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$", s)
+    if not m:
+        return None
+    return tuple(p.strip().strip('"').strip("'") for p in m.group(1).split("."))
+
+
+def edit_config_keys(config_path: Path,
+                     edits: dict[tuple[str, ...], dict[str, object]]) -> None:
+    """Set or remove keys in config.toml without rewriting the rest of it.
+
+    ``edits`` maps a table path — ``("Radio",)`` or ``("EDP1", "Radio")`` —
+    to ``{key: value}``, where a value of None removes the key.  Every edit in
+    one call lands in a single write.
+
+    ``ConfigManager.save()`` regenerates the whole file from parsed values,
+    which discards every comment in a file most users copied from the heavily
+    commented example.  That is acceptable behind Preferences' Save button; it
+    is not acceptable as a side effect of adding a radio station.  So this
+    works line by line, like ``backfill_config_defaults``: a key already in
+    the file is replaced where it stands, a new one goes at the end of its
+    table, and a table that does not exist is appended.  A profile table is
+    edited where the user keeps it — ``[EDP1.Radio]`` if that header exists,
+    otherwise dotted ``Radio.<key>`` lines under ``[EDP1]``.
+
+    Line editing cannot see TOML's full grammar, so the result is checked
+    before anything is written: the new text must parse, and must parse to
+    exactly the old document with these edits applied and nothing else.
+    Anything else raises ConfigEditError and leaves the file as it was.
+    """
+    import copy
+    import os
+    import shutil
+    import tomllib
+
+    try:
+        text = config_path.read_text(encoding="utf-8")
+        before = tomllib.loads(text)
+    except OSError as exc:
+        raise ConfigEditError(f"cannot read {config_path.name}: {exc}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigEditError(f"{config_path.name} does not parse: {exc}") from exc
+
+    expected = copy.deepcopy(before)
+    for path, keys in edits.items():
+        node = expected
+        for part in path:
+            node = node.setdefault(part, {})
+            if not isinstance(node, dict):
+                raise ConfigEditError(f"[{'.'.join(path)}] is not a table")
+        for key, value in keys.items():
+            if value is None:
+                node.pop(key, None)
+            else:
+                node[key] = value
+
+    lines = text.splitlines()
+
+    def _headers() -> list[tuple[int, tuple[str, ...]]]:
+        return [(i, h) for i, ln in enumerate(lines)
+                if (h := _header_path(ln)) is not None]
+
+    def _body(start: int) -> tuple[int, int]:
+        """(first, end) line indices of the table whose header is at start."""
+        nxt = [i for i, _ in _headers() if i > start]
+        return start + 1, (nxt[0] if nxt else len(lines))
+
+    def _key_re(parts: tuple[str, ...]) -> re.Pattern:
+        dotted = r"\s*\.\s*".join(re.escape(p) for p in parts)
+        return re.compile(rf"^\s*{dotted}\s*=")
+
+    for path, keys in edits.items():
+        header = next((i for i, h in _headers() if h == path), None)
+        prefix: tuple[str, ...] = ()
+        if header is None and len(path) > 1:
+            parent = next((i for i, h in _headers() if h == path[:-1]), None)
+            if parent is not None:
+                header, prefix = parent, (path[-1],)
+        for key, value in keys.items():
+            if header is None:
+                if value is None:
+                    continue                       # nothing to remove
+                if lines and lines[-1].strip():
+                    lines.append("")
+                lines.append(f"[{'.'.join(path)}]")
+                header = len(lines) - 1
+            first, end = _body(header)
+            pattern = _key_re(prefix + (key,))
+            hit = next((i for i in range(first, end) if pattern.match(lines[i])), None)
+            if value is None:
+                if hit is not None:
+                    del lines[hit]
+                continue
+            line = f"{'.'.join(prefix + (key,))} = {_toml_scalar(value)}"
+            if hit is not None:
+                # Keep the key exactly as written, alignment included; only
+                # the value changes.
+                lead = pattern.match(lines[hit]).group(0)
+                lines[hit] = f"{lead} {_toml_scalar(value)}"
+                continue
+            at = header + 1
+            for i in range(first, end):
+                stripped = lines[i].strip()
+                if stripped and not stripped.startswith("#"):
+                    at = i + 1
+            lines.insert(at, line)
+
+    def _prune(doc: dict) -> dict:
+        # A table emptied by removals may or may not survive, depending on how
+        # the file spelled it: dotted keys vanish with their last key, while a
+        # [EDP1.Radio] header stays behind empty.  Either is correct, so an
+        # empty table on an edited path counts the same as no table.
+        for path in edits:
+            for depth in range(len(path), 0, -1):
+                node = doc
+                for part in path[:depth - 1]:
+                    node = node.get(part, {}) if isinstance(node, dict) else {}
+                leaf = node.get(path[depth - 1]) if isinstance(node, dict) else None
+                if isinstance(leaf, dict) and not leaf:
+                    del node[path[depth - 1]]
+        return doc
+
+    new_text = "\n".join(lines) + "\n"
+    try:
+        after = tomllib.loads(new_text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigEditError(
+            f"could not edit {config_path.name} safely ({exc}); "
+            "it has been left unchanged") from exc
+    if _prune(after) != _prune(expected):
+        raise ConfigEditError(
+            f"could not edit {config_path.name} safely; it has been left "
+            "unchanged — edit it by hand")
+
+    tmp = config_path.with_name(config_path.name + ".tmp")
+    try:
+        tmp.write_text(new_text, encoding="utf-8")
+        try:
+            shutil.copymode(config_path, tmp)     # it can hold credentials
+        except OSError:
+            pass
+        os.replace(tmp, config_path)
+    except OSError as exc:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise ConfigEditError(f"cannot write {config_path.name}: {exc}") from exc
+
+
 class ConfigManager:
     """Holds live config state and supports hot-reload.
 
@@ -602,6 +780,20 @@ class ConfigManager:
             warn_missing,
             include_extra,
         )
+
+    def reload_now(self) -> None:
+        """Re-read config.toml immediately, after EDLD itself edited it.
+
+        ``refresh()`` compares modification times, and two writes inside the
+        filesystem's timestamp resolution look like one — the second edit
+        would not be seen until the next unrelated change.
+        """
+        self.config = load_config_file(self.config_path)
+        try:
+            self._mtime = self.config_path.stat().st_mtime
+        except OSError:
+            pass
+        self._resolve_all(warn=False)
 
     def refresh(self, terminal_print: bool = True) -> bool:
         """Re-read config.toml if modified.  Returns True if reloaded."""

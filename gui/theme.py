@@ -203,6 +203,24 @@ QLineEdit, QSpinBox, QComboBox {{
     selection-color: {c['bg']};
 }}
 QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{ border-color: {c['accent']}; }}
+/* Radio buttons (the Add Station dialog).  Without a rule the platform
+   indicator is drawn in the window colour and an unchecked one vanishes. */
+QRadioButton {{ spacing: 6px; }}
+QRadioButton::indicator {{
+    width: 12px; height: 12px;
+    border: 1px solid {c['border']};
+    border-radius: 7px;
+    background-color: {c['bg']};
+}}
+QRadioButton::indicator:hover {{ border-color: {c['accent']}; }}
+QRadioButton::indicator:checked {{
+    border-color: {c['accent']};
+    background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 {c['accent']}, stop:0.45 {c['accent']},
+        stop:0.55 {c['bg']}, stop:1 {c['bg']});
+}}
+QRadioButton:disabled {{ color: {c['dim']}; }}
+QRadioButton::indicator:disabled {{ border-color: {c['dim']}; }}
 QComboBox::drop-down {{ border: none; width: 16px; }}
 QComboBox QAbstractItemView {{
     background-color: {c['block-bg']};

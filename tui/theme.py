@@ -175,6 +175,21 @@ DepositScreen {
 
 #deposit-dialog .key { width: 30%; }
 
+/* Radio tab: Add Station.  Same box as the deposit window, for the same
+   reason; RadioSet's own border is dropped so it sits like the inputs. */
+AddStationScreen { align: center middle; }
+#station-dialog {
+    width: 76;
+    max-width: 95%;
+    height: auto;
+    max-height: 90%;
+    padding: 1;
+    background: $block-bg;
+    border: solid $accent;
+}
+#station-dialog .key { width: 30%; }
+#station-scope { width: 1fr; height: auto; border: none; background: $block-bg; }
+
 .pref-title {
     padding: 0 1;
     color: $accent;
@@ -306,7 +321,7 @@ PreferencesScreen Button { height: 3; margin-left: 1; }
 #cargo-title     { width: 1fr; }
 #cargo-price-src { width: auto; text-align: right; }
 
-#cargo-footer, #cmdr-footer, #nav-footer {
+#cargo-footer, #cmdr-footer, #nav-footer, #radio-footer {
     height: 1;
     background: $title-bg;
 }
@@ -402,6 +417,24 @@ SearchModal { align: center middle; }
 
 /* Crew rank line: block-title class supplies background + border-bottom */
 #crew-rank-lbl { padding: 0 1; height: 1; }
+
+/* Radio tab.  The station list is collapsed to one row, like the Navigation
+   inputs: the default Select is three rows with a border, which in a centre
+   window leaves no room for the readout beneath it. */
+#radio-panel   { height: 1fr; }
+#radio-select-row { height: auto; margin: 0 0 1 0; }
+#radio-select  { height: auto; width: 1fr; }
+.radio-edit-btn { width: 3; content-align: center middle; }
+#radio-select > SelectCurrent {
+    height: 1;
+    border: none;
+    padding: 0 1;
+    background: $title-bg;
+    color: $accent;
+}
+#radio-select:focus > SelectCurrent { border: none; text-style: bold; }
+#radio-body    { height: 1fr; }
+#radio-problems { height: auto; }
 
 Footer { color: $dim; background: $bg; }
 Header { color: $accent; background: $bg; text-style: bold; }

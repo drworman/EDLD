@@ -187,6 +187,104 @@ When a new release is available on GitHub, EDLD displays a notification at start
 
 ---
 
+## `[Radio]`
+
+Stations for the Radio tab in the Crew / Alerts window, in both the terminal dashboard and the desktop window. **[HOT]** — the station list follows the file within a second of saving, with no restart.
+
+Each station is two keys joined by an Id of your choosing:
+
+| Key | Meaning |
+|---|---|
+| `Name_<Id>` | What the station list shows. Optional — the Id is shown if it is missing |
+| `Url_<Id>` | The stream address, `http://` or `https://`. A `.m3u` or `.pls` playlist address also works; its first stream is played |
+
+The Id is a TOML bare key: letters, digits, `_` and `-`, no spaces. It only has to pair the two lines up. Stations are listed in the order they appear, defaults first.
+
+Three stations ship as defaults:
+
+```toml
+[Radio]
+Name_RadioSidewinder = "Radio Sidewinder"
+Url_RadioSidewinder  = "https://radiosidewinder.out.airtime.pro:8000/radiosidewinder_b"
+Name_HuttonOrbital   = "Hutton Orbital Radio"
+Url_HuttonOrbital    = "https://quincy.torontocast.com/hutton"
+Name_RadioSkvortsov  = "Radio Skvortsov"
+Url_RadioSkvortsov   = "https://cast1.torontocast.com:3225/stream"
+```
+
+### Adding and deleting from the Radio tab
+
+The **+** and **−** beside the station list do this for you, in both interfaces.
+
+**+** opens a form for the station's name and stream address, and where to keep it:
+
+- **Global — every profile** (preselected) adds the pair to `[Radio]`.
+- **Current profile** adds it to the profile loaded now, as `Radio.Name_<Id>` / `Radio.Url_<Id>` lines under `[EDP1]`, or inside `[EDP1.Radio]` if your file already has that table. It is unavailable when no profile is loaded.
+
+The Id is made from the name — "Lave Radio" becomes `LaveRadio` — with a number added if that Id is already used anywhere in the file. A name already in the list, or an address that is not `http(s)://` with a host name, is refused with the reason.
+
+**−** deletes the selected station after asking. The confirmation says exactly what will change:
+
+- a station you added is removed from `[Radio]`, and from the current profile if it is defined there;
+- a **default** station has its `Url_` blanked instead of deleted, because deleted default lines are put back at startup (see below);
+- a station that is playing is stopped first.
+
+Both edit `config.toml` in place, changing only the station's own lines — your comments, spacing and every other setting are left exactly as they were. Before anything is written the result is parsed back and compared with what was intended; if the file is laid out in a way the editor cannot change safely, it says so and leaves the file untouched, and you can make the edit by hand as below.
+
+### Adding your own station by hand
+
+Add a pair to `[Radio]` to have it everywhere:
+
+```toml
+[Radio]
+Name_LaveRadio = "Lave Radio"
+Url_LaveRadio  = "https://example.org:8000/stream"
+```
+
+Or add it to a profile to have it only when that profile is loaded, using the same dotted keys as any other profile setting:
+
+```toml
+[EDP1]
+Radio.Name_MyStation = "My Station"
+Radio.Url_MyStation  = "https://example.org:8000/stream"
+```
+
+A profile can also rename a default (`Radio.Name_HuttonOrbital = "Hutton"`) or point it somewhere else.
+
+### Hiding a station
+
+Set its URL to an empty string, globally or in a profile:
+
+```toml
+[EDP1]
+Radio.Url_RadioSkvortsov = ""
+```
+
+Deleting a default station's lines from `[Radio]` does not remove it: like every other default, EDLD adds missing keys back to the section at startup. An empty URL is kept as you wrote it.
+
+### What plays
+
+Streams must be **MP3, Ogg Vorbis or FLAC**. That covers most Icecast and SHOUTcast stations, including all three defaults. **AAC, AAC+ and Opus** stations, and HLS (`.m3u8`) streams, are refused with a message saying which format they are, rather than playing silence. To check a station before adding it:
+
+```bash
+curl -sI 'https://example.org:8000/stream' | grep -i content-type
+```
+
+`audio/mpeg`, `audio/ogg`, `application/ogg` and `audio/flac` will play.
+
+### Behaviour
+
+- **Nothing plays until you press Play.** The last station you chose is selected again at the next launch, but not started.
+- Choosing another station while one is playing switches to it.
+- Volume steps by 5%. Volume, mute and the last station are remembered in `radio.json` in the EDLD data directory, not in `config.toml`, so adjusting them never rewrites your config.
+- A station that is hidden or has its URL changed while it is playing is stopped.
+- Any new alert brings the Crew / Alerts tab back to the front. The radio keeps playing.
+- The song title is shown where the station sends one (most do).
+- An entry that cannot be used — a `Name_` with no `Url_`, a URL that is not `http(s)://`, a key that is neither — is listed under **Config** in the Radio tab, not dropped silently.
+- Playback needs the `miniaudio` package. It is installed by `install.sh` and bundled in the release binaries; if it is missing, the Radio tab says so and everything else works normally.
+
+---
+
 ## Config Profiles
 
 Profiles let you override any setting for a specific commander or purpose. Define them as named sections in `config.toml`:

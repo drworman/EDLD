@@ -341,6 +341,37 @@ Enabled       = false
 # PanelMode_survey_compass = "auto"
 # PanelScope_income    = "both"     # career figure with the session in parentheses
 
+# ── Radio ────────────────────────────────────────────────────────────────────
+# Stations for the Radio tab in the Crew / Alerts window.  [HOT] — the station
+# list updates within a second of saving.  Nothing plays until you press play.
+#
+# The + and − beside the tab's station list add and delete stations here for
+# you, touching only those stations' lines.  Or edit by hand, as follows.
+#
+# Two keys per station, joined by an Id of your choosing (letters, digits,
+# _ and -; no spaces):
+#   Name_<Id>   what the station list shows
+#   Url_<Id>    the stream address (http:// or https://; .m3u/.pls also work)
+#
+# Streams must be MP3, Ogg Vorbis or FLAC.  AAC and Opus stations are listed
+# but report "not supported" when played.
+#
+# To add a station, add a pair here, or in a profile to have it only there:
+#   [EDP1]
+#   Radio.Name_MyStation = "My Station"
+#   Radio.Url_MyStation  = "https://example.org:8000/stream"
+#
+# To hide a station, set its Url to "".  Deleting the lines is not enough for
+# the three below: EDLD puts missing defaults back into this section.
+#
+[Radio]
+Name_RadioSidewinder = "Radio Sidewinder"
+Url_RadioSidewinder  = "https://radiosidewinder.out.airtime.pro:8000/radiosidewinder_b"
+Name_HuttonOrbital   = "Hutton Orbital Radio"
+Url_HuttonOrbital    = "https://quincy.torontocast.com/hutton"
+Name_RadioSkvortsov  = "Radio Skvortsov"
+Url_RadioSkvortsov   = "https://cast1.torontocast.com:3225/stream"
+
 # ==============================================================================
 # Custom profiles (advanced)
 # ==============================================================================

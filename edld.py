@@ -135,6 +135,24 @@ if args.selftest:
         except Exception as _e:
             _failed = True
             _results.append(f"  FAIL  {_label}: {type(_e).__name__}: {_e}")
+    # The radio is only exercised when someone presses Play, so a binary
+    # missing miniaudio's compiled half would otherwise ship looking fine.
+    try:
+        from core.radio import selftest as _radio_selftest
+        _results.append(f"  OK    radio ({_radio_selftest()})")
+    except Exception as _e:
+        _failed = True
+        _results.append(f"  FAIL  radio: {type(_e).__name__}: {_e}")
+    # A binary must carry the licence text of everything inside it; the build
+    # collects them (packaging/build_common.py), and this proves they landed.
+    if getattr(sys, "frozen", False):
+        _lic = Path(getattr(sys, "_MEIPASS", "")) / "licenses" / "third-party"
+        _n = len([p for p in _lic.iterdir() if p.is_dir()]) if _lic.is_dir() else 0
+        if _n:
+            _results.append(f"  OK    licence texts ({_n} packages)")
+        else:
+            _failed = True
+            _results.append(f"  FAIL  licence texts: none bundled at {_lic}")
     print(f"EDLD {VERSION} selftest")
     print("\n".join(_results))
     sys.exit(1 if _failed else 0)
@@ -210,7 +228,7 @@ if config_path is None:
         CFG_DEFAULTS_SETTINGS, CFG_DEFAULTS_EXTRA, CFG_DEFAULTS_UI,
         CFG_DEFAULTS_DISCORD, CFG_DEFAULTS_EDDN, CFG_DEFAULTS_EDSM,
         CFG_DEFAULTS_EDASTRO, CFG_DEFAULTS_INARA, CFG_DEFAULTS_NOTIFY,
-        CFG_DEFAULTS_CAPI, CFG_DEFAULTS_COLONISATION,
+        CFG_DEFAULTS_CAPI, CFG_DEFAULTS_COLONISATION, CFG_DEFAULTS_RADIO,
     )
     # SessionMgmt's defaults are owned by the component that reads them.
     from components.ksw import CFG_DEFAULTS as CFG_DEFAULTS_SESSIONMGMT
@@ -231,6 +249,7 @@ if config_path is None:
         "CAPI":        CFG_DEFAULTS_CAPI,
         "Colonisation": CFG_DEFAULTS_COLONISATION,
         "SessionMgmt": CFG_DEFAULTS_SESSIONMGMT,
+        "Radio":       CFG_DEFAULTS_RADIO,
     }
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
