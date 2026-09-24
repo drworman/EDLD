@@ -7,6 +7,13 @@ Sheet so a squadron, a wing, or a Discord full of strangers can read them.
 
 Everything here is off until you turn it on.
 
+| File | What it is |
+|---|---|
+| `Code.gs` | The receiver. Accepts deposits from EDLD and writes the `Deposits` tab. |
+| `Mining_Dashboard.xlsx` | Optional starting spreadsheet: a themed, filterable, sortable dashboard over `Deposits`. |
+| `Dashboard.gs` | Optional companion to the template: applies the theme, adds click-to-sort, repairs formulas. |
+| `build_dashboard.py` | Regenerates `Mining_Dashboard.xlsx`. Only needed if you change the template. |
+
 ## What you are setting up
 
 A small script that lives inside your spreadsheet and accepts writes over HTTP.
@@ -26,8 +33,18 @@ want them to stop.
 **1. Make or open the spreadsheet.** Any Google Sheet. The script creates a tab
 called `Deposits` and writes its own header row, so an empty sheet is fine.
 
+If you want the dashboard, start from the template instead: in Google Drive,
+New → File upload → `Mining_Dashboard.xlsx`, then open it and File → Save as
+Google Sheets. It arrives with an empty `Deposits` tab already carrying the
+header row, so the receiver writes straight into it. See [The
+dashboard](#the-dashboard) below.
+
 **2. Open the script editor.** Extensions → Apps Script. Delete whatever is in
 `Code.gs` and paste in the contents of `Code.gs` from this directory.
+
+Using the template? Also add `Dashboard.gs`: the **+** beside Files → Script,
+name it `Dashboard`, paste. It sits beside `Code.gs` rather than replacing it;
+the two share a project and nothing else.
 
 **3. Set a token.** Near the top:
 
@@ -136,6 +153,82 @@ with whatever you were poking at.
 **The URL is half a credential.** EDLD only ever logs its hostname, and `Token`
 is redacted from the debug header by name. If you paste a log somewhere, check
 it anyway.
+
+## The dashboard
+
+`Mining_Dashboard.xlsx` is a read side for people who open the sheet rather than
+run EDLD. It is a template, not a copy of anybody's data: the `Deposits` tab
+holds only its header row, and Settings holds placeholders.
+
+**Settings.** Put your squadron's name in B1 and the maintaining commander in
+B2; the dashboard title and subtitle come from those. Leave B1 blank and the
+title falls back to "CMDR *name*'s Mining Data". D1 carries the template version.
+
+**Filtering.** Pick a System, a Commodity, or both in A5:B5. The table appears
+at row 7 once either is set, and is empty until then. Both lists are built from
+whatever is in `Deposits`, so they fill themselves as commanders publish.
+Deposits flagged `is_test` are left out, as they are from EDLD's own reads.
+
+**Sorting.** Sort By and Order (E5:F5) sort the table; the header of the sorted
+column carries ▲ or ▼. With `Dashboard.gs` installed, clicking a header does the
+same: once to sort by it, again to reverse. Amount and Density sort by rank —
+Depleted, Low, Medium, High, the levels EDLD records — rather than
+alphabetically. The sort is shared, since it
+lives in two cells: whoever clicks last decides it for everyone viewing.
+
+Sorting is done inside the table's formula, not with Data → Sort range. The
+table is one `FILTER` expression, and Sheets cannot reorder a formula's output
+in place; a manual sort over it either fails or is undone on the next
+recalculation.
+
+**Readability.** Rows alternate between the theme's Panel and Panel Alt colours.
+High amounts and densities are highlighted, Low ones dimmed, and depleted
+deposits are struck through.
+
+**Theme.** Settings B5 picks one of five presets — Classic HUD, Federation,
+Empire, Alliance, Thargoid — or Custom, which uses the hex codes in B10:B21.
+B6:B7 pick the title and body fonts. The template arrives in Classic HUD;
+changing any of this needs `Dashboard.gs`, because Sheets cannot colour a cell
+from a formula and something has to apply the codes. It re-applies on every
+edit to Settings, or from the **ED Dashboard** menu. More presets go on the
+hidden `Themes` tab: add a column before Custom and it joins the list.
+
+`Dashboard.gs` replaces every conditional formatting rule on the Dashboard tab
+each time it applies the theme. Rules of your own belong in `styleDashboard_`.
+
+**If the table shows nothing at all** after importing — no header when a filter
+is set — the import dropped a formula. ED Dashboard → Repair dashboard formulas
+rewrites them. The template stores its Sheets-only formulas in the wrapper
+Google uses for its own xlsx export, which Sheets unwraps on import; the repair
+is there for the case where it does not.
+
+### Changing the template
+
+Edit `build_dashboard.py` and run it from the repository root:
+
+```sh
+python3 sheets/build_dashboard.py                    # writes sheets/Mining_Dashboard.xlsx
+python3 sheets/build_dashboard.py --version 20261001
+```
+
+`--version` defaults to the `version` file, so rebuild after bumping it for a
+release and the template's Settings!D1 matches the tag. It needs `openpyxl`,
+which is in `requirements-dev.txt`. The dashboard's Sheets-only formulas are defined once, in
+`FORMULAS` in `Dashboard.gs`; the build reads them from there and checks that
+each one survives the export wrapper intact. Change a formula in `Dashboard.gs`
+and rebuild, and the template and the repair command stay in agreement. The
+Classic HUD palette appears in both files (`THEMES` and `ED.FALLBACK`).
+
+`tests/test_sheets_dashboard.py` holds the pieces together: the committed
+template must match a fresh build, the FILTER's column letters must name the
+right fields in `Code.gs` `COLUMNS`, the sort rank must match the levels in
+`core/mining_db.py`, and the two copies of Classic HUD must agree. Changing
+`COLUMNS` — appending, as it always should be — leaves the letters valid; the
+test is there for the day something is inserted instead.
+
+Do not round-trip the template through Excel or LibreOffice. Neither can
+evaluate the dashboard's formulas, and saving from either replaces them with
+errors.
 
 ## The columns
 
