@@ -141,8 +141,13 @@ def test_the_build_collects_a_licence_for_every_bundled_package():
 
 
 def test_the_build_names_miniaudio_explicitly():
+    """Each of these is invisible to PyInstaller's analysis: core.radio and
+    miniaudio sit behind try/except, _miniaudio is imported by name, and
+    _cffi_backend is imported from _miniaudio's C code.  Missing the last one
+    built three binaries whose --selftest failed on every platform."""
     bc = _build_common()
-    assert {"miniaudio", "_miniaudio", "core.radio"} <= set(bc.HIDDEN_IMPORTS)
+    assert {"miniaudio", "_miniaudio", "_cffi_backend",
+            "core.radio"} <= set(bc.HIDDEN_IMPORTS)
 
 
 def test_the_dir_build_does_not_pass_onedir_beside_the_spec():

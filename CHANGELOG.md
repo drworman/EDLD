@@ -4,7 +4,7 @@ Last updated: 20260923
 
 ---
 
-## Unreleased
+## Released in 20260923
 
 ### Added: a Radio tab in the Crew / Alerts window
 
@@ -153,6 +153,17 @@ sort rank against `AMOUNT_LEVELS` and `DENSITY_LEVELS` in `core/mining_db.py`,
 the script's fallback palette against the template's, and that the committed
 template is what the build produces now. openpyxl, which the build and the
 last check use, is in `requirements-dev.txt`; it is never bundled.
+
+### Fixed: the radio could not load in any release binary
+
+miniaudio's compiled half imports cffi's C runtime, `_cffi_backend`, from its
+own C initialiser. PyInstaller follows Python imports, not ones made from C,
+and nothing in Python imports `_cffi_backend`, so it was left out of the
+bundle. All three binaries built without complaint and would have shipped with
+a Radio tab that failed on the first press of Play. The `--selftest` radio
+check added with the Radio tab caught it on every platform in the release
+workflow, before anything was published. `_cffi_backend` is now a named hidden
+import, and `tests/test_dependencies.py` checks it stays one.
 
 ### Fixed: the binaries carried none of their dependencies' licence texts
 

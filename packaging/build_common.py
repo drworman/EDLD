@@ -326,6 +326,13 @@ HIDDEN_IMPORTS = (
         "core.radio",
         "miniaudio",
         "_miniaudio",
+        # And _miniaudio, being compiled, imports cffi's own C runtime from
+        # inside its C initialiser, where PyInstaller's analysis cannot see
+        # it.  Nothing in Python imports it, so without this it is left out,
+        # every binary builds cleanly, and the radio fails at first use with
+        # "No module named '_cffi_backend'" — which is how 20260923's release
+        # build failed its --selftest on all three platforms.
+        "_cffi_backend",
     ]
 )
 
