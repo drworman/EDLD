@@ -1,10 +1,32 @@
 # EDLD CHANGELOG
 
-Last updated: 20260924
+Last updated: 20260925
 
 ---
 
 ## Unreleased
+
+### Fixed: the overlay froze on its last frame after Apply & Save
+
+The overlay draws from the same state as both dashboards, yet it could sit on
+screen reading SRV 22/72 while the Ship window beside it read 45/72, with the
+income rate behind as well. Nothing was wrong with the numbers; the overlay had
+simply stopped updating. Reloading the config after Apply & Save built a new
+renderer client and dropped the old one without stopping it, so the old
+renderer stayed on screen showing whatever it was last sent, while every later
+frame went to the new client, which had never been started and so refused
+them. From then on the overlay was a snapshot of the moment the button was
+pressed, drifting further from the dashboard with every event. It was
+invisible because the only record was a TRACE line reading `sent=False` twice a
+second, which says nothing unless you already know to look for it. A
+layout-only change now keeps the running renderer, a change to the window
+settings stops the old renderer before starting its replacement, and switching
+the overlay off takes it off the screen. A renderer that goes away for any
+reason is now reported once at INFO and restarted after a short pause, rather
+than being abandoned in silence. Two smaller faults went with it: the overlay
+only noticed config changes if it had been enabled when EDLD started, so
+switching it on in Preferences did nothing until the next launch, and
+unplacing every panel left the last frame up indefinitely.
 
 ### Fixed: release verification could not find the public key
 

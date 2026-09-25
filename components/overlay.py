@@ -43,6 +43,11 @@ _TICK_S = 0.5
 #: A position older than this means the game has stopped writing Status.json.
 _STALE_S = 3.0
 
+#: How long to wait before starting a renderer that has gone away. Long enough
+#: that a renderer which dies on every start is not respawned twice a second,
+#: short enough that one killed by accident comes back before anyone notices.
+_RESTART_BACKOFF_S = 10.0
+
 #: Shipped placement. Everything off until the commander places it — an
 #: overlay that decides for you what to cover the game with is not a feature.
 DEFAULT_PANELS = {
@@ -56,7 +61,7 @@ DEFAULT_PANELS = {
 class OverlayPlugin(BasePlugin):
     PLUGIN_NAME        = "overlay"
     PLUGIN_DISPLAY     = "Streamer Stats Overlay"
-    PLUGIN_VERSION     = "1.2.0"
+    PLUGIN_VERSION     = "1.2.1"
     PLUGIN_DESCRIPTION = ("Draws a small, context-aware stats overlay over the "
                           "game — the subset of the dashboard worth putting on "
                           "camera. Experimental.")
@@ -66,8 +71,16 @@ class OverlayPlugin(BasePlugin):
     def on_load(self, core) -> None:
         self._core = core
         self._client = None
+        #: The Overlay section the live client was built from. The renderer
+        #: reads its window settings once, at spawn, so a client is only worth
+        #: keeping across a config reload when that section has not changed.
+        self._client_cfg: dict | None = None
         self._drawn = False
         self._started = False
+        #: Whether the last frame went out. Only a change is logged, so a
+        #: renderer that has gone away is reported once, not twice a second.
+        self._sending = True
+        self._restart_at = 0.0
         self._heights: dict[str, int] = {}
         self._stop = threading.Event()
         self._status = "off"
@@ -99,9 +112,13 @@ class OverlayPlugin(BasePlugin):
                   f"{sum(1 for p in self._placements if p.mode != 'off')} active, "
                   f"client={'yes' if self._client else 'no'}")
 
-        if self._client:
-            threading.Thread(target=self._loop, daemon=True,
-                             name="edld-overlay").start()
+        # Started whether or not the overlay is enabled yet. The loop is also
+        # what notices a config change, so gating it on a client meant a
+        # commander who switched the overlay on in Preferences got nothing
+        # until the next launch. With no client it stats config.toml twice a
+        # second and does nothing else.
+        threading.Thread(target=self._loop, daemon=True,
+                         name="edld-overlay").start()
 
     def on_unload(self) -> None:
         self._stop.set()
@@ -151,8 +168,34 @@ class OverlayPlugin(BasePlugin):
                                              warn=False, include_extra=True)
         self._placements = op.placements_from_config(self._layout_cfg,
                                                      log=self._log)
-        self._client = client_from_config(self._window_cfg, log=self._log)
+        # A layout-only change keeps the renderer that is already running. Any
+        # change to the window settings needs a new one, because the renderer
+        # is handed them at spawn — and the old one has to be stopped first.
+        # Replacing the client without stopping it orphaned a live renderer
+        # still showing the last frame it was sent, while every frame after
+        # went to a new client that had never been started and was dropped:
+        # the overlay froze on whatever it said when Apply & Save was pressed
+        # and drifted further from the dashboard with every event.
+        if self._client is None or self._window_cfg != self._client_cfg:
+            self._retire_client()
+            self._client = client_from_config(self._window_cfg, log=self._log)
+            self._client_cfg = dict(self._window_cfg)
         self._status = "configured" if self._client else "off"
+
+    def _retire_client(self) -> None:
+        """Stop the current renderer and forget that one was ever started."""
+        old, self._client = self._client, None
+        self._client_cfg = None
+        self._started = False
+        self._drawn = False
+        self._sending = True
+        self._restart_at = 0.0
+        if old is not None:
+            try:
+                old.stop()
+            except Exception as exc:
+                self._log(f"stopping the previous renderer failed: "
+                          f"{type(exc).__name__}: {exc}")
 
     def _trace(self, message: str) -> None:
         """Per-frame detail. TRACE so it is there when --trace is on and
@@ -213,7 +256,15 @@ class OverlayPlugin(BasePlugin):
 
     def refresh(self) -> list[dict]:
         """Build and send one frame. Returns the elements, for tests."""
-        if not self._client or not self._placements:
+        if not self._client:
+            return []
+        if not self._placements:
+            # Everything unplaced since the last frame. Returning without
+            # clearing would leave that frame on screen indefinitely.
+            if self._drawn and self._client.running:
+                for win in op.WINDOWS:
+                    self._client.clear(win)
+            self._drawn = False
             return []
 
         pos = POSITIONS.latest()
@@ -278,6 +329,8 @@ class OverlayPlugin(BasePlugin):
             return []
 
         if not self._started:
+            if time.time() < self._restart_at:
+                return []
             self._started = True
             caps = self._client.start()
             self._status = caps.summary()
@@ -293,6 +346,25 @@ class OverlayPlugin(BasePlugin):
         sent = all(self._client.send(els, win) for win, els in per_window.items())
         self._trace("frame: " + ", ".join(
             f"{w}={len(e)}" for w, e in per_window.items()) + f", sent={sent}")
+        if not sent:
+            # send() is only False when the renderer is not running, so there
+            # is nothing on screen being kept up to date. Said once at INFO —
+            # this sat at TRACE as sent=False twice a second, which is the only
+            # reason a frozen overlay went unexplained — and the renderer is
+            # started again after a pause rather than never.
+            if self._sending:
+                self._sending = False
+                self._log(f"frames are not reaching the renderer "
+                          f"({self._client.status() or 'not running'}); "
+                          f"restarting it in {_RESTART_BACKOFF_S:.0f}s")
+            self._client.stop()
+            self._started = False
+            self._drawn = False
+            self._restart_at = time.time() + _RESTART_BACKOFF_S
+            return elements
+        if not self._sending:
+            self._sending = True
+            self._log("frames are reaching the renderer again")
         if sent:
             if not self._drawn:
                 # Once, on the first frame that actually goes out. The doctor
@@ -377,6 +449,9 @@ class OverlayPlugin(BasePlugin):
         if not self._client:
             return "enabled, but the renderer could not be configured"
         if not self._started:
+            if self._restart_at > time.time():
+                return (f"renderer stopped ({self._client.status()}) — "
+                        f"restarting shortly")
             return "enabled — starts when a placed panel first applies"
         return self._client.status()
 
