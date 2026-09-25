@@ -41,7 +41,8 @@ digest and the manifest itself is signed, so a valid signature plus a matching
 digest gives the same guarantee for any file, and one signature check covers
 the whole release. Verification is therefore two steps:
 
-1. The signature on `EDLD-<version>.sha256` is valid for `signing_key.pub`.
+1. The signature on `EDLD-<version>.sha256` is valid for the release public
+   key, `signing/id_ed25519_signing.pub`.
 2. Your file's SHA-256 matches its line in that manifest.
 
 **Step 2 is worthless without step 1.** Anyone who alters an artefact can
@@ -68,7 +69,7 @@ bash scripts/verify_release.sh
 
 ```bash
 # Build an allowed_signers file from the repo public key
-echo "drworman namespaces=\"edld.release\" $(cat signing_key.pub)" > allowed_signers
+echo "drworman namespaces=\"edld.release\" $(cat signing/id_ed25519_signing.pub)" > allowed_signers
 
 # 1. Authenticate the manifest — this must pass before the checksums mean
 #    anything at all
@@ -90,9 +91,22 @@ rm allowed_signers
 
 ## Signing key
 
-The release signing public key is committed to the repo at `signing_key.pub`.
-It is registered on GitHub as a signing key, causing all commits and tags
-mirrored from the primary server to display a **Verified** badge.
+The release signing public key is committed to the repo at
+`signing/id_ed25519_signing.pub`. Its fingerprint is:
+
+```
+SHA256:cLyptjOnhuQWARi4TGvLp1Gr3VCqx6MFE+KtWEY5KXI  drworman-signing (ED25519)
+```
+
+Check it before trusting the key: `ssh-keygen -lf signing/id_ed25519_signing.pub`
+must print exactly that. A key file can be replaced as easily as a checksum
+list, so the fingerprint is the thing to compare against something you did not
+download alongside it — this page on the primary server, or the signing keys on
+the GitHub profile. `scripts/verify_release.sh` checks it for you.
+
+The same key signs commits and tags. It is registered on GitHub as a signing
+key, causing all commits and tags mirrored from the primary server to display a
+**Verified** badge.
 
 ---
 
@@ -102,7 +116,7 @@ All commits on `main` and `dev` are SSH-signed. To verify a commit locally:
 
 ```bash
 # One-time setup — add the key to your allowed_signers file
-echo "drworman namespaces=\"git\" $(cat signing_key.pub)" >> ~/.ssh/allowed_signers
+echo "drworman namespaces=\"git\" $(cat signing/id_ed25519_signing.pub)" >> ~/.ssh/allowed_signers
 git config --global gpg.ssh.allowedSignersFile ~/.ssh/allowed_signers
 
 # Verify any commit

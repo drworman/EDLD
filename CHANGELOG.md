@@ -1,10 +1,54 @@
 # EDLD CHANGELOG
 
-Last updated: 20260923
+Last updated: 20260924
 
 ---
 
-## Released in 20260923
+## Unreleased
+
+### Fixed: release verification could not find the public key
+
+`scripts/verify_release.sh` and `docs/SIGNING.md` both said the release public
+key was committed to the repository as `signing_key.pub`, and the script sent
+anyone without it to a download link for that file. It was never committed —
+`.gitignore` excludes `*.pub` — so the link was a 404 and nobody outside could
+check a release signature at all. The key is now in the repository at
+`signing/id_ed25519_signing.pub`, and the script and the documentation point
+there. The script also checks the key's fingerprint before using it, and
+refuses a key file that is not the release key, since a key file downloaded
+beside a manifest can be swapped as easily as the manifest can. The
+fingerprint is published in `docs/SIGNING.md`.
+
+### Fixed: profile credentials were written in full to every trace log
+
+The `--trace` header redacts credentials, but it only looked at the key sitting
+directly beside each value. A profile holds its overrides as nested tables, so
+in `[EDP1]` the key beside the EDSM API key is `EDSM`, not `ApiKey`, and the
+whole table was written out as it stood. Every profile-level EDSM, Inara and
+Colonisation API key, the Surface Survey token and the Discord webhook URL went
+into every trace log, while the top-level copies of the same settings a few
+lines above were correctly redacted, which is what made the leak easy to miss
+when reading the file. Redaction now walks nested tables to any depth, and a
+table whose own name is credential-shaped is hidden whole. The tests only ever
+exercised flat sections, which is why they passed; they now use the shape of a
+real profile.
+
+### Fixed: `--terminal` never read Status.json, and lost every live surface refine
+
+The Status.json poller was started by the two dashboards and not by terminal
+mode, so a terminal session never saw live fuel, balance or shield changes.
+Worse, the poller is also what records surface positions, and surface-mining
+deposits are joined against those positions; with none recorded, every live
+refine was treated as a ring refine and discarded. Nothing was logged, because
+a ring refine is the ordinary case. Terminal mode now starts the poller too.
+
+### Fixed: `--terminal` held every dashboard redraw request in memory
+
+The journal reader, the Status.json poller and the components post redraw
+requests to a queue in every mode, but only the dashboards ever read it. In
+terminal mode the queue grew for as long as EDLD ran, which is precisely the
+mode people leave running through day-long AFK sessions. Terminal mode now
+empties it.
 
 ### Added: a Radio tab in the Crew / Alerts window
 
@@ -153,17 +197,6 @@ sort rank against `AMOUNT_LEVELS` and `DENSITY_LEVELS` in `core/mining_db.py`,
 the script's fallback palette against the template's, and that the committed
 template is what the build produces now. openpyxl, which the build and the
 last check use, is in `requirements-dev.txt`; it is never bundled.
-
-### Fixed: the radio could not load in any release binary
-
-miniaudio's compiled half imports cffi's C runtime, `_cffi_backend`, from its
-own C initialiser. PyInstaller follows Python imports, not ones made from C,
-and nothing in Python imports `_cffi_backend`, so it was left out of the
-bundle. All three binaries built without complaint and would have shipped with
-a Radio tab that failed on the first press of Play. The `--selftest` radio
-check added with the Radio tab caught it on every platform in the release
-workflow, before anything was published. `_cffi_backend` is now a named hidden
-import, and `tests/test_dependencies.py` checks it stays one.
 
 ### Fixed: the binaries carried none of their dependencies' licence texts
 

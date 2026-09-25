@@ -13,7 +13,8 @@
 # So verification is two steps, and one signature check covers the whole
 # release:
 #
-#   1. The manifest's signature is valid for signing_key.pub.
+#   1. The manifest's signature is valid for the release public key,
+#      signing/id_ed25519_signing.pub in the repository.
 #   2. The artifact's digest matches its line in that manifest.
 #
 # Step 2 without step 1 proves only that the file matches an unauthenticated
@@ -83,13 +84,36 @@ if [ ! -f "$SIG_FILE" ]; then
     exit 1
 fi
 
-if [ -f "${WORK_DIR}/signing_key.pub" ]; then
-    PUB_KEY="${WORK_DIR}/signing_key.pub"
-elif [ -f "${SCRIPT_DIR}/../signing_key.pub" ]; then
-    PUB_KEY="$(realpath "${SCRIPT_DIR}/../signing_key.pub")"
-else
-    echo "ERROR: signing_key.pub not found."
-    echo "Download it from: https://github.com/drworman/EDLD/raw/main/signing_key.pub"
+# The public key is looked for beside the downloads first, then in the
+# repository this script came from.  signing_key.pub is the name older copies
+# of these instructions used, and is still accepted.
+KEY_NAME="id_ed25519_signing.pub"
+KEY_URL="https://github.com/drworman/EDLD/raw/main/signing/${KEY_NAME}"
+KEY_FP="SHA256:cLyptjOnhuQWARi4TGvLp1Gr3VCqx6MFE+KtWEY5KXI"
+PUB_KEY=""
+for _cand in "${WORK_DIR}/${KEY_NAME}" \
+             "${WORK_DIR}/signing_key.pub" \
+             "${SCRIPT_DIR}/../signing/${KEY_NAME}"; do
+    if [ -f "$_cand" ]; then
+        PUB_KEY="$(realpath "$_cand")"
+        break
+    fi
+done
+if [ -z "$PUB_KEY" ]; then
+    echo "ERROR: the release public key (${KEY_NAME}) was not found."
+    echo "Download it from: ${KEY_URL}"
+    echo "and put it beside the files you are verifying."
+    exit 1
+fi
+
+# A key file can be swapped as easily as a manifest, so say which key this is.
+# Compare the fingerprint with the one in docs/SIGNING.md, which is also shown
+# on the GitHub profile's signing keys.
+_FP="$(ssh-keygen -lf "$PUB_KEY" 2>/dev/null | awk '{print $2}')"
+if [ "$_FP" != "$KEY_FP" ]; then
+    echo "ERROR: ${PUB_KEY} is not the EDLD release key."
+    echo "        expected ${KEY_FP}"
+    echo "        found    ${_FP:-unreadable}"
     exit 1
 fi
 
@@ -97,7 +121,7 @@ fi
 
 echo ""
 echo "[ 1/2 ] Verifying the signature on ${MANIFEST_NAME}..."
-echo "        Key:       $PUB_KEY"
+echo "        Key:       $PUB_KEY ($KEY_FP)"
 echo "        Identity:  $SIGNING_IDENTITY"
 
 ALLOWED=$(mktemp)

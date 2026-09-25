@@ -84,3 +84,52 @@ def test_real_world_webhook_shape_is_redacted():
     out = "\n".join(_format_toml_block({"Discord": {"WebhookURL": url}}))
     for fragment in (url, "1462560202837594234", "YkLi-JhmQNzXaoNkiqU9"):
         assert fragment not in out
+
+
+# ── Profile sections ──────────────────────────────────────────────────────────
+#
+# A profile holds its overrides as nested tables, so the key beside each
+# credential in the dump is the section name.  Redaction that only looked one
+# level down let every profile-level credential through in full.
+
+def test_profile_nested_credentials_are_redacted():
+    """The exact shape of a real [EDP1] profile dump."""
+    cfg = {
+        "EDP1": {
+            "Settings": {"JournalFolder": "/home/cmdr/journals"},
+            "EDSM": {"ApiKey": SECRET, "CommanderName": "MERRICK"},
+            "Inara": {"ApiKey": SECRET},
+            "Colonisation": {"ApiKey": SECRET},
+            "Discord": {"WebhookURL": SECRET},
+            "SurfaceSurvey": {"Token": SECRET},
+        },
+    }
+    out = "\n".join(_format_toml_block(cfg))
+    assert SECRET not in out
+    # The dump still answers the diagnostic question for each of them.
+    assert out.count("<redacted — set>") == 5
+    # And ordinary nested values survive, so the dump stays useful.
+    assert "/home/cmdr/journals" in out
+    assert "MERRICK" in out
+
+
+def test_redaction_walks_any_depth():
+    cfg = {"P": {"A": {"B": {"C": {"api_key": SECRET, "ok": 1}}}}}
+    out = "\n".join(_format_toml_block(cfg))
+    assert SECRET not in out
+    assert "'ok': 1" in out
+
+
+def test_secret_named_table_is_redacted_whole():
+    """A table whose own name is credential-shaped hides every value in it."""
+    out = "\n".join(_format_toml_block({"P": {"Auth": {"user": SECRET,
+                                                        "pass": SECRET}}}))
+    assert SECRET not in out
+    assert "2 key(s)" in out
+
+
+def test_tables_inside_lists_are_redacted():
+    out = "\n".join(_format_toml_block(
+        {"P": {"Hooks": [{"WebhookURL": SECRET}, "plain"]}}))
+    assert SECRET not in out
+    assert "plain" in out

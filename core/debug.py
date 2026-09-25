@@ -320,9 +320,20 @@ def _is_secret_key(key: str) -> bool:
 def _redact(key: str, value: Any) -> Any:
     """Replace a credential value with a set/unset marker.
 
-    Non-secret keys pass through untouched.
+    Non-secret keys pass through untouched — except that a table is walked, at
+    any depth, whatever its own name. A profile section holds its overrides as
+    nested tables (``[EDP1]`` carrying ``EDSM = {ApiKey = ...}``), so the key
+    beside a credential is the section name, not the credential's. Checking
+    only the outer key let every profile-level API key, token and webhook URL
+    through in full, in every trace log since profiles existed.
     """
+    if isinstance(value, dict):
+        if _is_secret_key(key):
+            return f"<redacted — {len(value)} key(s)>"
+        return {k: _redact(k, v) for k, v in value.items()}
     if not _is_secret_key(key):
+        if isinstance(value, (list, tuple)) and any(isinstance(x, dict) for x in value):
+            return [_redact(key, x) if isinstance(x, dict) else x for x in value]
         return value
     if isinstance(value, str):
         return "<redacted — set>" if value.strip() else "<redacted — empty>"

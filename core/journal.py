@@ -118,6 +118,26 @@ def _status_log(message: str) -> None:
         pass
 
 
+def _discard_gui_queue(gui_queue: "queue.Queue | None") -> None:
+    """Background thread: empty the dashboard queue when there is no dashboard.
+
+    The journal reader, the Status.json poller and a dozen components post
+    redraw requests to this queue in every mode, but only the TUI and the
+    desktop window ever take anything off it.  In ``--terminal`` mode nothing
+    did, so every request since launch stayed in memory for the life of the
+    process — a slow, unbounded leak in the one mode meant for day-long AFK
+    sessions.  The messages are redraw hints with no reader, so they are
+    simply dropped.
+    """
+    if gui_queue is None:
+        return
+    while True:
+        try:
+            gui_queue.get()
+        except Exception:
+            time.sleep(1.0)
+
+
 def _poll_status_json(
     journal_dir: Path,
     state: MonitorState,

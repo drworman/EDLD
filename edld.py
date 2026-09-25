@@ -636,7 +636,8 @@ emit_summary(
 
 # ── Monitor + launch ──────────────────────────────────────────────────────────
 
-from core.journal      import run_monitor as _run_monitor, _poll_status_json
+from core.journal      import (run_monitor as _run_monitor, _poll_status_json,
+                              _discard_gui_queue)
 from core.state        import save_session_state
 
 _edld_start_mono = time.monotonic()
@@ -677,6 +678,24 @@ def _log_fatal(what: str) -> None:
         pass
 
 
+def _start_status_poller() -> threading.Thread:
+    """Start the Status.json poller.
+
+    Every mode needs it, not just the dashboards.  It is what keeps fuel,
+    balance and shields current and what records the surface positions that
+    surface-mining deposits are joined against; ``--terminal`` never started
+    it, so every live surface refine in that mode was discarded as a ring
+    refine without a word.
+    """
+    status_thread = threading.Thread(
+        target=_poll_status_json,
+        args=(journal_dir, state, gui_queue),
+        daemon=True,
+    )
+    status_thread.start()
+    return status_thread
+
+
 def _start_background_threads() -> tuple:
     """Start the journal monitor and Status.json poller.
 
@@ -685,14 +704,7 @@ def _start_background_threads() -> tuple:
     """
     monitor_thread = threading.Thread(target=run_monitor, daemon=True)
     monitor_thread.start()
-
-    status_thread = threading.Thread(
-        target=_poll_status_json,
-        args=(journal_dir, state, gui_queue),
-        daemon=True,
-    )
-    status_thread.start()
-    return monitor_thread, status_thread
+    return monitor_thread, _start_status_poller()
 
 
 if __name__ == "__main__":
@@ -761,4 +773,9 @@ if __name__ == "__main__":
             sys.exit(1)
 
     else:  # terminal
+        # No dashboard drains the redraw queue in this mode, so something must,
+        # or it grows for as long as EDLD runs.  See _discard_gui_queue().
+        threading.Thread(target=_discard_gui_queue, args=(gui_queue,),
+                         daemon=True).start()
+        _start_status_poller()
         run_monitor()
