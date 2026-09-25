@@ -115,6 +115,8 @@ class ServerService:
         self._sock: socket.socket | None = None
         self._stop = threading.Event()
         self.bound: tuple[str, int] | None = None
+        self.portmap = None
+        self.duckdns = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -129,8 +131,28 @@ class ServerService:
         threading.Thread(target=self._publish_loop, name="edld-server-publish",
                          daemon=True).start()
 
+        if bool(self.settings.get("PortMapping", False)):
+            from core.server.portmap import PortMapper
+            self.portmap = PortMapper(self.bound[1], log=self._log, alert=self._alert)
+            self.portmap.start()
+        domain = str(self.settings.get("DuckDNSDomain", "") or "")
+        token = str(self.settings.get("DuckDNSToken", "") or "")
+        if domain and token:
+            from core.server.duckdns import DuckDNSUpdater
+            self.duckdns = DuckDNSUpdater(domain, token, log=self._log,
+                                          alert=self._alert)
+            self.duckdns.start()
+
     def stop(self) -> None:
+        if self._stop.is_set():
+            return
         self._stop.set()
+        for helper in (self.portmap, self.duckdns):
+            if helper is not None:
+                try:
+                    helper.stop()
+                except Exception as exc:
+                    self._log(f"[server] stopping {type(helper).__name__}: {exc}")
         if self._sock is not None:
             try:
                 self._sock.close()
@@ -487,3 +509,15 @@ class ServerService:
         n = len(self.registry.all())
         return (f"Server listening on {where}, port {port} — "
                 f"{n} paired device{'s' if n != 1 else ''}")
+
+    def status_lines(self) -> list[str]:
+        """What the preferences pages show under the server's settings."""
+        with self._clients_lock:
+            connected = [c.device.get("name", "?") for c in self._clients if c.alive]
+        out = [self.describe(),
+               "Connected now: " + (", ".join(connected) if connected else "none")]
+        out.append("Port forwarding: " + (self.portmap.status if self.portmap
+                                          else "off (PortMapping)"))
+        out.append("DuckDNS: " + (self.duckdns.status if self.duckdns
+                                  else "off (no domain or token)"))
+        return out

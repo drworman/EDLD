@@ -20,6 +20,7 @@
 #   scripts/build_local.sh --skip-tests    build and package, no smoke test
 #   scripts/build_local.sh --dir           directory layout instead of onefile
 #   scripts/build_local.sh --sign          also sign with SIGNING_KEY
+#   scripts/build_local.sh --server        EDLD-server: no dashboards, see docs/SERVER.md
 #
 set -euo pipefail
 
@@ -33,6 +34,7 @@ PACKAGE=1
 RUN_TESTS=1
 ONEDIR=0
 SIGN=0
+VARIANT=full
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -40,12 +42,16 @@ while [ $# -gt 0 ]; do
     --skip-tests) RUN_TESTS=0 ;;
     --dir)        ONEDIR=1; PACKAGE=0 ;;
     --sign)       SIGN=1 ;;
+    --server)     VARIANT=server ;;
     -h|--help)    awk 'NR>1 && /^#/ { sub(/^#[[:space:]]?/, ""); print; next }
                        NR>1 { exit }' "$SELF"; exit 0 ;;
     *) echo "Unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
   shift
 done
+
+export EDLD_VARIANT="$VARIANT"
+if [ "$VARIANT" = server ]; then NAME=EDLD-server; SUFFIX="server-"; else NAME=EDLD; SUFFIX=""; fi
 
 say()  { printf '\n\033[96m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -97,9 +103,11 @@ echo "  all required paths present"
 # ── Build tooling ────────────────────────────────────────────────────────────
 "$PY" - <<'EOF' || die "Build dependencies missing. Run: pip install -r requirements-dev.txt"
 import importlib.util, sys
-missing = [m for m in ("PyInstaller", "PySide6", "textual", "psutil", "certifi",
-                       "miniaudio")
-           if importlib.util.find_spec(m) is None]
+import os
+need = ["PyInstaller", "psutil", "certifi", "cryptography", "segno"]
+if os.environ.get("EDLD_VARIANT") != "server":
+    need += ["PySide6", "textual", "miniaudio"]
+missing = [m for m in need if importlib.util.find_spec(m) is None]
 if missing:
     print("  missing modules: " + ", ".join(missing), file=sys.stderr)
     sys.exit(1)
@@ -107,7 +115,7 @@ print("  build dependencies present")
 EOF
 
 # ── Build ────────────────────────────────────────────────────────────────────
-say "Building"
+say "Building ($VARIANT)"
 rm -rf build dist
 if [ "$ONEDIR" -eq 1 ]; then
   # Chosen inside the spec: PyInstaller rejects -D alongside a .spec file.
@@ -117,15 +125,15 @@ else
 fi
 
 case "$OS" in
-  windows) BIN="dist/EDLD.exe" ;;
-  macos)   BIN="dist/EDLD"; [ -d "dist/EDLD.app" ] && APP="dist/EDLD.app" ;;
-  *)       BIN="dist/EDLD" ;;
+  windows) BIN="dist/${NAME}.exe" ;;
+  macos)   BIN="dist/${NAME}"; [ -d "dist/EDLD.app" ] && APP="dist/EDLD.app" ;;
+  *)       BIN="dist/${NAME}" ;;
 esac
 # The directory layout puts the executable inside dist/EDLD/.
 if [ "$ONEDIR" -eq 1 ]; then
   case "$OS" in
-    windows) BIN="dist/EDLD/EDLD.exe" ;;
-    *)       BIN="dist/EDLD/EDLD" ;;
+    windows) BIN="dist/${NAME}/${NAME}.exe" ;;
+    *)       BIN="dist/${NAME}/${NAME}" ;;
   esac
 fi
 [ -e "$BIN" ] || die "Build produced no $BIN — see the PyInstaller output above."
@@ -172,20 +180,20 @@ fi
 # accompany the binary, and a link does not satisfy it.
 if [ "$PACKAGE" -eq 1 ]; then
   say "Packaging"
-  STEM="EDLD-${VERSION}-${PLATFORM}"
+  STEM="EDLD-${VERSION}-${SUFFIX}${PLATFORM}"
 
   case "$OS" in
     windows)
       if command -v 7z >/dev/null 2>&1; then
-        7z a "dist/${STEM}.zip" "./dist/EDLD.exe" \
+        7z a "dist/${STEM}.zip" "./dist/${NAME}.exe" \
           ./LICENSE ./THIRD-PARTY-NOTICES.md ./licenses >/dev/null
       else
-        "$PY" - "$STEM" <<'EOF'
+        "$PY" - "$STEM" "$NAME" <<'EOF'
 import shutil, sys, zipfile
 from pathlib import Path
-stem = sys.argv[1]
+stem, name = sys.argv[1], sys.argv[2]
 with zipfile.ZipFile(f"dist/{stem}.zip", "w", zipfile.ZIP_DEFLATED) as z:
-    z.write("dist/EDLD.exe", "EDLD.exe")
+    z.write(f"dist/{name}.exe", f"{name}.exe")
     for f in ("LICENSE", "THIRD-PARTY-NOTICES.md"):
         z.write(f, f)
     for p in Path("licenses").rglob("*"):
@@ -199,12 +207,12 @@ EOF
         ditto -c -k --keepParent "$APP" "dist/${STEM}.zip"
         ART="dist/${STEM}.zip"
       else
-        tar -czf "dist/${STEM}.tar.gz" -C dist EDLD \
+        tar -czf "dist/${STEM}.tar.gz" -C dist "$NAME" \
           -C .. LICENSE THIRD-PARTY-NOTICES.md licenses
         ART="dist/${STEM}.tar.gz"
       fi ;;
     *)
-      tar -czf "dist/${STEM}.tar.gz" -C dist EDLD \
+      tar -czf "dist/${STEM}.tar.gz" -C dist "$NAME" \
         -C .. LICENSE THIRD-PARTY-NOTICES.md licenses
       ART="dist/${STEM}.tar.gz" ;;
   esac

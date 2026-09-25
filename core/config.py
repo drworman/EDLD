@@ -383,12 +383,18 @@ CFG_DEFAULTS_RADIO = {
 #   ExternalHost     the name devices use away from home, e.g. a DuckDNS name;
 #                    only put into pairing codes, never looked up or contacted
 #   AllowEndSession  let a paired device end the game session (Solo only)
+#   PortMapping      ask the router to forward Port (UPnP / NAT-PMP)
+#   DuckDNSDomain    keep this DuckDNS name pointed at this connection;
+#   DuckDNSToken     both blank if something else already updates it
 CFG_DEFAULTS_SERVER = {
     "Enabled":         False,
     "Port":            28510,
     "BindAddress":     "",
     "ExternalHost":    "",
     "AllowEndSession": False,
+    "PortMapping":     False,
+    "DuckDNSDomain":   "",
+    "DuckDNSToken":    "",
 }
 
 CFG_DEFAULTS_COLONISATION = {

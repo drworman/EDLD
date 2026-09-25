@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as _dt
 import socket
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from core.server import identity as _identity
@@ -28,6 +29,15 @@ def _listening(port: int) -> bool:
     return False
 
 
+def external_host(settings: dict) -> str:
+    """The away-from-home address: ExternalHost, else the DuckDNS name."""
+    ext = str(settings.get("ExternalHost", "") or "").strip()
+    if not ext and settings.get("DuckDNSDomain"):
+        from core.server.duckdns import hostname
+        ext = hostname(str(settings.get("DuckDNSDomain")))
+    return ext
+
+
 def _hosts(settings: dict, port: int, external: str) -> list[str]:
     bind = str(settings.get("BindAddress", "") or "").strip()
     if bind and bind not in ("0.0.0.0", "::"):
@@ -35,18 +45,74 @@ def _hosts(settings: dict, port: int, external: str) -> list[str]:
     else:
         hosts = [_pairing.host_port(a, port) for a in _pairing.local_addresses()]
     if external:
-        hosts.append(external if (":" in external and not external.count(":") > 1)
-                     else _pairing.host_port(external, port))
+        # "name:port" keeps its own port, for a router forwarding a different
+        # outside port; a bare name or address gets EDLD's.
+        has_port = external.count(":") == 1 or external.startswith("[")
+        hosts.append(external if has_port else _pairing.host_port(external, port))
     return hosts
+
+
+@dataclass
+class PairingInfo:
+    code: str
+    expires: float
+    link: str
+    hosts: list[str]
+    fingerprint: str
+    name: str
+    png: Path | None
+
+    @property
+    def until(self) -> str:
+        return _dt.datetime.fromtimestamp(self.expires).strftime("%H:%M:%S")
+
+    def qr_text(self) -> str | None:
+        return _pairing.qr_text(self.link)
+
+    def qr_png_bytes(self, scale: int = 6) -> bytes | None:
+        try:
+            import io
+            import segno
+            buf = io.BytesIO()
+            segno.make(self.link, error="m").save(buf, kind="png", scale=scale,
+                                                  border=3)
+            return buf.getvalue()
+        except Exception:
+            return None
+
+
+def new_pairing(directory: Path, settings: dict, name: str,
+                external: str | None = None, write_png: bool = True) -> PairingInfo:
+    """Open a pairing window and describe it.  Shared by --pair and both
+    preferences screens, so all three show the same code in the same way."""
+    port = int(settings.get("Port", 0) or 0)
+    ident = _identity.load_or_create(directory, name)
+    ext = external_host(settings) if external is None else external.strip()
+    code, expires = _pairing.issue_ticket(directory)
+    hosts = _hosts(settings, port, ext)
+    link = _pairing.pairing_link(name, ident.fingerprint, code, hosts)
+    info = PairingInfo(code, expires, link, hosts, ident.fingerprint, name, None)
+    if write_png:
+        # For a machine whose console cannot draw the QR code — a Windows
+        # logon task has no console at all.  It carries the code, so it is
+        # private and is deleted when the pairing window closes.
+        png = directory / _pairing.QR_IMAGE
+        data = info.qr_png_bytes(scale=8)
+        if data:
+            png.write_bytes(data)
+            try:
+                png.chmod(0o600)
+            except OSError:
+                pass
+            info.png = png
+    return info
 
 
 def pair(directory: Path, settings: dict, name: str, *,
          interactive: bool | None = None, out=None) -> int:
     out = out or sys.stdout
     port = int(settings.get("Port", 0) or 0)
-    ident = _identity.load_or_create(directory, name)
-
-    external = str(settings.get("ExternalHost", "") or "").strip()
+    external = external_host(settings)
     if interactive is None:
         interactive = sys.stdin.isatty()
     if not external and interactive:
@@ -59,35 +125,17 @@ def pair(directory: Path, settings: dict, name: str, *,
         except EOFError:
             external = ""
 
-    code, expires = _pairing.issue_ticket(directory)
-    hosts = _hosts(settings, port, external)
-    link = _pairing.pairing_link(name, ident.fingerprint, code, hosts)
-    until = _dt.datetime.fromtimestamp(expires).strftime("%H:%M:%S")
-
-    qr = _pairing.qr_text(link)
+    info = new_pairing(directory, settings, name, external=external)
+    qr = info.qr_text()
     if qr:
         print(qr, file=out)
-    # For a machine whose console cannot draw the QR code — a Windows logon
-    # task has no console at all.  It carries the code, so it is private and
-    # is deleted when the pairing window closes.
-    png = directory / _pairing.QR_IMAGE
-    try:
-        import segno
-        segno.make(link, error="m").save(str(png), scale=8, border=3)
-        try:
-            png.chmod(0o600)
-        except OSError:
-            pass
-    except Exception:
-        png = None
-
     print(f"Pair a device with {name}", file=out)
-    print(f"  Code:        {code}   (valid until {until}, one use)", file=out)
-    print(f"  Fingerprint: {ident.fingerprint}", file=out)
-    print("  Addresses:   " + (", ".join(hosts) or "(none found)"), file=out)
-    if png:
-        print(f"  QR image:    {png}", file=out)
-    print(f"  Link:        {link}", file=out)
+    print(f"  Code:        {info.code}   (valid until {info.until}, one use)", file=out)
+    print(f"  Fingerprint: {info.fingerprint}", file=out)
+    print("  Addresses:   " + (", ".join(info.hosts) or "(none found)"), file=out)
+    if info.png:
+        print(f"  QR image:    {info.png}", file=out)
+    print(f"  Link:        {info.link}", file=out)
     print("", file=out)
     print("In EDAM: Add computer → scan the QR code, or paste the link.", file=out)
     if port and not _listening(port):

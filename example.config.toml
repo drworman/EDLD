@@ -389,12 +389,23 @@ Url_RadioSkvortsov   = "https://cast1.torontocast.com:3225/stream"
 #                 codes; EDLD never looks it up or connects to it.
 # AllowEndSession let a paired device end the game session.  Solo mode only,
 #                 the same rule as session management's own triggers.
+# PortMapping     ask the router to forward Port to this computer, by UPnP or
+#                 NAT-PMP, and remove the forward when EDLD exits.  Instead of
+#                 setting up port forwarding by hand; it does nothing if your
+#                 router has UPnP switched off.
+# DuckDNSDomain   keep a DuckDNS name (yourname, or yourname.duckdns.org)
+# DuckDNSToken    pointed at this connection.  Leave both blank if your router
+#                 or DuckDNS's own updater already does it.  With a domain and
+#                 no ExternalHost, pairing codes use yourname.duckdns.org.
 [Server]
 Enabled         = false
 Port            = 28510
 BindAddress     = ""
 ExternalHost    = ""
 AllowEndSession = false
+PortMapping     = false
+DuckDNSDomain   = ""
+DuckDNSToken    = ""
 
 # ==============================================================================
 # Custom profiles (advanced)

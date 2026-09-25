@@ -30,6 +30,27 @@ The panels are built from the same sources as the dashboards and the overlay
 same figures and nothing is formatted twice. A panel is sent again only when it
 changes, and nothing is built at all while no device is connected.
 
+A **Server** tab in Preferences, in both the terminal dashboard and the
+desktop window, holds the settings, shows what the server is doing, lists the
+paired devices with Unpair, and has a **Show pairing code** button that shows
+the same QR code as `--pair`.
+
+`PortMapping = true` asks the router to forward the port by NAT-PMP or UPnP,
+renews the lease, and removes the forward on exit; a router that answers with
+a private external address is reported as CGNAT or double NAT rather than
+leaving the commander to wonder why an open port never answers. Only a router
+answering from a private address is trusted. `DuckDNSDomain` and
+`DuckDNSToken` keep a DuckDNS name pointed at this connection, and that name is
+used in pairing codes when `ExternalHost` is blank. Both are off by default,
+and they are the only outgoing traffic server mode ever adds.
+
+**EDLD-server** is a second build of the same code without Qt or Textual —
+about 19 MB against 92 — for running as a service. It always serves, refuses
+`--tui` and `--gui` with a sentence saying why, and is built for Linux and
+Windows by the release workflow and by `scripts/build_local.sh --server`. Both
+builds' `--selftest` now also generates a server key and draws a QR code,
+because cryptography's compiled half is what a bundle is most likely to lose.
+
 New optional requirements: `cryptography` and `segno`. The protocol, the
 security model and a networking guide (DuckDNS, port forwarding, CGNAT) are in
 `docs/SERVER.md`; `scripts/edld_client.py` is a working reference client.

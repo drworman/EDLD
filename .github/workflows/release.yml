@@ -127,7 +127,7 @@ jobs:
 # -- Job 2: Binaries ---------------------------------------------------------
 
   binaries:
-    name: Binary (${{ matrix.platform }})
+    name: Binary (${{ matrix.exe }}, ${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     needs: [verify]
     # Hoisted to job level on purpose. A step's own `env:` block is NOT visible
@@ -142,14 +142,38 @@ jobs:
       MAC_CERT: ${{ secrets.MACOS_CERT_P12_BASE64 }}
     strategy:
       fail-fast: false
+      # variant "full" is EDLD, every interface.  "server" is EDLD-server, the
+      # same program without Qt or Textual, for running as a service beside
+      # the game (docs/SERVER.md) — Linux and Windows only, since the game
+      # itself runs on nothing else.  `exe` is the binary's name and `suffix`
+      # goes into the archive name.
       matrix:
         include:
           - os: ubuntu-latest
             platform: linux-x86_64
+            variant: full
+            exe: EDLD
+            suffix: ""
           - os: windows-latest
             platform: windows-x86_64
+            variant: full
+            exe: EDLD
+            suffix: ""
           - os: macos-latest
             platform: macos-arm64
+            variant: full
+            exe: EDLD
+            suffix: ""
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            variant: server
+            exe: EDLD-server
+            suffix: "server-"
+          - os: windows-latest
+            platform: windows-x86_64
+            variant: server
+            exe: EDLD-server
+            suffix: "server-"
 
     steps:
       - uses: actions/checkout@v6
@@ -176,6 +200,8 @@ jobs:
             libxcb-render-util0 libxcb-xinerama0 xvfb
 
       - name: Build single-file binary
+        env:
+          EDLD_VARIANT: ${{ matrix.variant }}
         run: pyinstaller packaging/edld.spec --noconfirm --clean
 
       # ----------------------------------------------------------------- #
@@ -198,8 +224,8 @@ jobs:
             Select-Object -Last 1
           & $signtool.FullName sign /f $path /p $env:CERT_PASSWORD `
             /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-            "dist/EDLD.exe"
-          & $signtool.FullName verify /pa "dist/EDLD.exe"
+            "dist/${{ matrix.exe }}.exe"
+          & $signtool.FullName verify /pa "dist/${{ matrix.exe }}.exe"
           Remove-Item $path -Force
 
       - name: Sign and notarise macOS app
@@ -261,9 +287,9 @@ jobs:
         # a bare "exit code 1" with nothing to go on.
         run: |
           set -uo pipefail
-          chmod +x "dist/EDLD"
+          chmod +x "dist/${{ matrix.exe }}"
           set +e
-          OUTPUT="$(xvfb-run -a ./dist/EDLD --version 2>&1)"
+          OUTPUT="$(xvfb-run -a "./dist/${{ matrix.exe }}" --version 2>&1)"
           RC=$?
           set -e
           echo "--- binary output (exit $RC) ---"
@@ -284,7 +310,7 @@ jobs:
           # lazily-imported Textual widget, which only surfaces when the
           # dashboard is drawn.
           echo "--- selftest ---"
-          xvfb-run -a ./dist/EDLD --selftest
+          xvfb-run -a "./dist/${{ matrix.exe }}" --selftest
 
       - name: Smoke-test the binary (macOS)
         if: runner.os == 'macOS'
@@ -335,7 +361,7 @@ jobs:
         shell: pwsh
         run: |
           $expected = "${{ env.VERSION }}"
-          $exe = "dist/EDLD.exe"
+          $exe = "dist/${{ matrix.exe }}.exe"
 
           function Invoke-WithTimeout($file, $redirectPath, $arg = "--version") {
             $psi = [Diagnostics.ProcessStartInfo]::new()
@@ -424,12 +450,13 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ env.VERSION }}"
-          STEM="EDLD-${VERSION}-${{ matrix.platform }}"
+          STEM="EDLD-${VERSION}-${{ matrix.suffix }}${{ matrix.platform }}"
+          EXE="${{ matrix.exe }}"
 
           # Every archive carries the licence texts. LGPLv3 section 4(b)
           # requires a copy to accompany the binary; a link is not enough.
           if [ "${RUNNER_OS}" = "Windows" ]; then
-            7z a "dist/${STEM}.zip" "./dist/EDLD.exe" \
+            7z a "dist/${STEM}.zip" "./dist/${EXE}.exe" \
               ./LICENSE ./THIRD-PARTY-NOTICES.md ./licenses
           elif [ "${RUNNER_OS}" = "macOS" ]; then
             ditto -c -k --keepParent "dist/EDLD.app" "dist/${STEM}.zip" \
@@ -437,7 +464,7 @@ jobs:
               tar -czf "dist/${STEM}.tar.gz" -C dist "EDLD" \
                 -C .. LICENSE THIRD-PARTY-NOTICES.md licenses
           else
-            tar -czf "dist/${STEM}.tar.gz" -C dist "EDLD" \
+            tar -czf "dist/${STEM}.tar.gz" -C dist "${EXE}" \
               -C .. LICENSE THIRD-PARTY-NOTICES.md licenses
           fi
           ls -la dist/
@@ -451,11 +478,11 @@ jobs:
         with:
           # Prefixed so the archive is identifiable once it is sitting in
           # somebody's downloads folder next to everything else.
-          name: EDLD-binary-${{ matrix.platform }}
+          name: EDLD-binary-${{ matrix.suffix }}${{ matrix.platform }}
           # dist/ also holds the loose binary this archive was built from.
-          # "EDLD-" matches only the archive: the binary is EDLD, EDLD.exe
-          # or EDLD.app, none of which have the hyphen.
-          path: dist/EDLD-*
+          # The version in the pattern is what excludes it: the binary is
+          # EDLD, EDLD-server, EDLD.exe or EDLD.app, and none carry it.
+          path: dist/EDLD-${{ env.VERSION }}-*
           if-no-files-found: error
           retention-days: 14
 

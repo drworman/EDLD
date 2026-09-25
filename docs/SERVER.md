@@ -24,7 +24,15 @@ that interface and the server, in one process. Setting `Enabled = true` in
 `[Server]` does the same as passing `-s` every time.
 
 `--headless` prints nothing after startup; diagnostics go to the log file named
-on its first line. It is what to use for a service:
+on its first line. It is what to use for a service.
+
+**EDLD-server** is the same program built without either dashboard: about a
+fifth of the size, with no Qt and no Textual. It always serves, runs the
+terminal event log by default, and takes `--headless`, `--pair`, `--paired`
+and `--unpair` like EDLD. It is published for Linux and Windows beside the
+EDLD downloads, and `scripts/build_local.sh --server` builds it locally.
+
+Running as a service:
 
 - **Linux:** a `systemd --user` unit running `edld -s --headless`.
 - **Windows:** a Task Scheduler task triggered *At log on* for your own
@@ -46,7 +54,16 @@ Port            = 28510
 BindAddress     = ""        # blank: every interface, IPv6 and IPv4
 ExternalHost    = ""        # e.g. yourname.duckdns.org
 AllowEndSession = false
+PortMapping     = false     # ask the router to forward Port
+DuckDNSDomain   = ""        # keep yourname.duckdns.org pointed here...
+DuckDNSToken    = ""        # ...with this token
 ```
+
+All of these are also on the **Server** tab in Preferences, in both the
+terminal dashboard and the desktop window. That tab shows what the server is
+doing — listening, who is connected, the port forward, DuckDNS — lists the
+paired devices with an Unpair button, and has a **Show pairing code** button
+that puts the same QR code `edld --pair` prints on the screen.
 
 Each profile is its own server, with its own identity and its own paired
 devices, so two profiles running at once need two ports:
@@ -54,7 +71,8 @@ devices, so two profiles running at once need two ports:
 
 ## Pairing a device
 
-Run this on the computer, in a second terminal if EDLD is already running:
+Press **Show pairing code** on the Server tab in Preferences, or run this on
+the computer, in a second terminal if EDLD is already running:
 
 ```bash
 edld --pair              # or: edld -p PROFILE --pair
@@ -91,11 +109,16 @@ the internet:
 
 1. **A name that follows your address.** Your home address can change;
    [DuckDNS](https://www.duckdns.org) gives you a free name, such as
-   `yourname.duckdns.org`, and keeps it pointed at your address. Set it up by
-   following DuckDNS's own instructions for your system, then put the name in
-   `ExternalHost`.
-2. **A forwarded port.** In your router's settings, forward TCP port 28510 (or
-   whatever `Port` is) to this computer's LAN address. Routers name this
+   `yourname.duckdns.org`. Sign in there, create a name, and copy the token it
+   shows. Put the name in `DuckDNSDomain` and the token in `DuckDNSToken`, and
+   EDLD keeps the name pointed at your connection while it runs. If your
+   router or DuckDNS's own updater already does that, leave both blank and put
+   the name in `ExternalHost` instead.
+2. **A forwarded port.** Turn on `PortMapping` and EDLD asks the router to
+   forward the port itself, by UPnP or NAT-PMP, and removes the forward when
+   it exits. The Server tab says whether it worked. If your router has UPnP
+   switched off, or you would rather not, forward TCP port 28510 (or whatever
+   `Port` is) to this computer's LAN address in the router's settings instead —
    *port forwarding*, *virtual server* or *NAT rules*.
 3. Pair again, or edit the address in the app.
 
@@ -103,6 +126,11 @@ If the phone works on Wi-Fi at home but not away, the forward is the thing to
 check. If it works away but not at home using the DuckDNS name, your router
 does not support *NAT loopback*; that is why the app keeps your LAN address
 too and tries both.
+
+With `PortMapping` on, EDLD also reads back the address the router thinks it
+has on the internet. If that is a private address, EDLD says so on the Server
+tab and in the Alerts pane: it means your provider or a second router is doing
+NAT as well, and the next paragraph applies.
 
 **If your provider uses CGNAT** — common with Starlink, 4G/5G home internet
 and some fibre providers — no router setting can make your computer reachable
@@ -130,8 +158,14 @@ computer and the phone, and put the computer's Tailscale name or address in
   `ExternalHost`: it answers devices that come to it. Its own LAN address is
   found by asking the operating system which interface it would use, which
   sends nothing.
-- Nothing is sent anywhere except to devices you paired. Indevlin runs no
-  service in between.
+- Two settings, both off by default, add outgoing traffic, and only what they
+  describe. `PortMapping` sends one NAT-PMP request to your default gateway
+  and one UPnP search on the local network, then talks only to a router that
+  answered from a private address — the same thing games and consoles do to
+  open a port. `DuckDNSDomain` and `DuckDNSToken` make one HTTPS request to
+  duckdns.org every ten minutes. The token is never written to any log.
+- Nothing is sent anywhere else, and game data goes only to devices you
+  paired. Indevlin runs no service in between.
 
 Files, per profile, in `<data dir>/server/<profile>/`:
 

@@ -115,18 +115,33 @@ def _norm(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def runtime_requirements() -> list[str]:
-    """Top-level distribution names from requirements.txt, plus _EXTRA_BUNDLED."""
+#: What the server-only build leaves out: both dashboards and the radio.  None
+#: of it is imported by core/ or components/ at module level — every use is
+#: inside a preferences builder or a front end — so excluding it costs the
+#: server nothing.
+SERVER_SKIPPED_DISTS = {"pyside6", "textual", "rich", "miniaudio"}
+SERVER_EXCLUDES = ["PySide6", "shiboken6", "textual", "rich", "miniaudio",
+                   "_miniaudio", "tui", "gui", "core.radio"]
+
+
+def runtime_requirements(variant: str = "full") -> list[str]:
+    """Top-level distribution names from requirements.txt, plus _EXTRA_BUNDLED.
+
+    The server build skips SERVER_SKIPPED_DISTS, so it neither bundles nor
+    carries licence texts for packages it does not contain.
+    """
     names: list[str] = []
     for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines():
         line = line.split("#", 1)[0].strip()
         if not line or line.startswith("-"):
             continue
         names.append(re.split(r"[\s<>=!~;\[]", line, maxsplit=1)[0])
+    if variant == "server":
+        names = [n for n in names if _norm(n) not in SERVER_SKIPPED_DISTS]
     return names + _EXTRA_BUNDLED
 
 
-def bundled_distributions() -> dict:
+def bundled_distributions(variant: str = "full") -> dict:
     """Every installed distribution the binary will carry, by normalised name.
 
     The requirement closure of runtime_requirements(), following only
@@ -140,7 +155,7 @@ def bundled_distributions() -> dict:
     from packaging.requirements import Requirement
 
     found: dict = {}
-    stack = list(runtime_requirements())
+    stack = list(runtime_requirements(variant))
     while stack:
         name = stack.pop()
         key = _norm(name)
@@ -160,13 +175,13 @@ def bundled_distributions() -> dict:
     return {k: v for k, v in found.items() if v is not None}
 
 
-def licence_files() -> list[tuple[str, str]]:
+def licence_files(variant: str = "full") -> list[tuple[str, str]]:
     """(source, bundle_dir) pairs placing each licence under
     licenses/third-party/<name>-<version>/.  Raises SystemExit if any bundled
     distribution has none."""
     out: list[tuple[str, str]] = []
     missing: list[str] = []
-    for key, dist in sorted(bundled_distributions().items()):
+    for key, dist in sorted(bundled_distributions(variant).items()):
         if key in _LICENCE_EXEMPT:
             continue
         files = [f for f in (dist.files or [])
@@ -331,24 +346,62 @@ HIDDEN_IMPORTS = (
         # it.  Nothing in Python imports it, so without this it is left out,
         # every binary builds cleanly, and the radio fails at first use with
         # "No module named '_cffi_backend'" — which is how 20260923's release
-        # build failed its --selftest on all three platforms.
+        # build failed its --selftest on all three platforms.  Kept in the
+        # server build too: cryptography loads its OpenSSL bindings through
+        # the same runtime.
         "_cffi_backend",
+        # Server mode.  Imported inside functions and try blocks, so named
+        # here for the same reason as psutil above.
+        "core.server",
+        "core.server.cli",
+        "core.server.duckdns",
+        "core.server.identity",
+        "core.server.pairing",
+        "core.server.portmap",
+        "core.server.protocol",
+        "core.server.service",
+        "cryptography",
+        "segno",
     ]
 )
 
 
-def analysis_kwargs(extra_hidden: list[str] | None = None) -> dict:
-    """Return the keyword arguments for a PyInstaller ``Analysis``."""
+def _variant_marker(variant: str) -> tuple[str, str]:
+    """A BUILD_VARIANT file at the bundle root, read by core/build_info.py."""
+    d = ROOT / "build" / "variant"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "BUILD_VARIANT").write_text(variant + "\n", encoding="utf-8")
+    return (str(d / "BUILD_VARIANT"), ".")
+
+
+def analysis_kwargs(extra_hidden: list[str] | None = None,
+                    variant: str = "full") -> dict:
+    """Return the keyword arguments for a PyInstaller ``Analysis``.
+
+    ``variant`` is "full" (EDLD, every interface) or "server" (EDLD-server:
+    the terminal and headless modes and the server, no Qt, no Textual).
+    """
+    if variant not in ("full", "server"):
+        raise SystemExit(f"unknown build variant {variant!r}")
+    hidden = HIDDEN_IMPORTS + list(extra_hidden or [])
+    excludes = list(EXCLUDES)
+    datas = [d for d in DATA_FILES if Path(d[0]).exists()]
+    if variant == "server":
+        skip = tuple(SERVER_EXCLUDES)
+        hidden = [h for h in hidden
+                  if not any(h == x or h.startswith(x + ".") for x in skip)]
+        excludes += SERVER_EXCLUDES
+        datas = [d for d in datas if d[1] not in ("gui/resources", "fonts")]
     return {
         "scripts": [str(ROOT / "edld.py")],
         "pathex": [str(ROOT)],
         "binaries": [],
-        "datas": [d for d in DATA_FILES if Path(d[0]).exists()] + licence_files(),
-        "hiddenimports": HIDDEN_IMPORTS + list(extra_hidden or []),
+        "datas": datas + licence_files(variant) + [_variant_marker(variant)],
+        "hiddenimports": hidden,
         "hookspath": [],
         "hooksconfig": {},
         "runtime_hooks": [],
-        "excludes": EXCLUDES,
+        "excludes": excludes,
         "noarchive": False,
         "optimize": 0,
     }

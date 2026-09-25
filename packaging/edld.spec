@@ -25,11 +25,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(SPECPATH)))
 from build_common import ROOT, VERSION_FILE, analysis_kwargs  # noqa: E402
 
-APP_NAME = "EDLD"
+# EDLD_VARIANT=server builds EDLD-server: the same program without either
+# dashboard, for running as a service beside the game.  See docs/SERVER.md.
+VARIANT = os.environ.get("EDLD_VARIANT", "full").strip() or "full"
+APP_NAME = "EDLD-server" if VARIANT == "server" else "EDLD"
 ICON = ROOT / "packaging" / "icons" / "edld.ico"
 ICNS = ROOT / "packaging" / "icons" / "edld.icns"
 
-a = Analysis(**analysis_kwargs())
+a = Analysis(**analysis_kwargs(variant=VARIANT))
 pyz = PYZ(a.pure)
 
 icon = None
@@ -86,7 +89,7 @@ if _onedir:
     coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False,
                    name=APP_NAME)
 
-if sys.platform == "darwin" and not _onedir:
+if sys.platform == "darwin" and not _onedir and VARIANT == "full":
     app = BUNDLE(
         exe,
         name=f"{APP_NAME}.app",

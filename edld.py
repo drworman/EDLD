@@ -95,6 +95,11 @@ parser.add_argument("--overlay-selftest", action="store_true",
 
 args = parser.parse_args()
 
+# EDLD-server is this program built without either dashboard (see
+# core/build_info.py).  It always serves, and its default is the terminal log.
+from core.build_info import is_server_build as _is_server_build
+SERVER_BUILD = _is_server_build()
+
 # ── Windows: reconnect stdout before anything prints ──────────────────────────
 # The Windows binary is built windowed so the GUI has no console behind it,
 # which leaves stdout unusable until this runs.  A no-op everywhere else.
@@ -143,8 +148,30 @@ if args.overlay_renderer or args.overlay_probe or args.overlay_selftest:
 if args.selftest:
     import importlib as _il
     _results, _failed = [], False
-    for _label, _mod in (("terminal dashboard (--tui)", "tui.app"),
-                         ("desktop window (--gui)",     "gui.app")):
+    _frontends = () if SERVER_BUILD else (
+        ("terminal dashboard (--tui)", "tui.app"),
+        ("desktop window (--gui)",     "gui.app"))
+    # Both builds carry the server: its key generation (cryptography's
+    # compiled half is the part a bundle can lose) and the QR code.
+    if True:
+        try:
+            import tempfile as _tf
+            from core.server import service as _svc  # noqa: F401
+            from core.server.identity import load_or_create as _loc
+            with _tf.TemporaryDirectory() as _d:
+                _fp = _loc(Path(_d), "selftest").fingerprint
+            _results.append(f"  OK    server (identity {_fp[:8]}…)")
+        except Exception as _e:
+            _failed = True
+            _results.append(f"  FAIL  server: {type(_e).__name__}: {_e}")
+        try:
+            from core.server.pairing import qr_text as _qr
+            assert _qr("edld://pair?v=1")
+            _results.append("  OK    pairing QR code")
+        except Exception as _e:
+            _failed = True
+            _results.append(f"  FAIL  pairing QR code: {type(_e).__name__}: {_e}")
+    for _label, _mod in _frontends:
         try:
             _il.import_module(_mod)
             _results.append(f"  OK    {_label}")
@@ -153,12 +180,13 @@ if args.selftest:
             _results.append(f"  FAIL  {_label}: {type(_e).__name__}: {_e}")
     # The radio is only exercised when someone presses Play, so a binary
     # missing miniaudio's compiled half would otherwise ship looking fine.
-    try:
-        from core.radio import selftest as _radio_selftest
-        _results.append(f"  OK    radio ({_radio_selftest()})")
-    except Exception as _e:
-        _failed = True
-        _results.append(f"  FAIL  radio: {type(_e).__name__}: {_e}")
+    if not SERVER_BUILD:
+        try:
+            from core.radio import selftest as _radio_selftest
+            _results.append(f"  OK    radio ({_radio_selftest()})")
+        except Exception as _e:
+            _failed = True
+            _results.append(f"  FAIL  radio: {type(_e).__name__}: {_e}")
     # A binary must carry the licence text of everything inside it; the build
     # collects them (packaging/build_common.py), and this proves they landed.
     if getattr(sys, "frozen", False):
@@ -169,7 +197,7 @@ if args.selftest:
         else:
             _failed = True
             _results.append(f"  FAIL  licence texts: none bundled at {_lic}")
-    print(f"EDLD {VERSION} selftest")
+    print(f"EDLD{'-server' if SERVER_BUILD else ''} {VERSION} selftest")
     print("\n".join(_results))
     sys.exit(1 if _failed else 0)
 
@@ -181,6 +209,11 @@ if args.mode_flag and args.mode and args.mode != args.mode_flag:
     )
 if args.mode_flag and not args.mode:
     args.mode = args.mode_flag
+if SERVER_BUILD:
+    if args.mode in ("textual", "gui"):
+        parser.error("this is EDLD-server, built without the dashboards; "
+                     "use EDLD for --tui and --gui")
+    args.server = True
 # -s alone means the terminal event log; an interface asked for by name wins.
 if args.server and not args.mode:
     args.mode = "terminal"
@@ -605,6 +638,16 @@ core = CoreAPI(
 )
 data_provider._plugin_call = core.plugin_call
 
+# Where the Server preferences page finds this profile's pairing files; the
+# running server itself is attached as core.server once it has started.
+core.server_dir = server_dir
+core.server = None
+try:
+    from core.server.identity import default_server_name as _srv_name
+    core.server_name = _srv_name(_config_profile)
+except Exception:
+    core.server_name = None
+
 loader = PluginLoader(_HERE)
 loader.load_all(core)
 
@@ -717,6 +760,10 @@ if server_on:
             alert=lambda m: core.plugin_call("alerts", "_push", "📡", m),
         )
         server.start()
+        core.server = server
+        # Removes the router's port forward, if one was made, on the way out.
+        import atexit as _atexit
+        _atexit.register(server.stop)
         _debug.info(server.describe())
         if ui_mode == "terminal":
             print(f"{Terminal.GOOD}{server.describe()}{Terminal.END}")
