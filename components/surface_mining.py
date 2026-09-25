@@ -770,7 +770,7 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
 
         This is for a row that should never have existed — a wrong commodity, a
         position filed under the wrong body. A site that is merely empty should
-        be marked Depleted instead: that is information the next commander
+        be given a depletion date instead: that is information the next commander
         wants, and deleting it invites them to rediscover it.
         """
         pos = POSITIONS.latest()
@@ -835,8 +835,33 @@ class SurfaceMiningPlugin(BasePlugin, ActivityProviderMixin):
         return f"{name} marked as {'test' if is_test else 'live'} data"
 
     def mark_depleted_here(self) -> str:
-        """Say the deposit underfoot is worked out.  Not a delete."""
-        return self.mark_here(amount="Depleted")
+        """Stamp today as the day the deposit underfoot was worked out.
+
+        Not a delete, and not a change of amount: the date is the whole record
+        of depletion, and the amount stays what the site holds when full.
+        """
+        pos = POSITIONS.latest()
+        if pos is None or (time.time() - pos.ts) > _POSITION_STALE_S:
+            return "no live position — is the game running?"
+        if self._system_address is None or self._body_id is None:
+            return "no body identified yet"
+        radius = pos.radius_m or self._db.body_radius(self._system_address,
+                                                      self._body_id)
+        try:
+            near = self._db.nearest_deposit(
+                self._system_address, self._body_id,
+                pos.latitude, pos.longitude, radius)
+            if near is None:
+                return "no recorded deposit within range of this position"
+            self._db.mark_depleted(near["deposit_id"])
+        except Exception as exc:
+            msg = f"could not mark the deposit: {type(exc).__name__}: {exc}"
+            self._log(msg)
+            return msg
+        name = near.get("commodity_display") or near.get("commodity", "")
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        self._log(f"marked {near['deposit_id']} ({name}) worked out {today}")
+        return f"{name}: depleted {today}"
 
     # ── overlay ───────────────────────────────────────────────────────────────
 

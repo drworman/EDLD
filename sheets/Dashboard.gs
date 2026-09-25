@@ -22,6 +22,12 @@
  *          If that ever fails, ED Dashboard > Repair dashboard formulas rewrites
  *          them from FORMULAS below. build_dashboard.py reads FORMULAS from this
  *          file, so this is the one place they are defined.
+ *
+ *          It is also the upgrade. A sheet started from an older template
+ *          keeps that template's table; Repair rewrites the formulas, the
+ *          header list the sort reads, and the column layout, so pasting in a
+ *          newer Dashboard.gs and running it brings the table up to date —
+ *          the Notes column included — without re-importing anything.
  */
 
 const ED = {
@@ -38,12 +44,19 @@ const ED = {
   NOTES_LINES: 5,
   HEADER_ROW: 7,          // Dashboard row the table header lands on
   DATA_FIRST_ROW: 8,
-  DATA_COLS: 9,           // A:I
-  DASH_COLS: 10,          // A:J (J is a margin)
+  DATA_COLS: 10,          // A:J
+  DASH_COLS: 11,          // A:K (K is a margin)
+  NOTES_COL: 10,          // J, the one column of prose
   SORT_BY_CELL: 'E5',
   SORT_ORDER_CELL: 'F5',
-  SORT_NAMES: 'D1:L1',    // Queries: plain header names, the Sort By list
-  PARK_CELL: 'J7',        // where selection goes after a header click
+  SORT_NAMES: 'D1:M1',    // Queries: plain header names, the Sort By list
+  PARK_CELL: 'K7',        // where selection goes after a header click
+  // The table's columns, in the order the FILTER below emits them. Must match
+  // HEADERS in build_dashboard.py; tests/test_sheets_dashboard.py checks.
+  HEADERS: ['System', 'Body', 'Gravity', 'Mining Site', 'Commodity',
+            'Amount', 'Density', 'Rigs', 'Depleted', 'Notes'],
+  // Column widths in pixels, A:K, for Repair to lay an older sheet out with.
+  WIDTHS: [130, 160, 80, 100, 170, 95, 80, 60, 100, 280, 20],
   FALLBACK: {             // Classic HUD, used when a cell is blank or not #RRGGBB
     'Background': '#0A0A0A', 'Panel': '#16100A', 'Panel Alt': '#2B1E0E',
     'Accent': '#FF7100', 'Accent Text': '#0A0A0A', 'Title': '#FF8C1A',
@@ -67,12 +80,12 @@ const FORMULAS = {
   AND(Dashboard!$A$5="", Dashboard!$B$5=""),
   "",
   {
-    Queries!$D$2:$L$2;
+    Queries!$D$2:$M$2;
     IFERROR(
       LET(
         dep, FILTER(
           {Deposits!B2:B, Deposits!D2:D, Deposits!G2:G, Deposits!K2:K, Deposits!L2:L,
-           Deposits!Q2:Q, Deposits!P2:P, Deposits!R2:R, Deposits!X2:X},
+           Deposits!Q2:Q, Deposits!P2:P, Deposits!R2:R, Deposits!X2:X, Deposits!Y2:Y},
           (Dashboard!$A$5="") + (Deposits!B2:B=Dashboard!$A$5) > 0,
           (Dashboard!$B$5="") + (Deposits!L2:L=Dashboard!$B$5) > 0,
           Deposits!W2:W <> 1
@@ -80,11 +93,11 @@ const FORMULAS = {
         sortkey, INDEX(dep, 0, Queries!$N$1),
         SORT(
           dep,
-          ARRAYFORMULA(IFERROR(MATCH(sortkey, {"Depleted";"Low";"Medium";"High"}, 0), sortkey)),
+          ARRAYFORMULA(IFERROR(MATCH(sortkey, {"Low";"Medium";"High"}, 0), sortkey)),
           Queries!$N$2
         )
       ),
-      {"No deposits match this filter","","","","","","","",""}
+      {"No deposits match this filter","","","","","","","","",""}
     )
   }
 )`,
@@ -169,18 +182,79 @@ function copyActiveToCustom() {
   applyTheme(); // programmatic edits don't fire onEdit
 }
 
-/** Rewrites the Sheets-only formulas, clearing each one's spill area first. */
+/**
+ * Rewrites the Sheets-only formulas, clearing each one's spill area first, and
+ * brings the table's helpers and layout up to the current column set: the
+ * header names and sort arrows on Queries, the Sort By list, column widths,
+ * and wrapping on the Notes column. A sheet from an older template comes out
+ * the same as a fresh one.
+ */
 function repairFormulas() {
   const ss = SpreadsheetApp.getActive();
   const dash = ss.getSheetByName(ED.DASH);
   const q = ss.getSheetByName(ED.QUERIES);
-  dash.getRange(ED.HEADER_ROW, 1, dash.getMaxRows() - ED.HEADER_ROW + 1, ED.DATA_COLS).clearContent();
-  q.getRange(1, 1, q.getMaxRows(), 2).clearContent();
+  const H = ED.HEADERS, n = H.length;
+
+  // Room for the layout below, on a sheet somebody has trimmed.
+  if (dash.getMaxColumns() < ED.DASH_COLS)
+    dash.insertColumnsAfter(dash.getMaxColumns(), ED.DASH_COLS - dash.getMaxColumns());
+  if (q.getMaxColumns() < 15)
+    q.insertColumnsAfter(q.getMaxColumns(), 15 - q.getMaxColumns());
+
+  // Everything the older layout wrote, one column wider for the margin.
+  dash.getRange(ED.HEADER_ROW, 1, dash.getMaxRows() - ED.HEADER_ROW + 1, ED.DASH_COLS).clearContent();
+  q.getRange(1, 1, q.getMaxRows(), q.getMaxColumns()).clearContent();
+
+  // Queries helpers: names (the Sort By list), names with the sort arrow (the
+  // table header), the sort column index and direction.
+  q.getRange(1, 4, 1, n).setValues([H]);
+  const arrows = H.map((_, i) => {
+    const c = String.fromCharCode(68 + i);     // D, E, ...
+    return `=${c}1&IF(${c}1=Dashboard!$E$5,IF(Dashboard!$F$5="Descending"," ▼"," ▲"),"")`;
+  });
+  q.getRange(2, 4, 1, n).setFormulas([arrows]);
+  const last = String.fromCharCode(68 + n - 1);
+  q.getRange('N1').setFormula(`=IFERROR(MATCH(Dashboard!$E$5,$D$1:$${last}$1,0),1)`);
+  q.getRange('N2').setFormula('=Dashboard!$F$5<>"Descending"');
+  q.getRange('O1:O2').setValues([['← sort column index'], ['← ascending?']]);
+
   Object.keys(FORMULAS).forEach(key => {
     const [sheet, a1] = key.split('!');
     ss.getSheetByName(sheet).getRange(a1).setFormula(FORMULAS[key]);
   });
-  ss.toast('Dashboard formulas rewritten.', 'ED Dashboard');
+
+  dash.getRange(ED.SORT_BY_CELL).setDataValidation(
+    SpreadsheetApp.newDataValidation()
+      .requireValueInRange(q.getRange(ED.SORT_NAMES), true).build());
+
+  // Layout: widths across A:K, the margin column shown, everything past it
+  // hidden, and the Notes column wrapped so a long note reads as a paragraph.
+  ED.WIDTHS.forEach((w, i) => dash.setColumnWidth(i + 1, w));
+  dash.showColumns(1, ED.DASH_COLS);
+  const maxC = dash.getMaxColumns();
+  if (maxC > ED.DASH_COLS) dash.hideColumns(ED.DASH_COLS + 1, maxC - ED.DASH_COLS);
+  const dataRows = dash.getMaxRows() - ED.DATA_FIRST_ROW + 1;
+  dash.getRange(ED.DATA_FIRST_ROW, 1, dataRows, ED.DATA_COLS).setVerticalAlignment('top');
+  dash.getRange(ED.HEADER_ROW, ED.NOTES_COL, dataRows + 1, 1)
+    .setWrap(true).setHorizontalAlignment('left');
+
+  // Sheets from before depletion became a date alone carry the word in the
+  // amount column. EDLD ignores it on read; clear it so the table does too.
+  const deps = ss.getSheetByName('Deposits');
+  if (deps && deps.getLastRow() > 1) {
+    const head = deps.getRange(1, 1, 1, deps.getLastColumn()).getValues()[0];
+    const col = head.indexOf('amount') + 1;
+    if (col > 0) {
+      const rng = deps.getRange(2, col, deps.getLastRow() - 1, 1);
+      const vals = rng.getValues();
+      if (vals.some(v => v[0] === 'Depleted')) {
+        rng.setValues(vals.map(v => [v[0] === 'Depleted' ? '' : v[0]]));
+      }
+    }
+  }
+
+  applyTheme();
+  ss.toast('Dashboard formulas and layout rewritten.', 'ED Dashboard');
 }
 
 // ------------------------------------------------------------------ theme resolution

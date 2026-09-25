@@ -256,3 +256,73 @@ def test_the_window_has_the_styles_it_asks_for():
     for name in sorted(used):
         assert f".{name}" in css or f"#{name}" in css, \
             f"{name} is not styled anywhere"
+
+
+# ── notes ─────────────────────────────────────────────────────────────────────
+
+def _drive(form, steps):
+    """Run the screen and hand ``steps(pilot, screen)`` the live objects."""
+    from textual.app import App
+
+    from tui.deposit_screen import DepositScreen
+
+    plugin = _Plugin(form, "Editing Helium-3 (abc123def456)")
+    out = {}
+
+    class _Harness(App):
+        def on_mount(self) -> None:
+            self.push_screen(DepositScreen(None, plugin))
+
+    async def run():
+        app = _Harness()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            out["screen"] = app.screen
+            await steps(pilot, app.screen)
+            await pilot.pause()
+            out["top"] = app.screen
+
+    asyncio.run(run())
+    return plugin, out
+
+
+def test_the_note_box_opens_holding_the_stored_note():
+    from textual.widgets import TextArea
+
+    seen = {}
+
+    async def steps(pilot, screen):
+        area = screen.query_one("#dep-notes", TextArea)
+        seen["text"] = area.text
+        seen["wrap"] = getattr(area, "soft_wrap", True)
+
+    _drive(prefill({**STORED, "notes": "line one\nline two"}), steps)
+    assert seen["text"] == "line one\nline two"
+    assert seen["wrap"] is True
+
+
+def test_save_sends_what_is_in_the_note_box():
+    from textual.widgets import TextArea
+
+    async def steps(pilot, screen):
+        screen.query_one("#dep-notes", TextArea).load_text("north ridge\nno SRV")
+        screen.query_one("#dep-save").press()
+
+    plugin, _ = _drive(prefill(STORED), steps)
+    assert plugin.submitted["notes"] == "north ridge\nno SRV"
+    # The other fields still arrive alongside it.
+    assert plugin.submitted["amount"] == "High"
+
+
+def test_escape_from_the_note_box_closes_the_window():
+    """A focused TextArea must not swallow Escape, or the window would only
+    close from the mouse once somebody had clicked into the note."""
+    from textual.widgets import TextArea
+
+    async def steps(pilot, screen):
+        screen.query_one("#dep-notes", TextArea).focus()
+        await pilot.pause()
+        await pilot.press("escape")
+
+    _, out = _drive(prefill(STORED), steps)
+    assert out["top"] is not out["screen"]

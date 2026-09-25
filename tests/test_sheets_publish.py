@@ -320,7 +320,9 @@ def test_the_depletion_date_is_a_published_column():
     """It is the one fact about a deposit that any commander can contribute and
     every commander needs: a site somebody emptied last week is a wasted trip."""
     assert "depleted_on" in COLUMNS
-    assert COLUMNS[-1] == "depleted_on", "columns are positional; append only"
+    # Columns are positional: every sheet already in use has these at these
+    # positions, so later columns may only ever be appended after them.
+    assert COLUMNS[:24][-1] == "depleted_on", "columns are positional; append only"
 
 
 def test_the_date_is_published_as_a_plain_day():

@@ -49,7 +49,6 @@ def test_a_commodity_of_punctuation_alone_is_refused():
 
 @pytest.mark.parametrize("typed,expected", [
     ("high", "High"), ("HIGH", "High"), ("  Medium  ", "Medium"),
-    ("depleted", "Depleted"),
 ])
 def test_amount_is_case_and_space_insensitive(typed, expected):
     assert clean({"amount": typed}).values["amount"] == expected
@@ -57,7 +56,13 @@ def test_amount_is_case_and_space_insensitive(typed, expected):
 
 def test_an_amount_outside_the_vocabulary_is_named_in_the_error():
     err = clean({"amount": "Enormous"}).errors["amount"]
-    assert "Depleted" in err and "High" in err
+    assert "Low" in err and "High" in err
+
+
+def test_depleted_is_not_an_amount():
+    """Depletion is recorded by its date alone; the amount says what the site
+    holds when full, and does not change when it empties."""
+    assert "amount" in clean({"amount": "Depleted"}).errors
 
 
 def test_advertised_density_is_gone():
@@ -131,7 +136,9 @@ def test_an_empty_field_is_absent_rather_than_blank():
 
 
 def test_an_entirely_empty_form_writes_nothing():
-    assert clean({f.key: "" for f in FIELDS}).values == {}
+    """Nothing but the note, whose empty box is a value: it withdraws a note
+    that was there and is a no-op against one that was not."""
+    assert clean({f.key: "" for f in FIELDS}).values == {"notes": ""}
 
 
 # ── the test flag ─────────────────────────────────────────────────────────────
@@ -183,7 +190,7 @@ def test_both_front_ends_build_from_the_same_field_list():
     """So the TUI and the GUI cannot drift apart on what a deposit has."""
     assert [f.key for f in FIELDS][0] == "commodity"
     for f in FIELDS:
-        assert f.kind in ("text", "choice", "int", "bool")
+        assert f.kind in ("text", "choice", "int", "bool", "note")
         if f.kind == "choice":
             assert f.choices
 

@@ -53,12 +53,17 @@ DEPOSIT_COLUMNS = [
     'gravity', 'body_radius_m', 'atmosphere', 'volcanism', 'signal_no', 'commodity',
     'latitude', 'longitude', 'density_claimed', 'density_observed', 'amount', 'rigs',
     'refine_count', 'first_seen', 'last_confirmed', 'reported_by', 'is_test',
-    'depleted_on',
+    'depleted_on', 'notes', 'notes_updated', 'assessment_updated',
 ]
 
 # Dashboard table columns, in the order the FILTER in Dashboard.gs emits them.
+# Must match ED.HEADERS in Dashboard.gs.
 HEADERS = ['System', 'Body', 'Gravity', 'Mining Site', 'Commodity',
-           'Amount', 'Density', 'Rigs', 'Depleted']
+           'Amount', 'Density', 'Rigs', 'Depleted', 'Notes']
+NCOL = len(HEADERS)                       # table columns, A:J
+MARGIN = NCOL + 1                         # K, a narrow margin
+LAST = get_column_letter(NCOL)            # J
+Q_LAST = get_column_letter(3 + NCOL)      # Queries: names in D1:M1
 
 PLACEHOLDER_SQUADRON = 'Your Squadron Name [TAG]'
 PLACEHOLDER_MAINTAINER = 'Your CMDR Name'
@@ -182,13 +187,13 @@ def paint(ws, rows, cols, bg, fg):
 def build_dashboard(wb, formulas):
     ds = wb.active
     ds.title = 'Dashboard'
-    paint(ds, LAST_ROW, 10, C['Background'], C['Text'])
+    paint(ds, LAST_ROW, MARGIN, C['Background'], C['Text'])
 
     ds['A1'] = ('=IF(Settings!B1<>"",Settings!B1 & ": Mining Data",'
                 'IF(Settings!B2<>"","CMDR " & Settings!B2 & "\'s Mining Data",""))')
     ds['A2'] = '=IF(A1=Settings!B1 & ": Mining Data","Maintained by CMDR: " & Settings!B2,"")'
     ds['E2'] = '=Settings!D1'
-    ds.merge_cells('E2:I2')
+    ds.merge_cells(f'E2:{LAST}2')
     ds['A1'].font = font(C['Title'], TITLE_FONT, bold=True, size=20)
     ds['A1'].alignment = Alignment(vertical='center')
     ds['A2'].font = font(C['Text Dim'], italic=True, size=10)
@@ -196,7 +201,7 @@ def build_dashboard(wb, formulas):
     ds['E2'].alignment = Alignment(horizontal='right')
     ds.row_dimensions[1].height = 38
     ds.row_dimensions[3].height = 4
-    for c in range(1, 10):
+    for c in range(1, NCOL + 1):
         ds.cell(3, c).fill = fill(C['Accent'])
 
     # Filters (A:B) and sort (E:F)
@@ -213,7 +218,8 @@ def build_dashboard(wb, formulas):
     ds.row_dimensions[7].height = 24
 
     for sqref, f1 in (('A5', 'Queries!$A$1:$A$1000'), ('B5', 'Queries!$B$1:$B$1000'),
-                      ('E5', 'Queries!$D$1:$L$1'), ('F5', '"Ascending,Descending"')):
+                      ('E5', f'Queries!$D$1:${Q_LAST}$1'),
+                      ('F5', '"Ascending,Descending"')):
         dv = DataValidation(type='list', formula1=f1, allow_blank=True)
         ds.add_data_validation(dv)
         dv.add(sqref)
@@ -221,12 +227,15 @@ def build_dashboard(wb, formulas):
     # The table: one formula at A7 fills A7:I
     ds['A7'] = sheets_only(formulas['Dashboard!A7'])
 
-    left = (1, 2, 5)
+    left = (1, 2, 5, NCOL)
     for r in range(7, LAST_ROW + 1):
-        for c in range(1, 10):
+        for c in range(1, NCOL + 1):
+            # Data rows align to the top: a wrapped note makes its row tall,
+            # and the rest of the row should sit level with its first line.
             ds.cell(r, c).alignment = Alignment(
                 horizontal='left' if c in left else 'center',
-                vertical='center' if r == 7 else None,
+                vertical='center' if r == 7 else 'top',
+                wrap_text=(c == NCOL and r > 7),
                 indent=1 if c in left else 0)
         if r > 7:
             ds.cell(r, 3).number_format = '0.000" g"'
@@ -244,9 +253,9 @@ def build_dashboard(wb, formulas):
                                             end_color=h(bg), bgColor=h(bg)))
 
     cf = ds.conditional_formatting
-    cf.add('A7:I7', rule('$A$7<>""', C['Accent'], C['Accent Text'], bold=True))
+    cf.add(f'A7:{LAST}7', rule('$A$7<>""', C['Accent'], C['Accent Text'], bold=True))
     bands = ((0, C['Panel']), (1, C['Panel Alt']))   # row 8, the first data row, is even
-    hilo, allr = f'F8:G{LAST_ROW}', f'A8:I{LAST_ROW}'
+    hilo, allr = f'F8:G{LAST_ROW}', f'A8:{LAST}{LAST_ROW}'
     for p, bg in bands:
         cf.add(hilo, rule(f'AND($A8<>"",$I8="",F8="High",MOD(ROW(),2)={p})', bg, C['Highlight'], bold=True))
         cf.add(hilo, rule(f'AND($A8<>"",$I8="",F8="Low",MOD(ROW(),2)={p})', bg, C['Text Dim']))
@@ -256,9 +265,9 @@ def build_dashboard(wb, formulas):
     for p, bg in bands:
         cf.add(allr, rule(f'AND($A8<>"",$I8="",MOD(ROW(),2)={p})', bg, C['Text']))
 
-    for col, w in zip('ABCDEFGHIJ', [18, 22, 11, 14, 24, 13, 11, 8, 14, 3]):
+    for col, w in zip('ABCDEFGHIJK', [18, 22, 11, 14, 24, 13, 11, 8, 14, 40, 3]):
         ds.column_dimensions[col].width = w
-    ds.column_dimensions.group('K', 'Z', hidden=True)
+    ds.column_dimensions.group(get_column_letter(MARGIN + 1), 'Z', hidden=True)
     ds.sheet_view.showGridLines = False
     ds.freeze_panes = 'A8'
     ds.sheet_properties.tabColor = h(C['Accent'])
@@ -356,13 +365,13 @@ def build_queries(wb, formulas):
     q = wb.create_sheet('Queries')
     q['A1'] = sheets_only(formulas['Queries!A1'])
     q['B1'] = sheets_only(formulas['Queries!B1'])
-    # D1:L1 header names (the Sort By list); D2:L2 the same with a sort arrow.
+    # D1:M1 header names (the Sort By list); D2:M2 the same with a sort arrow.
     for j, name in enumerate(HEADERS):
         col = get_column_letter(4 + j)
         q[f'{col}1'] = name
         q[f'{col}2'] = (f'={col}1&IF({col}1=Dashboard!$E$5,'
                         f'IF(Dashboard!$F$5="Descending"," ▼"," ▲"),"")')
-    q['N1'] = '=IFERROR(MATCH(Dashboard!$E$5,$D$1:$L$1,0),1)'
+    q['N1'] = f'=IFERROR(MATCH(Dashboard!$E$5,$D$1:${Q_LAST}$1,0),1)'
     q['N2'] = '=Dashboard!$F$5<>"Descending"'
     q['O1'] = '← sort column index'
     q['O2'] = '← ascending?'
@@ -411,7 +420,9 @@ def default_version():
     vf = ROOT / 'version'
     if vf.is_file():
         v = vf.read_text(encoding='utf-8').strip()
-        if re.fullmatch(r'\d{8}', v):
+        # A bare datestamp, or one with a suffix on a development build
+        # (20260924-dev), which the template carries as it is.
+        if re.fullmatch(r'\d{8}(?:-[A-Za-z0-9.]+)?', v):
             return v
     return dt.date.today().strftime('%Y%m%d')
 

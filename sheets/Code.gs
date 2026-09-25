@@ -67,16 +67,38 @@ var COLUMNS = [
   'last_confirmed',
   'reported_by',
   'is_test',
-  'depleted_on'
+  'depleted_on',
+  'notes',
+  'notes_updated',
+  'assessment_updated'
 ];
 
-/** Fields a later report is allowed to overwrite on an existing row. */
+/**
+ * Fields a later report is allowed to overwrite on an existing row.
+ *
+ * notes is not here. It is a commander's writing rather than an observation,
+ * so a newer sighting of the site says nothing about whether the note is
+ * current; it has its own timestamp, notes_updated, and _update() lets the
+ * newer of those win outright — even when the newer note is blank, because
+ * that is how its author withdraws it.
+ */
 var MUTABLE = [
-  'depleted_on',
-  'density_claimed', 'density_observed', 'amount', 'rigs', 'refine_count',
+  'rigs', 'refine_count',
   'last_confirmed', 'signal_no', 'planet_class', 'gravity', 'body_radius_m',
   'atmosphere', 'volcanism', 'system', 'body'
 ];
+
+/**
+ * Assessments: what the HUD said the site holds. A later report fills them
+ * only where they are blank. They are replaced only by a correction — a
+ * report whose assessment_updated is newer than the row's — so a commander
+ * who merely drives onto a site cannot put back a value somebody fixed.
+ *
+ * Nothing here is ever "Depleted". A worked-out site is recorded by its
+ * depleted_on date alone, and the latest date wins; older sheets that wrote
+ * the word into amount have it cleared the next time the row is touched.
+ */
+var ASSESSED = ['amount', 'density_observed', 'density_claimed'];
 
 // ── Entry points ─────────────────────────────────────────────────────────────
 
@@ -158,6 +180,10 @@ function _read(query) {
     if (testCol >= 0 && String(row[testCol]) === '1') continue;
     var dep = {};
     for (var c = 0; c < COLUMNS.length; c++) dep[COLUMNS[c]] = row[c];
+    // As EDLD would have sent them: a day rather than whatever Sheets made of
+    // a date it parsed, and no amount of "Depleted" from an older sheet.
+    dep.depleted_on = _day(dep.depleted_on);
+    if (String(dep.amount) === 'Depleted') dep.amount = '';
     out.push(dep);
   }
   return { ok: true, deposits: out };
@@ -261,8 +287,64 @@ function _update(sheet, row, dep) {
     if (String(existing) === String(incoming)) continue;
     if (existing !== '' && existing !== null && !_isNewer(dep, current)) continue;
 
-    sheet.getRange(row, col + 1).setValue(incoming);
+    sheet.getRange(row, col + 1).setValue(_cell(incoming));
     current[col] = incoming;
+    changed = true;
+  }
+
+  // Assessments: fill blanks; replace only on a newer correction.
+  var aCol = COLUMNS.indexOf('assessment_updated');
+  var aStamp = String(dep.assessment_updated || '');
+  var corrected = aCol >= 0 && aStamp !== '' &&
+                  aStamp > String(current[aCol] || '');
+  for (var a = 0; a < ASSESSED.length; a++) {
+    var aField = ASSESSED[a];
+    var ac = COLUMNS.indexOf(aField);
+    var held = String(current[ac] === null ? '' : current[ac]);
+    var legacy = held === 'Depleted';
+    var sent = (aField in dep && dep[aField] !== null && dep[aField] !== undefined)
+               ? String(dep[aField]) : '';
+    if (sent === '') {
+      if (legacy) { sheet.getRange(row, ac + 1).setValue(''); current[ac] = ''; changed = true; }
+      continue;
+    }
+    if (sent === held) continue;
+    if (held !== '' && !legacy && !corrected) continue;
+    sheet.getRange(row, ac + 1).setValue(_cell(sent));
+    current[ac] = sent;
+    changed = true;
+  }
+  if (corrected) {
+    sheet.getRange(row, aCol + 1).setValue(aStamp);
+    current[aCol] = aStamp;
+    changed = true;
+  }
+
+  // Depletion: the latest date wins. Sites refill and are worked out again,
+  // so the most recent emptying is the one that describes the site now.
+  var dCol = COLUMNS.indexOf('depleted_on');
+  var day = _day(dep.depleted_on);
+  if (dCol >= 0 && day && day > _day(current[dCol])) {
+    sheet.getRange(row, dCol + 1).setValue("'" + day);
+    current[dCol] = day;
+    changed = true;
+  }
+
+  // Notes: last writer wins, by notes_updated. Equal stamps are the same note
+  // coming back round; an older one is somebody re-sending a copy they
+  // imported before its author changed it.
+  var noteCol = COLUMNS.indexOf('notes');
+  var stampCol = COLUMNS.indexOf('notes_updated');
+  var stamp = String(dep.notes_updated || '');
+  if (noteCol >= 0 && stampCol >= 0 && stamp &&
+      stamp > String(current[stampCol] || '')) {
+    var note = String(dep.notes || '');
+    if (String(current[noteCol] || '') !== note) {
+      sheet.getRange(row, noteCol + 1).setValue(_cell(note));
+      current[noteCol] = note;
+    }
+    sheet.getRange(row, stampCol + 1).setValue(stamp);
+    current[stampCol] = stamp;
     changed = true;
   }
   return changed;
@@ -281,9 +363,40 @@ function _toRow(dep) {
   var row = [];
   for (var c = 0; c < COLUMNS.length; c++) {
     var v = dep[COLUMNS[c]];
-    row.push(v === null || v === undefined ? '' : v);
+    if (v === null || v === undefined) v = '';
+    // A bare day is text, not a date: Sheets would otherwise parse it into
+    // its own timezone and hand back something else on the next read.
+    else if (COLUMNS[c] === 'depleted_on' && v !== '') v = "'" + _day(v);
+    else v = _cell(v);
+    row.push(v);
   }
   return row;
+}
+
+/** A depletion date as YYYY-MM-DD, from text or from a date Sheets parsed. */
+function _day(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  return String(v).slice(0, 10);
+}
+
+/**
+ * A value as it should be written to a cell.
+ *
+ * Sheets reads a string starting with = + - or @ as a formula, and notes are
+ * free text from anyone holding the token. Unescaped, "=IMPORTXML(...)" in a
+ * note would run in every reader's copy of the sheet. A leading apostrophe
+ * makes Sheets store the text as typed; it is not part of the value, so
+ * getValues() — and so _read() — returns the note exactly as it was sent.
+ * A string that itself starts with an apostrophe gets a second one, or Sheets
+ * would take the first as that marker and drop it. Numbers arrive as numbers
+ * and are left alone.
+ */
+function _cell(v) {
+  if (typeof v === 'string' && /^[=+\-@']/.test(v)) return "'" + v;
+  return v;
 }
 
 function _sheet() {

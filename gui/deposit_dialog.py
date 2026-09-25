@@ -11,7 +11,8 @@ drift apart on what a deposit has.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
-                               QFormLayout, QLabel, QLineEdit, QVBoxLayout)
+                               QFormLayout, QLabel, QLineEdit, QPlainTextEdit,
+                               QVBoxLayout)
 
 from core.deposit_form import FIELDS
 
@@ -48,6 +49,15 @@ class DepositDialog(QDialog):
                 box.addItem("Yes", "true")
                 box.setCurrentIndex(1 if current else 0)
                 widget = box
+            elif field.kind == "note":
+                widget = QPlainTextEdit(current)
+                widget.setPlaceholderText(field.hint)
+                # Tab leaves the box rather than typing a tab, as it does from
+                # every other field; Save and Cancel stay reachable from the
+                # keyboard. Enter still breaks the line.
+                widget.setTabChangesFocus(True)
+                lines = widget.fontMetrics().lineSpacing()
+                widget.setFixedHeight(lines * 4 + 12)
             else:
                 widget = QLineEdit(current)
                 if field.hint:
@@ -70,6 +80,8 @@ class DepositDialog(QDialog):
         for key, widget in self._widgets.items():
             if isinstance(widget, QComboBox):
                 out[key] = widget.currentData() or ""
+            elif isinstance(widget, QPlainTextEdit):
+                out[key] = widget.toPlainText()
             else:
                 out[key] = widget.text()
         return out

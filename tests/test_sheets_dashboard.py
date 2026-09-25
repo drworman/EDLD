@@ -28,7 +28,7 @@ TEMPLATE = SHEETS / "Mining_Dashboard.xlsx"
 
 #: What the dashboard table shows, in column order.
 DASHBOARD_FIELDS = ("system", "body", "gravity", "signal_no", "commodity",
-                    "amount", "density_observed", "rigs", "depleted_on")
+                    "amount", "density_observed", "rigs", "depleted_on", "notes")
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -99,6 +99,14 @@ def test_dropdown_lists_read_system_and_commodity_without_test_rows():
         assert _condition_field(f[key], r"Deposits!([A-Z]+)2:\1<>1") == "is_test", key
 
 
+def test_both_files_list_the_same_table_columns():
+    """Repair lays an older sheet out from ED.HEADERS; the build from HEADERS."""
+    gs = (SHEETS / "Dashboard.gs").read_text(encoding="utf-8")
+    block = re.search(r"HEADERS: \[(.*?)\]", gs, re.S)
+    assert block, "ED.HEADERS not found in Dashboard.gs"
+    assert re.findall(r"'([^']+)'", block.group(1)) == _literal(BUILD, "HEADERS")
+
+
 def test_every_table_row_is_as_wide_as_the_header():
     """An array literal with a short row is an error in Sheets, not a blank."""
     headers = _literal(BUILD, "HEADERS")
@@ -159,7 +167,7 @@ def _snapshot(wb) -> dict:
 
 def test_committed_template_is_a_fresh_build(tmp_path):
     committed = _load(TEMPLATE)
-    version = re.search(r"v(\d{8})", committed["Settings"]["D1"].value).group(1)
+    version = re.search(r"v(\S+) powered", committed["Settings"]["D1"].value).group(1)
     fresh_path = tmp_path / "fresh.xlsx"
     subprocess.run([sys.executable, str(BUILD), "--out", str(fresh_path),
                     "--version", version], check=True, capture_output=True)

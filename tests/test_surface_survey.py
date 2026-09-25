@@ -160,12 +160,13 @@ def test_depletion_is_history_not_deletion(db):
     dep, _ = db.record_deposit(1234, 7, "monazite", 10.0, 20.0, refined=True)
     assert db.mark_depleted(dep, "worked out") is True
     rows = db.deposits_on(1234, 7)
-    assert len(rows) == 1 and rows[0]["amount"] == "Depleted"
+    assert len(rows) == 1
     assert len(db.depletion_history(dep)) == 1
+    assert rows[0]["depleted_on"], "the date is how depletion is read back"
 
-    # Working it again lifts it back out of Depleted without losing the note.
+    # Working it again keeps the dated history and invents no amount.
     db.record_deposit(1234, 7, "monazite", 10.0, 20.0, refined=True)
-    assert db.deposits_on(1234, 7)[0]["amount"] == "Low"
+    assert db.deposits_on(1234, 7)[0]["amount"] == ""
     assert len(db.depletion_history(dep)) == 1
 
 
@@ -318,11 +319,14 @@ def test_an_annotation_makes_the_row_stale_on_the_sheet(db):
         "a correction the squadron never sees is worse than no correction"
 
 
-def test_annotating_to_depleted_stamps_the_history(db):
-    dep, _ = db.record_deposit(1234, 7, "monazite", 10.0, 20.0, refined=True)
-    db.annotate_deposit(dep, amount="Depleted")
-    assert len(db.depletion_history(dep)) == 1
-    assert db.deposits_on(1234, 7)[0]["amount"] == "Depleted"
+def test_marking_depleted_leaves_the_amount_alone(db):
+    dep, _ = db.record_deposit(1234, 7, "monazite", 10.0, 20.0,
+                               amount="High", refined=True)
+    db.mark_published([dep])
+    assert db.mark_depleted(dep)
+    row = db.deposits_on(1234, 7)[0]
+    assert row["amount"] == "High" and row["depleted_on"]
+    assert len(db.unpublished()) == 1, "the date is news for the sheet"
 
 
 def test_the_test_flag_can_be_set_and_held_back_from_publishing(db):
@@ -577,8 +581,9 @@ def test_the_record_action_takes_values_from_the_widgets(tmp_path, monkeypatch):
 def test_the_depleted_action_is_reachable(tmp_path, monkeypatch):
     p = _plugin_at(tmp_path, monkeypatch)
     p.record_here("Helium-3", amount="High")
-    assert "Depleted" in p.preferences_action("btn-srv-depleted", {}) or \
-        p._db.deposits_on(1234, 7)[0]["amount"] == "Depleted"
+    assert "depleted" in p.preferences_action("btn-srv-depleted", {})
+    row = p._db.deposits_on(1234, 7)[0]
+    assert row["depleted_on"] and row["amount"] == "High"
 
 
 def test_an_action_id_that_is_not_ours_is_declined(tmp_path, monkeypatch):
@@ -865,14 +870,13 @@ def test_the_form_refuses_a_stale_position(tmp_path, monkeypatch):
 
 
 def test_a_depletion_date_marks_the_deposit_worked_out(tmp_path, monkeypatch):
-    """Amount says whether, the date says when — so a date implies Depleted
-    even when the Amount field was left alone."""
+    """The date is the whole record of depletion; the amount is untouched."""
     p = _plugin_at(tmp_path, monkeypatch)
     p.submit_form({"commodity": "Silver", "amount": "High"})
     assert "updated" in p.submit_form({"depleted_on": "2026-09-14"})
 
     row = p._db.deposits_on(1234, 7)[0]
-    assert row["amount"] == "Depleted"
+    assert row["amount"] == "High"
     history = p._db.depletion_history(row["deposit_id"])
     assert history[-1]["noted_at"].startswith("2026-09-14")
 
@@ -883,7 +887,7 @@ def test_the_form_reads_back_the_recorded_depletion_date(tmp_path, monkeypatch):
     p.submit_form({"depleted_on": "2026-09-14"})
     form, _heading = p.form_for_here()
     assert form["depleted_on"] == "2026-09-14"
-    assert form["amount"] == "Depleted"
+    assert form["amount"] == ""
 
 
 def test_the_depletion_date_reaches_the_sheet(db):

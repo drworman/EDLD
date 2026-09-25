@@ -15,7 +15,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Select
+from textual.widgets import Button, Input, Label, Select, TextArea
 
 from core.deposit_form import FIELDS
 
@@ -38,6 +38,11 @@ class DepositScreen(ModalScreen):
 
             for field in FIELDS:
                 current = str(self._form.get(field.key, "") or "")
+                if field.kind == "note":
+                    with Horizontal(classes="pref-row dep-note-row"):
+                        yield Label(field.label, classes="key")
+                        yield self._note_area(field, current)
+                    continue
                 with Horizontal(classes="pref-row"):
                     yield Label(field.label, classes="key")
                     if field.kind == "choice":
@@ -91,12 +96,38 @@ class DepositScreen(ModalScreen):
                 yield Button("Save", id="dep-save", variant="primary")
                 yield Button("Cancel", id="dep-cancel")
 
+    @staticmethod
+    def _note_area(field, current: str) -> TextArea:
+        """A few lines of wrapping text, whatever Textual release is installed.
+
+        TextArea's constructor has grown keywords across the releases
+        requirements.txt allows — soft wrap, line numbers and tab behaviour
+        all arrived as arguments after it did, and line numbers defaulted on
+        before they defaulted off. Each is set as an attribute where it exists
+        rather than passed where it might not be accepted, so an older Textual
+        gets a plainer box instead of a TypeError when Ctrl+D is pressed.
+        """
+        area = TextArea(current, id=f"dep-{field.key}", classes="dep-note")
+        for attr, value in (("soft_wrap", True),
+                            ("show_line_numbers", False),
+                            # Tab moves on to Save, as from every other field.
+                            ("tab_behavior", "focus")):
+            if hasattr(area, attr):
+                try:
+                    setattr(area, attr, value)
+                except Exception:
+                    pass
+        return area
+
     def _values(self) -> dict:
         out: dict = {}
         for field in FIELDS:
             try:
                 widget = self.query_one(f"#dep-{field.key}")
             except Exception:
+                continue
+            if isinstance(widget, TextArea):
+                out[field.key] = widget.text
                 continue
             value = getattr(widget, "value", "")
             out[field.key] = "" if value is None else str(value)

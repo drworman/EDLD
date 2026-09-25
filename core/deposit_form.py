@@ -17,19 +17,25 @@ field means "leave it alone" rather than "set it to nothing" — a commander
 editing the amount should not silently blank the density they recorded last
 week.
 
-Amount and "Depleted on" divide the work: Amount says *whether* a site is
-worked out, and the date says *when*. They are not two ways of saying the same
-thing, and a button that only ever stamped today would have been — selecting
-Depleted in the Amount list already does that. The date exists so a site worked
-out last week can be recorded as such, and so the one already in the store can
-be seen and corrected.
+Depletion is a date and nothing else. Amount and density say what the site
+holds when it is full — they are corrected when they were wrong, not changed
+when the site empties — and "Depleted on" says when it was last worked out, so
+a site emptied last week can be recorded as such and the date already held can
+be seen and corrected. The date is what a refill estimate will be built on once
+the refill period is known.
+
+Notes are the one field where empty does mean nothing. The box always opens
+holding the current note, so a commander who clears it has removed the note on
+purpose; treating that as "leave it alone" would make a note impossible to
+withdraw.
 """
 
 from __future__ import annotations
 
 from typing import NamedTuple
 
-from core.mining_db import AMOUNT_LEVELS, DENSITY_LEVELS
+from core.mining_db import (AMOUNT_LEVELS, DENSITY_LEVELS, MAX_NOTES_CHARS,
+                            normalise_notes)
 from core.surface_survey import canonical_commodity
 
 #: Largest plausible rig count. The Rhino carries twelve; the cap exists to
@@ -44,7 +50,7 @@ class Field(NamedTuple):
     """One editable field, for a front end to build a control from."""
     key:      str
     label:    str
-    kind:     str              # "text" | "choice" | "int" | "bool"
+    kind:     str              # "text" | "choice" | "int" | "bool" | "note"
     choices:  tuple[str, ...] = ()
     hint:     str = ""
 
@@ -55,7 +61,7 @@ class Field(NamedTuple):
 FIELDS: tuple[Field, ...] = (
     Field("commodity", "Commodity", "text", hint="as the game names it"),
     Field("amount", "Amount", "choice", AMOUNT_LEVELS,
-          "how much is left"),
+          "what the HUD shows when full"),
     Field("density_observed", "Density", "choice", DENSITY_LEVELS,
           "what you actually found"),
     Field("depleted_on", "Depleted on", "text",
@@ -63,6 +69,10 @@ FIELDS: tuple[Field, ...] = (
     Field("rigs", "Rigs", "int", hint=f"0-{MAX_RIGS}"),
     Field("signal_no", "Signal #", "int", hint=f"1-{MAX_SIGNAL_NO}"),
     Field("is_test", "Test data", "bool", hint="held back from the sheet"),
+    # Last, and multi-line in both front ends: it is the one field somebody
+    # writes sentences in.
+    Field("notes", "Notes", "note",
+          hint="anything the next commander should know about this site"),
 )
 
 
@@ -139,6 +149,15 @@ def clean(raw: dict, *, require_commodity: bool = False) -> Cleaned:
             else:
                 values["depleted_on"] = when.isoformat()
 
+    # Only when the form has the field, so a caller that never shows notes
+    # cannot blank one by leaving the key out.
+    if "notes" in raw:
+        note = normalise_notes(raw.get("notes"))
+        if len(note) > MAX_NOTES_CHARS:
+            errors["notes"] = (f"Notes are limited to {MAX_NOTES_CHARS} "
+                               f"characters ({len(note)} entered)")
+        else:
+            values["notes"] = note
     flag = raw.get("is_test", None)
     if flag not in (None, ""):
         values["is_test"] = str(flag).strip().lower() in ("1", "true", "yes", "on")
@@ -167,4 +186,5 @@ def prefill(deposit: dict | None) -> dict:
         "signal_no": "" if deposit.get("signal_no") in (None, "")
                      else str(deposit["signal_no"]),
         "is_test": "true" if deposit.get("is_test") else "",
+        "notes": deposit.get("notes", "") or "",
     }

@@ -175,6 +175,18 @@ DepositScreen {
 
 #deposit-dialog .key { width: 30%; }
 
+/* Notes: a few wrapped lines, label at the top rather than the middle so it
+   stays beside the first line of text however long the note grows. */
+#deposit-dialog .dep-note-row .key { content-align: left top; }
+#deposit-dialog TextArea.dep-note {
+    width: 1fr;
+    height: 6;
+    background: $bg;
+    color: $fg;
+    border: round $dim;
+}
+#deposit-dialog TextArea.dep-note:focus { border: round $accent; }
+
 /* Radio tab: Add and Edit Station.  Same box as the deposit window, for the same
    reason; RadioSet's own border is dropped so it sits like the inputs. */
 AddStationScreen, EditStationScreen { align: center middle; }

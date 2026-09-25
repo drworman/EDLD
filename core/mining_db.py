@@ -39,10 +39,41 @@ equality and never has to reimplement a haversine.
 
 Depletion
 ---------
-Working a site out is not a delete.  ``mark_depleted`` sets the amount to
-``Depleted`` and appends a dated line to ``depletion_log``; the deposit stays
-on the map with its history intact, because "empty on the twelfth" is worth
-more to the next commander than a missing row.
+Working a site out is not a delete, and it is not an amount either. Amount and
+density describe the deposit — what the HUD says is there when it is full — and
+a worked-out site is the same deposit, empty for now. So ``mark_depleted``
+touches neither: it appends a dated line to ``depletion_log``, and the date of
+the most recent line is the whole of how depletion is recorded, shown and
+shared. "Empty on the twelfth" is worth more to the next commander than a
+missing row, and more than an amount that would have to be put back by hand
+once the site refilled.
+
+Sites do refill. How long that takes is not yet known, so
+:data:`REPLENISH_DAYS` is ``None`` and :func:`replenishes_on` answers nothing;
+once it is measured, setting it is the whole change, and every depletion date
+already recorded becomes a refresh date.
+
+Amount and density
+------------------
+These are assessments, and a sighting does not overturn one: a later refine or
+a drive-by fills them only where they are blank. They change when a commander
+corrects them, and a correction stamps ``assessment_updated``. That stamp, not
+``last_confirmed``, is what decides between two versions on the sheet and on
+import — otherwise anyone who merely drove onto a site would re-send whatever
+they had imported weeks ago with a fresh date, and undo the correction.
+
+Notes
+-----
+``notes`` is free text a commander writes about a site — the way in, a hazard,
+what else is on the ridge. Unlike every other field it is not an observation,
+so it does not merge like one. The sighting fields fill blanks and follow
+``last_confirmed``; a note follows ``notes_updated``, the moment it was last
+written, and the most recent writing wins outright — including a blank one,
+because emptying the box is how a note is withdrawn.
+
+Tying it to ``last_confirmed`` would have let any commander who merely drove
+onto a site re-send whatever note they imported weeks ago with a fresh date,
+and silently put back text its author had since changed or removed.
 """
 
 from __future__ import annotations
@@ -58,7 +89,7 @@ from typing import Iterable, Optional
 
 from core.geo import surface_distance
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: Two sightings of the same commodity on the same body within this many metres
 #: are the same deposit.
@@ -75,12 +106,64 @@ DEDUPE_RADIUS_M = 100.0
 #: zero; a body with no radius is recorded and flagged rather than dropped.
 _FALLBACK_RADIUS_M = 2.0e6
 
-AMOUNT_LEVELS  = ("Depleted", "Low", "Medium", "High")
+#: Lowest first. "Depleted" is deliberately absent — see Depletion above.
+AMOUNT_LEVELS  = ("Low", "Medium", "High")
+
+#: The assessed fields, which only a correction changes once they are set.
+ASSESSED_FIELDS = ("amount", "density_observed", "density_claimed")
+
+#: Days for a worked-out site to refill. Unknown: None until it is measured.
+REPLENISH_DAYS: int | None = None
+
+#: Longest note kept. A cap against a pasted page rather than a style rule: the
+#: note travels to a shared sheet and back into every squadron member's form.
+MAX_NOTES_CHARS = 1000
 DENSITY_LEVELS = ("Low", "Medium", "High")
 
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def normalise_notes(raw) -> str:
+    """A note as it is stored: plain text, ``\n`` line ends, no outer space.
+
+    Applied to what the form submits and to what the sheet sends back alike,
+    since a sheet is a document people edit by hand. Control characters other
+    than line breaks are dropped and tabs become spaces. Length is not
+    touched; see :func:`clean_notes`.
+    """
+    text = str(raw or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\t", " ")
+    text = "".join(ch for ch in text
+                   if ch == "\n" or (ch >= " " and ch != "\x7f"))
+    return "\n".join(line.rstrip() for line in text.split("\n")).strip()
+
+
+def clean_notes(raw) -> str:
+    """:func:`normalise_notes`, cut to :data:`MAX_NOTES_CHARS`.
+
+    For text arriving from the sheet, which is cut rather than refused —
+    refusing is the form's job, where somebody can act on it.
+    """
+    return normalise_notes(raw)[:MAX_NOTES_CHARS]
+
+
+def replenishes_on(depleted_on: str) -> str:
+    """The day a site worked out on ``depleted_on`` should have refilled.
+
+    ``""`` while :data:`REPLENISH_DAYS` is unknown, and for no date. The one
+    place the refill rule lives, so the sheet, the overlay and the form can all
+    ask it once it means something.
+    """
+    day = str(depleted_on or "")[:10]
+    if not day or REPLENISH_DAYS is None:
+        return ""
+    from datetime import date, timedelta
+    try:
+        return (date.fromisoformat(day) + timedelta(days=REPLENISH_DAYS)).isoformat()
+    except ValueError:
+        return ""
 
 
 def deposit_id(system_address: int, body_id: int, commodity: str,
@@ -206,6 +289,33 @@ class MiningDB:
         # Later versions add strictly — CREATE TABLE IF NOT EXISTS for new
         # tables, ALTER TABLE ADD COLUMN for new columns.  Never edit a block
         # that has shipped.
+        if have < 2:
+            # A commander's free-text note, and when it was last written.
+            # Checked rather than assumed: a store copied back from a newer
+            # build can already have the columns with an older version number.
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(deposits)")}
+            if "notes" not in cols:
+                conn.execute("ALTER TABLE deposits ADD COLUMN "
+                             "notes TEXT NOT NULL DEFAULT ''")
+            if "notes_updated" not in cols:
+                conn.execute("ALTER TABLE deposits ADD COLUMN "
+                             "notes_updated TEXT NOT NULL DEFAULT ''")
+            # When amount or density was last corrected by hand.
+            if "assessment_updated" not in cols:
+                conn.execute("ALTER TABLE deposits ADD COLUMN "
+                             "assessment_updated TEXT NOT NULL DEFAULT ''")
+            # Depletion leaves the amount. A row that says Depleted keeps the
+            # fact as a dated log line — its last confirmation, if nothing
+            # already dates it — and loses the word, which describes the site
+            # rather than how much it holds. published_at is left alone: this
+            # is a change of representation, not news for the sheet.
+            conn.execute(
+                "INSERT OR IGNORE INTO depletion_log(deposit_id, noted_at, note) "
+                "SELECT deposit_id, last_confirmed, "
+                "       'Worked out ' || substr(last_confirmed, 1, 10) "
+                "FROM deposits d WHERE amount='Depleted' AND NOT EXISTS "
+                "(SELECT 1 FROM depletion_log l WHERE l.deposit_id=d.deposit_id)")
+            conn.execute("UPDATE deposits SET amount='' WHERE amount='Depleted'")
         if have < SCHEMA_VERSION:
             conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
@@ -358,10 +468,6 @@ class MiningDB:
                     updates["rigs"] = int(rigs)
                 if signal_no is not None and existing["signal_no"] is None:
                     updates["signal_no"] = int(signal_no)
-                # A deposit being worked again is no longer depleted.  The
-                # depletion_log keeps the history either way.
-                if refined and existing["amount"] == "Depleted":
-                    updates["amount"] = "Low"
                 # Any change makes the published copy stale.
                 updates["published_at"] = ""
                 sets = ", ".join(f"{k}=?" for k in updates)
@@ -420,7 +526,8 @@ class MiningDB:
                          rigs: int | None = None,
                          signal_no: int | None = None,
                          depleted_on: str = "",
-                         is_test: bool | None = None) -> bool:
+                         is_test: bool | None = None,
+                         notes: str | None = None) -> bool:
         """Apply a commander's assessment to a deposit.  Returns whether it changed.
 
         Blank arguments leave the stored value alone, so setting the amount
@@ -428,6 +535,19 @@ class MiningDB:
         ``published_at`` so the sheet is told about it on the next flush —
         otherwise the correction would sit in the local store forever while the
         squadron kept reading the old value.
+
+        Setting amount or density to something other than what is stored is a
+        correction, and stamps ``assessment_updated`` — the stamp that lets it
+        replace another commander's value on the sheet and on their import.
+
+        ``depleted_on`` adds a dated line to the depletion log and changes
+        nothing else: the amount stays what the site holds when it is full.
+
+        ``notes`` is the exception: ``None`` leaves the note alone, and any
+        string — the empty one included — replaces it, since the form always
+        shows the current note and an emptied box is a deliberate removal. A
+        changed note stamps ``notes_updated``, which is what decides between
+        two commanders' versions of it; an unchanged one stamps nothing.
         """
         updates: dict = {}
         if amount:
@@ -442,7 +562,7 @@ class MiningDB:
             updates["signal_no"] = int(signal_no)
         if is_test is not None:
             updates["is_test"] = 1 if is_test else 0
-        if not updates and not depleted_on:
+        if not updates and not depleted_on and notes is None:
             return False
 
         now = _utcnow()
@@ -452,32 +572,26 @@ class MiningDB:
                                (dep_id,)).fetchone()
             if row is None:
                 return False
-            if updates and all(str(row[k]) == str(v) for k, v in updates.items()) \
-                    and not depleted_on:
-                return False
-            if not updates:
-                updates["amount"] = "Depleted"
+            if notes is not None and notes != (row["notes"] or ""):
+                updates["notes"] = notes
+                updates["notes_updated"] = now
+            if not depleted_on:
+                if not updates or all(str(row[k]) == str(v)
+                                      for k, v in updates.items()):
+                    return False
+            if any(k in updates and str(row[k] or "") != str(updates[k])
+                   for k in ASSESSED_FIELDS):
+                updates["assessment_updated"] = now
             updates["last_confirmed"] = now
             updates["published_at"] = ""
             sets = ", ".join(f"{k}=?" for k in updates)
             conn.execute(f"UPDATE deposits SET {sets} WHERE deposit_id=?",
                          (*updates.values(), dep_id))
-            # A supplied date says when the site was worked out; without one,
-            # selecting Depleted means today. The two are not alternatives —
-            # Amount says whether, the date says when — so a date implies
-            # Depleted even if the Amount field was left alone.
             if depleted_on:
                 stamp = f"{depleted_on}T00:00:00Z"
                 conn.execute(
                     "INSERT OR REPLACE INTO depletion_log(deposit_id, noted_at, note) "
                     "VALUES(?,?,?)", (dep_id, stamp, f"Worked out {depleted_on}"))
-                if row["amount"] != "Depleted":
-                    conn.execute("UPDATE deposits SET amount='Depleted' "
-                                 "WHERE deposit_id=?", (dep_id,))
-            elif updates.get("amount") == "Depleted":
-                conn.execute(
-                    "INSERT OR REPLACE INTO depletion_log(deposit_id, noted_at, note) "
-                    "VALUES(?,?,?)", (dep_id, now, f"Worked out {now[:10]}"))
             conn.commit()
             return True
 
@@ -505,12 +619,16 @@ class MiningDB:
             return bool(cur.rowcount)
 
     def mark_depleted(self, dep_id: str, note: str = "") -> bool:
-        """Drop a deposit to Depleted and stamp the date.  Not a delete."""
+        """Stamp today as the day this site was worked out.
+
+        Not a delete, and not an amount: the dated log line is the whole
+        record. See Depletion in the module docstring.
+        """
         now = _utcnow()
         conn = self._connect()
         with self._lock:
             cur = conn.execute(
-                "UPDATE deposits SET amount='Depleted', last_confirmed=?, "
+                "UPDATE deposits SET last_confirmed=?, "
                 "published_at='' WHERE deposit_id=?", (now, dep_id))
             if cur.rowcount == 0:
                 return False
@@ -527,9 +645,12 @@ class MiningDB:
             "ORDER BY noted_at", (dep_id,)).fetchall()]
 
     def deposits_on(self, system_address: int, body_id: int) -> list[dict]:
+        """This body's deposits, each with ``depleted_on``: its latest date."""
         conn = self._connect()
         return [dict(r) for r in conn.execute(
-            "SELECT * FROM deposits WHERE system_address=? AND body_id=? "
+            "SELECT d.*, (SELECT MAX(noted_at) FROM depletion_log l "
+            " WHERE l.deposit_id = d.deposit_id) AS depleted_on "
+            "FROM deposits d WHERE system_address=? AND body_id=? "
             "ORDER BY commodity, first_seen",
             (int(system_address), int(body_id))).fetchall()]
 
@@ -594,6 +715,8 @@ class MiningDB:
                 # rather than kept, because a wrong value is worse than a blank
                 # one a later sighting can fill in.
                 row = dict(row)
+                notes = clean_notes(row.get("notes", ""))
+                notes_at = str(row.get("notes_updated", "") or "").strip()
                 for _key, _allowed in (("amount", AMOUNT_LEVELS),
                                        ("density_observed", DENSITY_LEVELS),
                                        ("density_claimed", DENSITY_LEVELS)):
@@ -608,8 +731,9 @@ class MiningDB:
                         " commodity_display, latitude, longitude, signal_no,"
                         " density_claimed, density_observed, amount, rigs,"
                         " refine_count, first_seen, last_confirmed,"
-                        " reported_by, is_test, published_at)"
-                        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,0,?)",
+                        " reported_by, is_test, published_at,"
+                        " notes, notes_updated, assessment_updated)"
+                        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,0,?,?,?,?)",
                         (dep_id, sa, bid,
                          str(row.get("commodity", "") or "").lower(),
                          str(row.get("commodity_display")
@@ -622,7 +746,8 @@ class MiningDB:
                          str(row.get("first_seen", "") or now),
                          str(row.get("last_confirmed", "") or now),
                          str(row.get("reported_by", "") or ""),
-                         now))
+                         now, notes, notes_at,
+                         str(row.get("assessment_updated", "") or "").strip()))
                     stamp = str(row.get("depleted_on", "") or "").strip()[:10]
                     if stamp:
                         conn.execute(
@@ -655,9 +780,32 @@ class MiningDB:
                     incoming = str(row.get(field_name, "") or "")
                     if incoming and not existing[field_name]:
                         changes[field_name] = incoming
+                # A correction made since the one held here replaces it —
+                # the one case where the sheet overrides what was seen
+                # locally, because somebody has said the local value is wrong.
+                assessed_at = str(row.get("assessment_updated", "") or "").strip()
+                if assessed_at and assessed_at > str(existing["assessment_updated"] or ""):
+                    for field_name in ASSESSED_FIELDS:
+                        incoming = str(row.get(field_name, "") or "")
+                        if incoming and incoming != existing[field_name]:
+                            changes[field_name] = incoming
+                    changes["assessment_updated"] = assessed_at
                 theirs = str(row.get("last_confirmed", "") or "")
                 if theirs and theirs > str(existing["last_confirmed"] or ""):
                     changes["last_confirmed"] = theirs
+                # The note is not an observation, so "local wins" does not
+                # apply: whoever wrote it last wins, even with a blank, which
+                # is how its author withdraws it. Equal stamps mean this is the
+                # note already held, echoed back.
+                if notes_at and notes_at > str(existing["notes_updated"] or ""):
+                    if notes != (existing["notes"] or ""):
+                        changes["notes"] = notes
+                    changes["notes_updated"] = notes_at
+                elif (notes and not notes_at and not existing["notes"]
+                        and not existing["notes_updated"]):
+                    # Typed straight into the sheet, so never stamped. It can
+                    # only fill a blank, like any other unattributed field.
+                    changes["notes"] = notes
                 if changes:
                     sets = ", ".join(f"{k}=?" for k in changes)
                     conn.execute(f"UPDATE deposits SET {sets} WHERE deposit_id=?",
@@ -671,7 +819,7 @@ class MiningDB:
 
         Deletion is for a row that should never have existed — a bad commodity,
         a position filed under the wrong body — not for a site that is empty.
-        An empty site is Depleted, which is information somebody else wants;
+        An empty site gets a depletion date, which somebody else wants;
         deleting it throws that away and invites the next commander to rediscover
         it.
         """

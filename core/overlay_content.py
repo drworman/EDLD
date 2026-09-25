@@ -25,14 +25,12 @@ from typing import Iterable, Optional
 
 from core.geo import bearing as geo_bearing, surface_distance
 
-#: Deposit marks, coloured by how much is thought to be left. A worked-out site
-#: still gets drawn — knowing a site is empty saves the drive out to it — but
-#: it is dimmed so it does not compete with one worth visiting.
+#: Deposit marks, coloured by how much the site holds when full. Depletion is
+#: a date on the deposit, not an amount, so it is not a colour here.
 _AMOUNT_COLOURS = {
     "High":     "#7ee787",
     "Medium":   "#8fd1ff",
     "Low":      "#e3b341",
-    "Depleted": "#6b7280",
     "":         "#8fd1ff",
 }
 

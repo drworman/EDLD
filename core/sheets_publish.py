@@ -105,6 +105,9 @@ COLUMNS = (
     "reported_by",
     "is_test",
     "depleted_on",
+    "notes",
+    "notes_updated",
+    "assessment_updated",
 )
 
 
@@ -185,6 +188,8 @@ class PublishResult:
     error: str = ""
     sent_ids: list[str] = field(default_factory=list)
     deposits: list[dict] = field(default_factory=list)
+    #: How many columns the sheet's script knows, where it says (ping only).
+    columns: int = 0
 
     @property
     def accounted(self) -> int:
@@ -252,6 +257,16 @@ def row_from_deposit(
         # deposit that any commander can contribute and every commander needs:
         # a site somebody emptied last week is a wasted trip.
         "depleted_on": (dep.get("depleted_on", "") or "")[:10],
+        # The note travels with the moment it was written, and the sheet keeps
+        # whichever is newer — a blank included, since that is a withdrawal.
+        # See the Notes section of core/mining_db.py for why last_confirmed
+        # cannot stand in for it.
+        "notes": dep.get("notes", "") or "",
+        "notes_updated": dep.get("notes_updated", "") or "",
+        # When amount or density was last corrected by hand. The sheet lets a
+        # newer correction replace its values and otherwise only fills blanks,
+        # so a later sighting cannot put back a value somebody fixed.
+        "assessment_updated": dep.get("assessment_updated", "") or "",
     }
 
 
@@ -443,12 +458,18 @@ class SheetsPublisher:
                 error="sheet returned invalid result counts"
             )
 
+        try:
+            columns = int(data.get("columns", 0) or 0)
+        except (TypeError, ValueError):
+            columns = 0
+
         return PublishResult(
             ok=True,
             added=added,
             updated=updated,
             unchanged=unchanged,
             deposits=list(data.get("deposits") or []),
+            columns=columns,
         )
 
     # ── public API ───────────────────────────────────────────────────────────
@@ -462,6 +483,20 @@ class SheetsPublisher:
                     "token": self._token,
                     "ping": True,
                 }
+            )
+
+        # A script deployed before a column was added accepts every write and
+        # quietly drops the fields it has no column for, so nothing else would
+        # ever say the sheet is not storing them. This is the one place that
+        # can: the ping reports the script's column count.
+        if result.ok and 0 < result.columns < len(COLUMNS):
+            missing = ", ".join(COLUMNS[result.columns:])
+            result.ok = False
+            result.error = (
+                f"the sheet's script is out of date — it stores "
+                f"{result.columns} columns and this EDLD sends {len(COLUMNS)} "
+                f"(missing: {missing}). Paste the current sheets/Code.gs into "
+                f"the sheet's Apps Script and deploy a new version"
             )
 
         self._log(
