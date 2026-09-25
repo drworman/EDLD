@@ -6,6 +6,23 @@ Last updated: 20260925
 
 ## Unreleased
 
+### Added: edit a radio station from the Radio tab
+
+A **✎** now sits between **+** and **−** beside the station list, in both
+interfaces. It opens the selected station's name and stream address for
+editing, with the same checks as adding a station, and writes the change with
+the same line-by-line editor, so nothing else in `config.toml` moves. Until now
+the only way to correct a mistyped address was to delete the station and add
+it again, which gave it a new Id and lost it as the remembered station, or to
+edit the file by hand. The station keeps its Id. The change is saved where the
+station already lives, the loaded profile when it defines the station and
+`[Radio]` otherwise, and the form says which, because writing a profile's
+station globally would change nothing and writing a global one into the profile
+would quietly fork it for that profile alone. Editing the station that is
+playing retunes it to the new address rather than leaving it stopped, and a
+new name shows under On air at once; On air previously showed the name the
+stream was started with, which would have gone stale after a rename.
+
 ### Fixed: the overlay froze on its last frame after Apply & Save
 
 The overlay draws from the same state as both dashboards, yet it could sit on

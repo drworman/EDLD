@@ -175,9 +175,9 @@ DepositScreen {
 
 #deposit-dialog .key { width: 30%; }
 
-/* Radio tab: Add Station.  Same box as the deposit window, for the same
+/* Radio tab: Add and Edit Station.  Same box as the deposit window, for the same
    reason; RadioSet's own border is dropped so it sits like the inputs. */
-AddStationScreen { align: center middle; }
+AddStationScreen, EditStationScreen { align: center middle; }
 #station-dialog {
     width: 76;
     max-width: 95%;

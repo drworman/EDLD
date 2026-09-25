@@ -239,11 +239,14 @@ class RadioPanel(QWidget):
         self._combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._combo.currentIndexChanged.connect(self._on_station_changed)
         rl.addWidget(self._combo, 1)
-        self._add_btn = self._button("+", self._open_add)
-        self._del_btn = self._button("−", self._open_delete)
+        self._add_btn  = self._button("+", self._open_add)
+        self._edit_btn = self._button("✎", self._open_edit)
+        self._del_btn  = self._button("−", self._open_delete)
         self._add_btn.setToolTip("Add a station")
+        self._edit_btn.setToolTip("Edit the selected station")
         self._del_btn.setToolTip("Delete the selected station")
         rl.addWidget(self._add_btn, 0)
+        rl.addWidget(self._edit_btn, 0)
         rl.addWidget(self._del_btn, 0)
         layout.addWidget(row)
 
@@ -286,12 +289,26 @@ class RadioPanel(QWidget):
         b.clicked.connect(lambda _=False, a=action: (a(), self._redraw()))
         return b
 
-    # ── Adding and deleting ──────────────────────────────────────────────────
+    # ── Adding, editing and deleting ─────────────────────────────────────────
 
     def _open_add(self) -> None:
         from gui.station_dialog import AddStationDialog
         dlg = AddStationDialog(self._ctl, parent=self)
         if dlg.exec() == AddStationDialog.Accepted:
+            self._sync_options()
+            self._redraw()
+
+    def _open_edit(self) -> None:
+        from gui.station_dialog import EditStationDialog
+        sid = self._ctl.selected
+        if not sid:
+            return
+        try:
+            dlg = EditStationDialog(self._ctl, sid, parent=self)
+        except RadioError as exc:
+            self._error(str(exc))
+            return
+        if dlg.exec() == EditStationDialog.Accepted:
             self._sync_options()
             self._redraw()
 
@@ -370,6 +387,7 @@ class RadioPanel(QWidget):
         self._kv_now.set_value(v["now"])
         self._kv_volume.set_value(v["volume"])
         self._del_btn.setEnabled(v["can_delete"])
+        self._edit_btn.setEnabled(v["can_edit"])
         self._play_btn.setText(v["play_label"])
         self._play_btn.setEnabled(v["can_play"])
         self._mute_btn.setText(v["mute_label"])

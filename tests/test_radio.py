@@ -644,7 +644,7 @@ def test_both_tabs_offer_the_same_controls(qt_app, monkeypatch, tmp_path):
     gui_labels = [b.text() for b in gui.findChildren(QPushButton)]
     out = _tui_app(_stub_core([]), size=(60, 20), before=_radio_tab)
     tui_labels = out["footer_text"]
-    assert gui_labels == tui_labels == ["+", "−", "▶ Play", "Vol −", "Vol +", "Mute"]
+    assert gui_labels == tui_labels == ["+", "✎", "−", "▶ Play", "Vol −", "Vol +", "Mute"]
     assert [gui._combo.itemText(i) for i in range(gui._combo.count())] == [
         "Radio Sidewinder", "Hutton Orbital Radio", "Radio Skvortsov"]
 
@@ -970,3 +970,158 @@ def test_gui_add_to_profile_then_delete_while_playing(qt_app, cfg_file, monkeypa
     assert player.playing is None
     assert "LaveRadio" not in cfg_file.read_text("utf-8")
     assert panel._combo.currentText() == "Radio Sidewinder"
+
+
+# ── Editing a station ─────────────────────────────────────────────────────────
+
+def test_editing_a_default_writes_radio_and_keeps_its_id(cfg_file):
+    ctl, _ = _live(cfg_file, "EDP1")
+    info = ctl.edit_info("HuttonOrbital")
+    assert info["name"] == "Hutton Orbital Radio" and info["saved_to"].startswith("[Radio]")
+    st = ctl.edit_station("HuttonOrbital", " Hutton FM ", " https://h.example/new ")
+    assert st == R.Station("HuttonOrbital", "Hutton FM", "https://h.example/new")
+    parsed = tomllib.loads(cfg_file.read_text("utf-8"))
+    assert parsed["Radio"]["Name_HuttonOrbital"] == "Hutton FM"
+    assert parsed["Radio"]["Url_HuttonOrbital"] == "https://h.example/new"
+    assert "Radio" not in parsed.get("EDP1", {})
+    # …and backfill does not put the default back over it.
+    backfill_config_defaults(cfg_file)
+    again, _ = _live(cfg_file)
+    assert R.Station("HuttonOrbital", "Hutton FM", "https://h.example/new") in again.stations
+
+
+def test_editing_a_profile_station_stays_in_the_profile(cfg_file):
+    ctl, _ = _live(cfg_file, "EDP1")
+    ctl.add_station("Mine", "http://m.example/s", to_profile=True)
+    assert ctl.edit_info("Mine")["saved_to"] == "profile [EDP1]"
+    ctl.edit_station("Mine", "Mine Too", "http://m.example/t")
+    parsed = tomllib.loads(cfg_file.read_text("utf-8"))
+    assert parsed["EDP1"]["Radio"] == {"Name_Mine": "Mine Too", "Url_Mine": "http://m.example/t"}
+    assert "Name_Mine" not in parsed["Radio"]
+
+
+def test_an_unchanged_edit_writes_nothing(cfg_file):
+    ctl, _ = _live(cfg_file)
+    before = cfg_file.read_bytes()
+    st = ctl.edit_station("RadioSkvortsov", "Radio Skvortsov",
+                          ctl.edit_info("RadioSkvortsov")["url"])
+    assert st.id == "RadioSkvortsov" and cfg_file.read_bytes() == before
+
+
+@pytest.mark.parametrize("name,url,fragment", [
+    ("", "http://x.example", "Enter a station name"),
+    ("Radio Sidewinder", "http://x.example", "already listed"),
+    ("X", "ftp://x.example", "must start with http"),
+    ("X", "http://x.example/a b", "cannot contain spaces"),
+])
+def test_edit_refuses_what_would_not_work(cfg_file, name, url, fragment):
+    ctl, _ = _live(cfg_file)
+    before = cfg_file.read_bytes()
+    with pytest.raises(R.RadioError, match=fragment):
+        ctl.edit_station("HuttonOrbital", name, url)
+    assert cfg_file.read_bytes() == before
+
+
+def test_a_station_keeps_its_own_name_when_only_the_address_changes(cfg_file):
+    ctl, _ = _live(cfg_file)
+    st = ctl.edit_station("HuttonOrbital", "hutton orbital radio", "http://h.example/")
+    assert st.name == "hutton orbital radio"
+
+
+def test_editing_the_playing_station_retunes_it(cfg_file):
+    ctl, _ = _live(cfg_file)
+    ctl.select("RadioSkvortsov")
+    ctl.toggle_play()
+    ctl.edit_station("RadioSkvortsov", "Skvortsov", "http://s.example/new")
+    assert ctl.player.playing == R.Station("RadioSkvortsov", "Skvortsov",
+                                           "http://s.example/new")
+    assert ctl.selected == "RadioSkvortsov"
+
+
+def test_renaming_the_playing_station_renames_it_on_air(cfg_file):
+    ctl, _ = _live(cfg_file)
+    ctl.toggle_play()                                  # Radio Sidewinder
+    url = ctl.station().url
+    ctl.edit_station("RadioSidewinder", "Sidewinder", url)
+    assert ctl.player.calls.count(("play", "RadioSidewinder")) == 1, \
+        "a name change must not restart the stream"
+    assert ctl.view()["on_air"] == "Sidewinder"
+
+
+def test_editing_another_station_leaves_playback_alone(cfg_file):
+    ctl, _ = _live(cfg_file)
+    ctl.toggle_play()                                  # Radio Sidewinder
+    ctl.edit_station("HuttonOrbital", "Hutton", "http://h.example/")
+    assert ctl.player.playing.id == "RadioSidewinder"
+    assert ctl.player.calls == [("play", "RadioSidewinder")]
+
+
+def test_tui_edit_through_the_panel(cfg_file, monkeypatch):
+    import asyncio
+    from textual.app import App
+    from textual.widgets import Input
+    from tui.theme import build_css
+    from tui.blocks.status import StatusBlock
+    player = _FakePlayer()
+    monkeypatch.setattr(R, "_PLAYER", player)
+    _, core = _live(cfg_file, "EDP1", player)
+    seen = {}
+
+    class _One(App):
+        CSS = build_css("default")
+        def compose(self):
+            yield StatusBlock(core, id="b")
+
+    async def _run():
+        app = _One()
+        async with app.run_test(size=(100, 34)) as pilot:
+            _radio_tab(app)
+            await pilot.pause()
+            await pilot.click("#radio-edit-btn")
+            await pilot.pause()
+            seen["screen"] = type(app.screen).__name__
+            seen["prefill"] = app.screen.query_one("#station-name", Input).value
+            seen["saved_to"] = str(app.screen.query_one("#station-saved-to").render())
+            app.screen.query_one("#station-name", Input).value = ""
+            await pilot.click("#station-save")
+            await pilot.pause()
+            seen["refused"] = str(app.screen.query_one("#station-result").render())
+            app.screen.query_one("#station-name", Input).value = "Sidewinder FM"
+            # Textual ignores a second click on a Button while its press
+            # effect is still showing, as a real user's double-click would be.
+            await pilot.pause(app.screen.query_one("#station-save")
+                              .active_effect_duration + 0.1)
+            await pilot.click("#station-save")
+            await pilot.pause()
+            seen["after"] = type(app.screen).__name__
+            seen["value"] = app.query_one("#radio-select").value
+    asyncio.run(_run())
+    assert seen["screen"] == "EditStationScreen"
+    assert seen["prefill"] == "Radio Sidewinder"
+    assert "[Radio]" in seen["saved_to"]
+    assert "Enter a station name" in seen["refused"]
+    assert seen["after"] != "EditStationScreen" and seen["value"] == "RadioSidewinder"
+    assert tomllib.loads(cfg_file.read_text("utf-8"))["Radio"]["Name_RadioSidewinder"] \
+        == "Sidewinder FM"
+
+
+def test_gui_edit_through_the_panel(qt_app, cfg_file, monkeypatch):
+    from gui.blocks.status import StatusBlock
+    from gui.station_dialog import EditStationDialog
+    player = _FakePlayer()
+    monkeypatch.setattr(R, "_PLAYER", player)
+    _, core = _live(cfg_file, "EDP1", player)
+    panel = StatusBlock(core)._radio
+    assert panel._edit_btn.isEnabled()
+
+    dlg = EditStationDialog(panel._ctl, panel._ctl.selected)
+    assert dlg._name.text() == "Radio Sidewinder"
+    dlg.set_fields("Radio Skvortsov", dlg._url.text())
+    dlg.submit()
+    assert "already listed" in dlg.error()
+    dlg.set_fields("Sidewinder FM", "http://s.example/new")
+    dlg.submit()
+    assert dlg.error() == ""
+    panel._sync_options()
+    assert panel._combo.currentText() == "Sidewinder FM"
+    assert panel._combo.currentData() == "RadioSidewinder"

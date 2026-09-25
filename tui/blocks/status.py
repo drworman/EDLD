@@ -246,6 +246,7 @@ class RadioPanel(Vertical):
                 yield Select(self._as_text(options), id="radio-select",
                              prompt="Choose a station")
             yield Static("+", id="radio-add-btn", classes="footer-lbl radio-edit-btn")
+            yield Static("✎", id="radio-edit-btn", classes="footer-lbl radio-edit-btn")
             yield Static("−", id="radio-del-btn", classes="footer-lbl radio-edit-btn")
         with VerticalScroll(id="radio-body"):
             yield KVRow("Status",  id="radio-status")
@@ -295,6 +296,10 @@ class RadioPanel(Vertical):
             event.stop()
             self._open_add()
             return
+        if wid == "radio-edit-btn":
+            event.stop()
+            self._open_edit()
+            return
         if wid == "radio-del-btn":
             event.stop()
             self._open_delete()
@@ -311,7 +316,7 @@ class RadioPanel(Vertical):
         action()
         self._redraw()
 
-    # ── Adding and deleting ──────────────────────────────────────────────────
+    # ── Adding, editing and deleting ─────────────────────────────────────────
 
     def _open_add(self) -> None:
         from tui.station_screen import AddStationScreen
@@ -321,6 +326,23 @@ class RadioPanel(Vertical):
                 self._sync_options()
                 self._redraw()
         self.app.push_screen(AddStationScreen(self._ctl), _done)
+
+    def _open_edit(self) -> None:
+        from tui.station_screen import EditStationScreen
+        sid = self._ctl.selected
+        if not sid:
+            return
+        try:
+            screen = EditStationScreen(self._ctl, sid)
+        except RadioError as exc:
+            self._notify_error(str(exc))
+            return
+
+        def _done(station_id) -> None:
+            if station_id:
+                self._sync_options()
+                self._redraw()
+        self.app.push_screen(screen, _done)
 
     def _open_delete(self) -> None:
         from tui.confirm_modal import ConfirmModal
@@ -372,6 +394,8 @@ class RadioPanel(Vertical):
         try:
             self.query_one("#radio-del-btn", Static).set_class(
                 not v["can_delete"], "dim")
+            self.query_one("#radio-edit-btn", Static).set_class(
+                not v["can_edit"], "dim")
         except Exception:
             pass
         for wid, text in (("radio-play-btn", v["play_label"]),

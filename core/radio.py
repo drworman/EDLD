@@ -868,6 +868,14 @@ class RadioController:
 
     def validate_new(self, name: str, url: str) -> Optional[str]:
         """Why this station cannot be added, or None if it can."""
+        return self._validate(name, url)
+
+    def _validate(self, name: str, url: str,
+                  exclude_id: Optional[str] = None) -> Optional[str]:
+        """Why this name and address cannot be saved, or None if they can.
+
+        ``exclude_id`` is the station being edited, whose own name is not a
+        clash with itself."""
         name, url = (name or "").strip(), (url or "").strip()
         if not name:
             return "Enter a station name."
@@ -875,7 +883,8 @@ class RadioController:
             return f"Keep the name under {self.NAME_LIMIT} characters."
         if any(ord(c) < 32 for c in name):
             return "The name cannot contain control characters."
-        if any(st.name.casefold() == name.casefold() for st in self.stations):
+        if any(st.name.casefold() == name.casefold() and st.id != exclude_id
+               for st in self.stations):
             return f"A station called {name} is already listed."
         if not re.match(r"^https?://", url, re.IGNORECASE):
             return "The address must start with http:// or https://."
@@ -978,6 +987,64 @@ class RadioController:
         self._write(self._cfg(), edits)
         self.reload()
 
+    # ── Editing a station ────────────────────────────────────────────────────
+    #
+    # An edit keeps the station's Id and changes its Name_ and Url_ in place,
+    # so the remembered station, the selection and anything else keyed on the
+    # Id carry on pointing at it.  The keys are written to the layer the
+    # station already lives in: the loaded profile's Radio table when that
+    # defines it, otherwise [Radio].  Writing a profile's station globally
+    # would change nothing — the profile's keys win — and writing a global one
+    # into the profile would quietly fork it for that profile alone.
+
+    def _edit_target(self, station_id: str) -> tuple[tuple, str]:
+        """(table path, where-it-is-saved label) for an edit to this station."""
+        profile = self.profile_name()
+        keys = (f"Name_{station_id}", f"Url_{station_id}")
+        if profile and any(k in self._raw_radio(profile) for k in keys):
+            return (profile, "Radio"), f"profile [{profile}]"
+        return ("Radio",), "[Radio], every profile"
+
+    def _listed(self, station_id: str) -> Station:
+        st = next((s for s in self.stations if s.id == station_id), None)
+        if st is None:
+            raise RadioError("That station is no longer listed.")
+        return st
+
+    def edit_info(self, station_id: str) -> dict:
+        """What the edit form starts from: the station's current name and
+        address, and where the change will be saved."""
+        st = self._listed(station_id)
+        _, where = self._edit_target(station_id)
+        return {"id": st.id, "name": st.name, "url": st.url, "saved_to": where}
+
+    def edit_station(self, station_id: str, name: str, url: str) -> Station:
+        """Change a station's name and address.  Raises RadioError with a
+        readable reason and leaves config.toml untouched if it cannot.
+
+        A station that was playing keeps playing: a new address is tuned in
+        straight away rather than leaving the commander on a stopped radio
+        they did not stop."""
+        st = self._listed(station_id)
+        problem = self._validate(name, url, exclude_id=station_id)
+        if problem:
+            raise RadioError(problem)
+        name, url = name.strip(), url.strip()
+        if (name, url) == (st.name, st.url):
+            return st
+        cfg = self._cfg()
+        table, _ = self._edit_target(station_id)
+        playing = self.player.status().station
+        was_playing = (playing is not None and playing.id == station_id
+                       and self.player.is_active())
+        self._write(cfg, {table: {f"Name_{station_id}": name,
+                                  f"Url_{station_id}": url}})
+        self.reload()                  # stops it if the address changed
+        edited = self._listed(station_id)
+        if was_playing and not self.player.is_active():
+            self.player.play(edited)
+        return edited
+
     def _write(self, cfg, edits: dict) -> None:
         from core.config import ConfigEditError, edit_config_keys
         try:
@@ -1004,7 +1071,12 @@ class RadioController:
             tone = "health-warn"
         else:
             tone = ""
-        on_air = st.station.name if (st.station and active) else "—"
+        # The name from the list, not the one the stream was started with, so
+        # renaming the station that is playing renames it here too.
+        on_air = "—"
+        if st.station and active:
+            listed = next((s for s in self.stations if s.id == st.station.id), None)
+            on_air = (listed or st.station).name
         if not self.stations and st.state != UNAVAILABLE:
             status = "No stations — see [Radio] in config.toml"
             tone = "health-warn"
@@ -1020,6 +1092,7 @@ class RadioController:
             "mute_label":  "Unmute" if st.muted else "Mute",
             "can_play":    st.state != UNAVAILABLE and bool(self.stations),
             "can_delete":  self.station() is not None,
+            "can_edit":    self.station() is not None,
             "scope_labels": self.scope_labels(),
             "problems":    list(self.problems),
         }

@@ -212,9 +212,9 @@ Name_RadioSkvortsov  = "Radio Skvortsov"
 Url_RadioSkvortsov   = "https://cast1.torontocast.com:3225/stream"
 ```
 
-### Adding and deleting from the Radio tab
+### Adding, editing and deleting from the Radio tab
 
-The **+** and **−** beside the station list do this for you, in both interfaces.
+The **+**, **✎** and **−** beside the station list do this for you, in both interfaces.
 
 **+** opens a form for the station's name and stream address, and where to keep it:
 
@@ -223,13 +223,15 @@ The **+** and **−** beside the station list do this for you, in both interface
 
 The Id is made from the name — "Lave Radio" becomes `LaveRadio` — with a number added if that Id is already used anywhere in the file. A name already in the list, or an address that is not `http(s)://` with a host name, is refused with the reason.
 
+**✎** edits the selected station's name and stream address. The station keeps its Id, so it stays selected and stays the remembered station. The change is saved where the station already lives — the current profile if the profile defines it, otherwise `[Radio]` — and the form says which. Editing a default station writes its keys into `[Radio]`, where they override the default and are not put back at startup. If the station is playing, a new address is tuned in straight away and a new name shows under On air at once; a name-only change does not interrupt the stream. The same checks as adding apply, except that a station's own name is not a clash with itself.
+
 **−** deletes the selected station after asking. The confirmation says exactly what will change:
 
 - a station you added is removed from `[Radio]`, and from the current profile if it is defined there;
 - a **default** station has its `Url_` blanked instead of deleted, because deleted default lines are put back at startup (see below);
 - a station that is playing is stopped first.
 
-Both edit `config.toml` in place, changing only the station's own lines — your comments, spacing and every other setting are left exactly as they were. Before anything is written the result is parsed back and compared with what was intended; if the file is laid out in a way the editor cannot change safely, it says so and leaves the file untouched, and you can make the edit by hand as below.
+All three edit `config.toml` in place, changing only the station's own lines — your comments, spacing and every other setting are left exactly as they were. Before anything is written the result is parsed back and compared with what was intended; if the file is laid out in a way the editor cannot change safely, it says so and leaves the file untouched, and you can make the edit by hand as below.
 
 ### Adding your own station by hand
 
