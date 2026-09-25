@@ -120,7 +120,19 @@ def test_schedule_reports_name_ident_destination_and_countdown(plugin):
     assert "JUMP SCHEDULED" in text
     assert "Bhutatani" in text
     assert "15m 36s" in text          # 06:17:34 → 06:33:10
-    assert "departs 06:33" in text
+    # The departure prints in the machine's local time unless UseUTC is set,
+    # so the expected clock is the same instant converted the same way. This
+    # asserted "06:33" — the UTC clock — and so passed only on machines
+    # running UTC, which is every CI runner and no commander in Illinois.
+    from datetime import datetime, timezone
+    local = datetime(2026, 5, 21, 6, 33, 10, tzinfo=timezone.utc).astimezone()
+    assert f"departs {local:%H:%M})" in text
+
+
+def test_schedule_prints_utc_when_asked(plugin):
+    plugin.core.app_settings = {"UseUTC": True}
+    plugin._schedule_carrier_jump(request(), FakeState())
+    assert "departs 06:33 UTC" in texts(plugin)[0]
 
 
 def test_schedule_uses_the_configured_level(plugin):

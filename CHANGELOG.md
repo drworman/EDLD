@@ -6,6 +6,17 @@ Last updated: 20260925
 
 ## Unreleased
 
+### Fixed: a carrier jump test that passed only on machines set to UTC
+
+`test_schedule_reports_name_ident_destination_and_countdown` expected the
+departure clock in UTC, but the notification prints it in local time unless
+`UseUTC` is set, which is the intended behaviour. On any machine not set to UTC
+the suite reported a failure in code that was working correctly. It went
+unnoticed because every place the suite had been run, the GitHub runners
+included, runs on UTC. The test now converts the departure the same way the
+notification does, and a second test covers `UseUTC`, the case the old
+assertion had been checking without meaning to.
+
 ### Added: edit a radio station from the Radio tab
 
 A **✎** now sits between **+** and **−** beside the station list, in both
