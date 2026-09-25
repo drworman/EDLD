@@ -42,20 +42,33 @@ Amount, density, rig count, signal number and the depletion date are validated
 against the game's own vocabularies, so a typed row and a captured one are
 indistinguishable downstream.
 
-Amount and **Depleted on** divide the work rather than duplicating it: Amount
-says *whether* a site is worked out, the date says *when*. Choosing Depleted in
-the Amount list stamps today; supplying a date records a site worked out
-earlier, and implies Depleted whether or not the Amount field was touched. The
-date is what a reset-period calculation would be built on, so it is worth
-getting right rather than always being the moment somebody noticed.
+**Amount and density** are what the HUD says the site holds when it is full:
+Low, Medium or High. Once set they change only when you correct them. A later
+refine or drive-by fills them where they are blank and never overturns them,
+and a correction is stamped so that it — and not somebody's older copy —
+wins on the shared sheet.
+
+**Depleted on** is the whole record of a site being worked out. It is not an
+amount, and setting it changes nothing else about the deposit: the amount stays
+what the site holds when full. **Mark depleted** on the Survey tab stamps today;
+the form's date field records a site worked out earlier, or corrects the date
+already held. How long a site takes to refill is not yet known. When it is, the
+refresh date will be calculated from this one, so it is worth getting right
+rather than always being the moment somebody noticed.
+
+**Notes** is free text for anything the next commander should know — the way
+in, a hazard, what else is nearby — up to 1000 characters over several lines.
+It opens holding the current note, so clearing it removes the note. Notes are
+shared on the sheet, where the most recently written note wins, blank included.
 
 It is published to the shared sheet and read back from it, because it is the
 one fact about a deposit that any commander can contribute and every commander
 needs — a site somebody emptied last week is a wasted trip, and only the person
 who found it empty knows. The most recent date wins on a merge, unlike every
 other field where local observation does: sites reset and are worked out again,
-so the freshest sighting of an empty one describes the current state. An empty field means *leave it alone*, not *set it
-to nothing* — editing the amount will not blank a density recorded last week.
+so the freshest sighting of an empty one describes the current state. An empty
+field means *leave it alone*, not *set it to nothing* — editing the amount will
+not blank a density recorded last week. Notes are the exception, as above.
 
 The commodity cannot be changed on an existing deposit: it is part of the
 deposit's identity, and altering it would leave the id pointing at something
@@ -95,9 +108,10 @@ Some rules worth knowing:
 - **Imported rows are never sent back up.** Otherwise every commander
   re-publishes every other commander's finds and the sheet spends its write
   quota echoing itself.
-- **Local observation wins.** An imported row only fills fields yours does not
-  have. A deposit you found worked out stays Depleted however rich somebody
-  else remembers it.
+- **Local observation wins, until someone corrects it.** An imported row only
+  fills fields yours does not have — except an amount or density somebody
+  corrected more recently than yours, and a newer note.
+- **Depletion dates merge by date.** The latest wins, whoever sent it.
 - **Deposits publish when you leave a body**, or on **Ctrl+G**. Sheets allows
   roughly sixty writes a minute and one real session produced 608 refine events.
 - **Nothing is marked published until the sheet confirms it.** A transport

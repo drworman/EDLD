@@ -6,6 +6,77 @@ Last updated: 20260925
 
 ## Unreleased
 
+### Added: notes on a surface deposit
+
+The deposit window (**Ctrl+D**) has a **Notes** box at the bottom, several
+lines tall in both interfaces, for anything the next commander should know
+about a site — the way in, a hazard, what else is on the ridge. It opens
+holding the current note, so clearing it removes the note: the one field in the
+form where an empty box means nothing rather than leave-it-alone. Notes are
+limited to 1000 characters and stored as plain text.
+
+Notes are shared on the survey sheet and read back from it. They do not merge
+like the fields around them, which are observations and follow the freshest
+sighting. A note is somebody's writing, so it carries its own timestamp,
+`notes_updated`, and the most recently written note wins — a blank one
+included, which is how a note is withdrawn. Following `last_confirmed` instead
+would have let anyone who drove onto a site re-send a copy they imported weeks
+ago and put back text its author had since changed.
+
+The sheet gains `notes` and `notes_updated` columns, and the dashboard template
+a wrapped **Notes** column at the end of its table. Anything Sheets would run
+as a formula — text starting with `=`, `+`, `-` or `@` — is now stored as
+text, in every column, so a note cannot execute in a reader's copy of the sheet.
+
+An existing sheet needs the current `sheets/Code.gs` deployed as a new version;
+the header widens itself on the next write. An old script accepts writes and
+drops the fields it has no column for, so **Test connection** now compares the
+script's column count with EDLD's and says so instead of reporting success.
+A sheet from the dashboard template also wants the current `Dashboard.gs` and a
+run of **ED Dashboard → Repair dashboard formulas**, which now upgrades an
+older template's table in place.
+
+The survey store moves to schema version 2, adding the columns; existing
+deposits are kept and nothing is re-queued for publishing.
+
+### Changed: depletion is a date, never an amount
+
+Amount and density describe what a site holds when it is full. "Depleted" was
+an amount, which meant working a site out overwrote the High it had held, and
+somebody had to remember to put it back once the site refilled. It is gone from
+the Amount list. The depletion date is now the whole of how a worked-out site
+is recorded, shown and shared: **Mark depleted** stamps today, the form's date
+records an earlier day, and neither touches the amount.
+
+A store that has `Depleted` as an amount keeps the fact as a dated log line —
+its last confirmation, if nothing already dated it — and the amount becomes
+blank. The sheet stops serving `Depleted`, clears it from a row the next time
+the row is written, and **Repair dashboard formulas** clears it from a template
+sheet at once. The overlay no longer has a colour for it.
+
+How long a site takes to refill is not yet known. `REPLENISH_DAYS` in
+`core/mining_db.py` is `None` and `replenishes_on()` answers nothing until it
+is; setting it will turn every depletion date already recorded into a refresh
+date.
+
+On the sheet the latest depletion date now wins, whoever sent it. It was
+following `last_confirmed`, so a commander confirming a site could replace a
+newer date with an older one. The date is also written as text: Sheets parsed a
+bare day into a date in the spreadsheet's timezone and handed back a timestamp
+that could land on a different day.
+
+### Changed: amount and density change only when corrected
+
+A later sighting could overwrite an assessment. The sheet replaced amount and
+density whenever a report carried a newer `last_confirmed`, and every drive-by
+of a site republishes it — so a commander who had imported "High" weeks ago
+could put it back over somebody's correction just by parking on the rock.
+
+Amount and both densities now fill blanks and otherwise change only when a
+commander corrects them in the form. A correction stamps `assessment_updated`,
+and on the sheet and on import only a newer stamp replaces a value that is
+already there. The sheet gains an `assessment_updated` column.
+
 ### Fixed: a carrier jump test that passed only on machines set to UTC
 
 `test_schedule_reports_name_ident_destination_and_countdown` expected the

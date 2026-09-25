@@ -130,9 +130,43 @@ rock on the same evening both append it, each of them right about what they had
 seen. The script holds a document lock while it writes, so the second one
 updates the first one's row instead.
 
-An existing row is only overwritten by a report with a newer `last_confirmed`,
-so somebody replaying an old session cannot walk back a fresher reading. Blank
-cells are always filled in.
+What a later report may change depends on what the field is:
+
+- **Observations** — rigs, refine count, the body's facts, `last_confirmed` —
+  are replaced only by a report with a newer `last_confirmed`, so somebody
+  replaying an old session cannot walk back a fresher reading.
+- **Assessments** — amount and both densities — are what the HUD says the site
+  holds when full. A later report only fills them where they are blank. They
+  change when a commander corrects one, which stamps `assessment_updated`, and
+  a newer stamp is the only thing that replaces them. Otherwise anyone who
+  merely drove onto a site would re-send whatever they imported weeks ago and
+  undo the correction.
+- **Depletion** is a date and nothing else — never an amount. The latest date
+  wins, since sites refill and are worked out again. It is written as text, so
+  Sheets does not parse it into a date in its own timezone and hand back a
+  different day. A sheet from before this that has `Depleted` in the amount
+  column has it cleared the next time the row is written, and never serves it.
+- **Notes** are a commander's writing, stamped `notes_updated`. The newest note
+  wins outright, a blank one included, since emptying the box is how a note is
+  withdrawn; an older copy coming back round is ignored.
+
+Blank cells are always filled in. Any text Sheets would run as a formula —
+starting with `=`, `+`, `-` or `@` — is stored as text, so a note cannot
+execute in anyone's copy of the sheet.
+
+### Updating an existing sheet
+
+A sheet set up before notes needs the current `Code.gs`: paste it over the old
+one and publish a new version (Deploy → Manage deployments → pencil → New
+version). The URL and token stay the same. Its header row gains the new columns
+on the next write. Until then it accepts writes and drops the fields it has no
+column for — the **Test connection** button in Options says so rather than
+reporting success.
+
+A sheet started from the dashboard template also wants the current
+`Dashboard.gs`; paste it in and run **ED Dashboard → Repair dashboard
+formulas**, which adds the Notes column, re-lays the table and clears any old
+`Depleted` amounts. Nothing needs re-importing.
 
 ## Things worth knowing
 
@@ -172,8 +206,7 @@ Deposits flagged `is_test` are left out, as they are from EDLD's own reads.
 **Sorting.** Sort By and Order (E5:F5) sort the table; the header of the sorted
 column carries ▲ or ▼. With `Dashboard.gs` installed, clicking a header does the
 same: once to sort by it, again to reverse. Amount and Density sort by rank —
-Depleted, Low, Medium, High, the levels EDLD records — rather than
-alphabetically. The sort is shared, since it
+Low, Medium, High, the levels EDLD records — rather than alphabetically. The sort is shared, since it
 lives in two cells: whoever clicks last decides it for everyone viewing.
 
 Sorting is done inside the table's formula, not with Data → Sort range. The
@@ -182,8 +215,9 @@ in place; a manual sort over it either fails or is undone on the next
 recalculation.
 
 **Readability.** Rows alternate between the theme's Panel and Panel Alt colours.
-High amounts and densities are highlighted, Low ones dimmed, and depleted
-deposits are struck through.
+High amounts and densities are highlighted, Low ones dimmed, and a deposit with
+a depletion date is struck through. Notes sit in the last column, wrapped, and
+the rest of the row aligns with their first line.
 
 **Theme.** Settings B5 picks one of five presets — Classic HUD, Federation,
 Empire, Alliance, Thargoid — or Custom, which uses the hex codes in B10:B21.
@@ -240,7 +274,8 @@ existing row.
 `planet_class` · `gravity` · `body_radius_m` · `atmosphere` · `volcanism` ·
 `signal_no` · `commodity` · `latitude` · `longitude` · `density_claimed` ·
 `density_observed` · `amount` · `rigs` · `refine_count` · `first_seen` ·
-`last_confirmed` · `reported_by` · `is_test` · `depleted_on`
+`last_confirmed` · `reported_by` · `is_test` · `depleted_on` · `notes` ·
+`notes_updated` · `assessment_updated`
 
 `density_claimed` is what the body's own signals advertised. `density_observed`
 is what was actually found. They are separate columns because a site can be
