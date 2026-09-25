@@ -6,6 +6,34 @@ Last updated: 20260924
 
 ## Unreleased
 
+### Added (experimental): server mode, for the EDAM mobile client
+
+`-s` / `--server` lets paired phones and tablets show this EDLD's commander,
+squadron, ship, status, cargo, session and career figures and alerts. On its
+own `-s` runs the terminal event log beside the server; with `--tui`, `--gui`,
+`--terminal` or `--mode` it runs that interface and the server in one process.
+`[Server] Enabled = true` does the same without the flag. A new `--headless`
+mode runs with no interface and no terminal output, for a `systemd --user`
+unit or a Windows logon task.
+
+`edld --pair` prints a QR code and a five-minute, single-use code; `--paired`
+lists devices and `--unpair` removes one, which a running EDLD notices within
+seconds. Everything is TLS 1.3: the device pins EDLD's key from the pairing
+code, and EDLD admits only the certificates of devices that paired, rejecting
+anything else during the handshake. A device can end the game session only when
+`AllowEndSession` is set, and only in Solo. Nothing is sent to anything but a
+paired device, EDLD never scans the network, and its own LAN address is found
+without sending a packet.
+
+The panels are built from the same sources as the dashboards and the overlay
+— `core.summary_model` and the components' own panels — so a device shows the
+same figures and nothing is formatted twice. A panel is sent again only when it
+changes, and nothing is built at all while no device is connected.
+
+New optional requirements: `cryptography` and `segno`. The protocol, the
+security model and a networking guide (DuckDNS, port forwarding, CGNAT) are in
+`docs/SERVER.md`; `scripts/edld_client.py` is a working reference client.
+
 ### Fixed: release verification could not find the public key
 
 `scripts/verify_release.sh` and `docs/SIGNING.md` both said the release public

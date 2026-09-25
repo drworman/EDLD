@@ -45,9 +45,9 @@ parser.add_argument("-t", "--test", action="store_true", default=None,
                     help="Re-route Discord output to terminal instead of webhook")
 parser.add_argument("-d", "--trace", action="store_true", default=None,
                     help="Print verbose debug/trace output")
-parser.add_argument("--mode", choices=["terminal", "textual", "gui"],
+parser.add_argument("--mode", choices=["terminal", "textual", "gui", "headless"],
                     default=None, metavar="MODE",
-                    help="UI mode: textual (default) | terminal | gui")
+                    help="UI mode: textual (default) | terminal | gui | headless")
 
 # Convenience flags.  --tui and --gui are the two dashboards; --terminal is
 # the scrolling event log.  They are mutually exclusive with each other and
@@ -63,6 +63,22 @@ _mode_group.add_argument("--gui", dest="mode_flag", action="store_const",
 _mode_group.add_argument("--terminal", dest="mode_flag", action="store_const",
                          const="terminal",
                          help="Scrolling terminal event log")
+_mode_group.add_argument("--headless", dest="mode_flag", action="store_const",
+                         const="headless",
+                         help="No interface and no terminal output, for running "
+                              "as a service; diagnostics go to the log file")
+
+# Server mode, for the EDAM mobile client.  Combines with any interface: on its
+# own, -s runs the terminal event log beside the server; with --tui, --gui,
+# --terminal, --headless or --mode, it runs that interface and the server.
+parser.add_argument("-s", "--server", action="store_true",
+                    help="Serve paired EDAM devices (see docs/SERVER.md)")
+parser.add_argument("--pair", action="store_true",
+                    help="Show a one-time code for pairing a device, then exit")
+parser.add_argument("--paired", action="store_true",
+                    help="List paired devices, then exit")
+parser.add_argument("--unpair", metavar="ID",
+                    help="Remove a paired device by the ID --paired shows, then exit")
 
 parser.add_argument("--version", action="store_true",
                     help="Print the version and exit")
@@ -165,6 +181,9 @@ if args.mode_flag and args.mode and args.mode != args.mode_flag:
     )
 if args.mode_flag and not args.mode:
     args.mode = args.mode_flag
+# -s alone means the terminal event log; an interface asked for by name wins.
+if args.server and not args.mode:
+    args.mode = "terminal"
 
 
 
@@ -229,6 +248,7 @@ if config_path is None:
         CFG_DEFAULTS_DISCORD, CFG_DEFAULTS_EDDN, CFG_DEFAULTS_EDSM,
         CFG_DEFAULTS_EDASTRO, CFG_DEFAULTS_INARA, CFG_DEFAULTS_NOTIFY,
         CFG_DEFAULTS_CAPI, CFG_DEFAULTS_COLONISATION, CFG_DEFAULTS_RADIO,
+        CFG_DEFAULTS_SERVER,
     )
     # SessionMgmt's defaults are owned by the component that reads them.
     from components.ksw import CFG_DEFAULTS as CFG_DEFAULTS_SESSIONMGMT
@@ -250,6 +270,7 @@ if config_path is None:
         "Colonisation": CFG_DEFAULTS_COLONISATION,
         "SessionMgmt": CFG_DEFAULTS_SESSIONMGMT,
         "Radio":       CFG_DEFAULTS_RADIO,
+        "Server":      CFG_DEFAULTS_SERVER,
     }
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -408,6 +429,33 @@ print(
 )
 
 
+# ── Server settings and pairing commands ─────────────────────────────────────
+# Resolved after the profile, because each profile is its own server: its own
+# port, identity and paired devices.  --pair, --paired and --unpair act on the
+# files in that directory and exit; a running EDLD picks up their changes.
+
+from core.config import CFG_DEFAULTS_SERVER
+from core.state  import EDLD_DATA_DIR as _DATA_DIR
+
+server_cfg = mgr.load_setting("Server", CFG_DEFAULTS_SERVER, warn_missing=False)
+server_dir = _DATA_DIR / "server" / (_config_profile or "default")
+server_on  = bool(args.server or server_cfg.get("Enabled"))
+
+if args.pair or args.paired or args.unpair:
+    from core.server import cli as _server_cli
+    from core.server.identity import ServerDependencyError, default_server_name
+    try:
+        if args.paired:
+            sys.exit(_server_cli.paired(server_dir))
+        if args.unpair:
+            sys.exit(_server_cli.unpair(server_dir, args.unpair))
+        sys.exit(_server_cli.pair(server_dir, server_cfg,
+                                  default_server_name(_config_profile)))
+    except ServerDependencyError as _e:
+        print(f"{Terminal.WARN}ERROR:{Terminal.END} {_e}")
+        sys.exit(1)
+
+
 # ── UI mode ───────────────────────────────────────────────────────────────────
 # Priority: --mode CLI flag > config [UI] Mode value > default (textual).
 # The legacy GTK4 UI has been removed; any "gtk4" left in an old config is
@@ -419,7 +467,7 @@ if _cfg_mode == "gtk4":
 
 if args.mode:
     ui_mode = args.mode
-elif _cfg_mode in ("terminal", "textual", "gui"):
+elif _cfg_mode in ("terminal", "textual", "gui", "headless"):
     ui_mode = _cfg_mode
 else:
     ui_mode = "textual"
@@ -482,7 +530,7 @@ except Exception:
     pass
 
 
-if ui_mode in ("textual", "gui"):
+if ui_mode in ("textual", "gui", "headless"):
     log_p = _debug.path()
     print(
         f"{Terminal.GOOD}Launching {ui_mode}{Terminal.END}"
@@ -634,6 +682,64 @@ emit_summary(
 )
 
 
+# ── Server ────────────────────────────────────────────────────────────────────
+# Started after the bootstrap so the first snapshot a device receives already
+# reflects the journal history.  A server that cannot start is reported
+# everywhere a commander might be looking — terminal, log, Alerts — and EDLD
+# carries on without it rather than refusing to run.
+
+server = None
+if server_on:
+    def _server_problem(message: str) -> None:
+        _debug.log(message, level="ERROR")
+        try:
+            sys.__stderr__.write(f"\nERROR: {message}\n")
+            sys.__stderr__.flush()
+        except Exception:
+            pass
+        _al = core._plugins.get("alerts")
+        if _al is not None:
+            try:
+                _al.push_fault("📡", message)
+            except Exception:
+                pass
+
+    try:
+        from core.server.identity import ServerDependencyError, default_server_name
+        from core.server.service  import ServerService
+        server = ServerService(
+            core,
+            directory=server_dir,
+            settings=server_cfg,
+            name=default_server_name(_config_profile),
+            journal_dir=journal_dir,
+            log=lambda m: _debug.log(m, level="INFO"),
+            alert=lambda m: core.plugin_call("alerts", "_push", "📡", m),
+        )
+        server.start()
+        _debug.info(server.describe())
+        if ui_mode == "terminal":
+            print(f"{Terminal.GOOD}{server.describe()}{Terminal.END}")
+    except ServerDependencyError as _e:
+        server = None
+        _server_problem(f"Server not started: {_e}")
+    except OSError as _e:
+        import errno as _errno
+        server = None
+        if _e.errno in (_errno.EADDRINUSE, getattr(_errno, "WSAEADDRINUSE", -1)):
+            _why = (f"port {server_cfg.get('Port')} is already in use — another "
+                    f"EDLD profile or another program; set Server.Port")
+        else:
+            _why = (f"could not listen on port {server_cfg.get('Port')}"
+                    + (f" at {server_cfg.get('BindAddress')}"
+                       if server_cfg.get("BindAddress") else "")
+                    + f": {_e}")
+        _server_problem(f"Server not started: {_why}.")
+    except Exception as _e:
+        server = None
+        _server_problem(f"Server not started: {type(_e).__name__}: {_e}")
+
+
 # ── Monitor + launch ──────────────────────────────────────────────────────────
 
 from core.journal      import (run_monitor as _run_monitor, _poll_status_json,
@@ -772,7 +878,7 @@ if __name__ == "__main__":
             _log_fatal("Textual dashboard")
             sys.exit(1)
 
-    else:  # terminal
+    else:  # terminal, and headless, which is terminal with nowhere to print
         # No dashboard drains the redraw queue in this mode, so something must,
         # or it grows for as long as EDLD runs.  See _discard_gui_queue().
         threading.Thread(target=_discard_gui_queue, args=(gui_queue,),

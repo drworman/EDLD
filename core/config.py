@@ -37,7 +37,7 @@ import re
 STANDARD_SECTIONS: frozenset[str] = frozenset({
     "Settings", "Discord", "LogLevels", "UI",
     "EDDN", "EDSM", "EDAstro", "Inara", "CAPI", "SurfaceSurvey", "Overlay", "OverlayPanels",
-    "Radio",
+    "Radio", "Server",
 })
 
 # Matches any TOML section header that indicates old-format content:
@@ -174,6 +174,7 @@ def backfill_config_defaults(config_path: Path) -> list[str]:
         "LogLevels": CFG_DEFAULTS_NOTIFY,
         "CAPI":      CFG_DEFAULTS_CAPI,
         "Radio":     CFG_DEFAULTS_RADIO,
+        "Server":    CFG_DEFAULTS_SERVER,
     }
     # SessionMgmt's defaults are owned by the component that reads them;
     # imported late to keep core/ from depending on components/ at import time.
@@ -373,6 +374,21 @@ CFG_DEFAULTS_RADIO = {
     "Url_HuttonOrbital":    "https://quincy.torontocast.com/hutton",
     "Name_RadioSkvortsov":  "Radio Skvortsov",
     "Url_RadioSkvortsov":   "https://cast1.torontocast.com:3225/stream",
+}
+
+# Server mode, for the EDAM mobile client.  See docs/SERVER.md.
+#   Enabled          run the server without passing -s
+#   Port             TCP port to listen on; forward this one on the router
+#   BindAddress      blank listens on every interface, IPv6 and IPv4
+#   ExternalHost     the name devices use away from home, e.g. a DuckDNS name;
+#                    only put into pairing codes, never looked up or contacted
+#   AllowEndSession  let a paired device end the game session (Solo only)
+CFG_DEFAULTS_SERVER = {
+    "Enabled":         False,
+    "Port":            28510,
+    "BindAddress":     "",
+    "ExternalHost":    "",
+    "AllowEndSession": False,
 }
 
 CFG_DEFAULTS_COLONISATION = {

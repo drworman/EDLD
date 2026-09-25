@@ -373,6 +373,30 @@ Name_RadioSkvortsov  = "Radio Skvortsov"
 Url_RadioSkvortsov   = "https://cast1.torontocast.com:3225/stream"
 
 # ==============================================================================
+# [Server] — the EDAM mobile client
+# ==============================================================================
+# Lets paired phones and tablets show this EDLD's commander, ship, session and
+# career figures.  Off unless Enabled is true or EDLD is started with -s.
+# Pair a device with:  edld --pair   (list with --paired, remove with --unpair)
+# Nothing is sent to any device you have not paired.  See docs/SERVER.md.
+#
+# Port            the TCP port devices connect to.  To use the app away from
+#                 home, forward this port on your router to this computer.
+#                 Two profiles running at once need two different ports.
+# BindAddress     blank listens on every interface, IPv6 and IPv4.
+# ExternalHost    how devices reach you from outside, e.g. yourname.duckdns.org
+#                 or yourname.duckdns.org:28510.  Only written into pairing
+#                 codes; EDLD never looks it up or connects to it.
+# AllowEndSession let a paired device end the game session.  Solo mode only,
+#                 the same rule as session management's own triggers.
+[Server]
+Enabled         = false
+Port            = 28510
+BindAddress     = ""
+ExternalHost    = ""
+AllowEndSession = false
+
+# ==============================================================================
 # Custom profiles (advanced)
 # ==============================================================================
 # Profiles override any setting above for a specific commander or use case.

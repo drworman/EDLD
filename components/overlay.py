@@ -121,6 +121,8 @@ class OverlayPlugin(BasePlugin):
         mode = str(getattr(self._core, "ui_mode", "") or "").lower()
         if mode == "terminal":
             return "terminal mode has no window for an overlay to sit beside"
+        if mode == "headless":
+            return "headless mode runs as a service, with no window at all"
 
         try:
             settings = self._core.load_setting("Settings", {"PrimaryInstance": True},

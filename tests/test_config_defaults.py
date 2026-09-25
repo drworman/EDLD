@@ -42,6 +42,7 @@ DOCUMENTED = {
     "CAPI":      C.CFG_DEFAULTS_CAPI,
     "Colonisation": C.CFG_DEFAULTS_COLONISATION,
     "Radio":     C.CFG_DEFAULTS_RADIO,
+    "Server":    C.CFG_DEFAULTS_SERVER,
 }
 
 
@@ -108,7 +109,7 @@ def test_generated_default_covers_every_section():
     block = source[start:end + 1]
     for section in ("Settings", "Discord", "UI", "LogLevels", "EDDN", "EDSM",
                     "EDAstro", "Inara", "CAPI", "Colonisation", "SessionMgmt",
-                    "Radio"):
+                    "Radio", "Server"):
         assert f'"{section}"' in block, (
             f"generated default config omits [{section}]")
 
