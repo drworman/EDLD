@@ -15,8 +15,9 @@ Everything here is off until you turn it on.
 | `Dashboard.gs` | Source: the dashboard's theme, click-to-sort and formula repair. |
 | `Upgrade.gs` | Source: the sheet's upgrade steps, run by Upgrade after new code is installed. |
 | `edld_sheet.js` | Generated: the three sources bundled, which is what the loader installs. Never edit. |
-| `release.json` | Generated: the version, the bundle's address and SHA-256, and what it needs. |
-| `build_dashboard.py` | Regenerates the template, the bundle and the manifest. |
+| `release.json` | Generated: the version, the bundle's file name and SHA-256, and what it needs. |
+| `build_bundle.py` | Regenerates the bundle and the manifest; `--check` says whether they are stale. Standard library only. |
+| `build_dashboard.py` | Regenerates the template, and the bundle and manifest with it. |
 
 ## What you are setting up
 
@@ -159,10 +160,11 @@ execute in anyone's copy of the sheet.
 ## Upgrading a sheet
 
 After upgrading EDLD, open the sheet and run **ED Dashboard → Upgrade…**. It
-reads the latest release, tells you what it will change, and on your say-so:
+reads the release on the branch the sheet follows — `main` unless you have
+picked another — tells you what it will change, and on your say-so:
 
-1. fetches the sheet code for that release and checks its SHA-256 against the
-   release manifest — a mismatch installs nothing;
+1. fetches the sheet code from beside that release's manifest and checks its
+   SHA-256 against the manifest — a mismatch installs nothing;
 2. copies `Deposits` to a hidden tab named `Deposits backup <date>`;
 3. installs the code and runs the sheet's upgrade steps — new columns, the
    dashboard's formulas and layout, tidying data an older version wrote —
@@ -172,8 +174,36 @@ reads the latest release, tells you what it will change, and on your say-so:
 
 Deposits are only ever added to, your Settings values are left as they are,
 and the URL and token do not change. EDLD's own writes wait while it runs.
-Running it again on an up-to-date sheet says so and changes nothing. **ED
-Dashboard → About** shows what is installed.
+Running it again on an up-to-date sheet says so and changes nothing. "Up to
+date" is decided by the code's hash, not its version, so a branch whose version
+file has not moved still installs each new build. **ED Dashboard → About**
+shows what is installed, its hash, and where updates come from.
+
+### Trying sheet code before it is released
+
+Nothing about a sheet's updates involves tags or GitHub Releases: a sheet reads
+`sheets/release.json` from a branch and the bundle from beside it. To try what
+is on `dev` before it is merged or tagged:
+
+1. Push `dev`, with `sheets/edld_sheet.js` and `sheets/release.json` rebuilt
+   (`python3 sheets/build_bundle.py`; the release workflow and
+   `scripts/build_local.sh` both refuse a stale pair).
+2. In a **copy** of your sheet, run **ED Dashboard → Update from branch…** and
+   enter `dev`.
+3. Run **ED Dashboard → Upgrade…**.
+
+Each later push to `dev` is another Upgrade away. Enter a blank branch to go
+back to `main`; Upgrade then offers `main`'s code, and says so when the sheet's
+layout is newer than that code expects — nothing in the sheet is undone, and the
+older code leaves the newer columns alone. Any branch name works, including ones
+with a slash, such as `exp/server-mode`.
+
+GitHub serves raw files from a cache for a few minutes after a push, so the
+manifest and the bundle can briefly disagree. Upgrade then refuses the download
+and says to wait five minutes; nothing is changed.
+
+A branch with no `sheets/release.json` — `main`, until the loader is merged —
+is reported as having no sheet release rather than as an error.
 
 **Test connection** in EDLD's Options names the release the sheet runs, and
 fails with "run ED Dashboard > Upgrade" when the sheet is too old to store
@@ -213,14 +243,16 @@ properties and the loader re-checks against its SHA-256 every time it loads it.
 
 The check guards against a damaged download or stored copy. It does not make
 the code more trustworthy than this repository, which is the same trust as
-pasting it by hand: code comes only from the address in the release manifest,
-only from `raw.githubusercontent.com`, and never without you confirming the
-version. A release that needs a newer loader says so and stops; that is the one
-case where a sheet needs another paste.
+pasting it by hand: code comes only from `raw.githubusercontent.com`, only from
+beside the manifest that names it — a manifest can name a file, not an address
+— and never without you confirming the version. A release that needs a newer
+loader says so and stops; that is the one case where a sheet needs another
+paste.
 
-To test a release before it is on `main` — or to follow a fork — set the
-script property `EDLD_RELEASE_URL` (Project Settings → Script properties) to
-that `release.json`'s raw address.
+A fork changes one line of `Loader.gs`, `EDLD_REPO_RAW`. To point one sheet at
+a manifest somewhere else on `raw.githubusercontent.com` without editing the
+loader, set the script property `EDLD_RELEASE_URL` (Project Settings → Script
+properties) to its full address; it takes precedence over the branch.
 
 ## Things worth knowing
 
@@ -300,7 +332,7 @@ python3 sheets/build_dashboard.py --version 20261001
 ```
 
 `--version` defaults to the `version` file, so rebuild after bumping it for a
-release and the template's Settings!D1 matches the tag. It needs `openpyxl`,
+release and the template's Settings!D1 matches it. It needs `openpyxl`,
 which is in `requirements-dev.txt`. The dashboard's Sheets-only formulas are defined once, in
 `FORMULAS` in `Dashboard.gs`; the build reads them from there and checks that
 each one survives the export wrapper intact. Change a formula in `Dashboard.gs`
@@ -316,14 +348,18 @@ test is there for the day something is inserted instead.
 
 ### The bundle and releases
 
-The same build writes `edld_sheet.js` — `Code.gs`, `Dashboard.gs` and
-`Upgrade.gs` joined into the body the loader runs — and `release.json`, which
-names the bundle at this version's tag with its SHA-256, the sheet layout
-version it brings a sheet to, and the oldest loader it runs under. Both are
-committed; the loader reads `release.json` from `main` and fetches the bundle
-from the tag it names, so **rebuild after bumping `version` and before tagging**.
-`tests/test_sheets_dashboard.py` fails if either is stale, and
-`tests/test_sheets_loader.py` checks the manifest matches the `version` file.
+`build_bundle.py` — run on its own, or by `build_dashboard.py` — writes
+`edld_sheet.js`, which is `Code.gs`, `Dashboard.gs` and `Upgrade.gs` joined into
+the body the loader runs, and `release.json`, which names the bundle by file
+name with its SHA-256, the sheet layout version it brings a sheet to, and the
+oldest loader it runs under. Both are committed, because sheets install them
+straight from the branch.
+
+**For sheets, merging to `main` is the release.** Sheets follow `main` by
+default and read whatever `release.json` is there; tags and GitHub Releases
+play no part. So **rebuild after bumping `version`**, before committing. Four
+things refuse a stale pair: `build_bundle.py --check`, the release workflow's
+verify job, `scripts/build_local.sh`, and the tests.
 
 A change that needs the sheet itself changed — a column, a tab, a layout —
 is a new entry at the end of `SHEET_MIGRATIONS` in `Upgrade.gs`, with the next

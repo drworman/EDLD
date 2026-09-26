@@ -4,6 +4,56 @@ Last updated: 20260926
 
 ---
 
+## Unreleased
+
+### Fixed: a sheet could only upgrade from a tagged release
+
+Upgrade fetched the sheet code from the git tag the manifest named, so it
+worked only once a release had been tagged — and trying it first meant
+publishing one. On `dev` the manifest named `20260924-dev`, a tag that did not
+exist, and Upgrade stopped with HTTP 404. The manifest itself was also stale:
+the version file had moved to `20260926-dev` without a rebuild.
+
+A sheet now follows a branch. It reads `sheets/release.json` from that branch
+and the bundle from beside it; the manifest names the bundle by file name
+only, and the loader accepts nothing else, so it cannot be pointed at another
+address. Sheets follow `main`, which makes merging to `main` the sheet release.
+**ED Dashboard → Update from branch…** switches a sheet to `dev` — or any
+branch — to try sheet code before it is merged or tagged. No tag or GitHub
+Release is involved at any point.
+
+"Up to date" is now decided by the bundle's hash rather than its version, since
+a development branch keeps one version across many commits. The confirmation
+shows short hashes when versions tie, says which branch the code comes from,
+and warns when stepping back to code that expects an older layout. A branch
+with no sheet release says so and suggests another branch instead of reporting
+a 404. A hash mismatch — usually GitHub's raw-file cache still serving the
+previous copy for a few minutes after a push — says to wait and retry.
+**About** shows the branch, the installed hash and where it came from.
+
+`Loader.gs` changed; it has not been on `main`, so no sheet outside testing is
+affected, but a sheet that installed the earlier one needs it pasted again.
+
+### Fixed: a manual release run on a branch failed every smoke test
+
+Running the release workflow by hand on `dev` built all three binaries and then
+failed each one's smoke test: the workflow's `VERSION` is the ref name, which on
+a branch is the branch — `dev` — while the binary correctly reported the
+version file. The binaries and checksums jobs now take the version from the
+verify job, which reads the version file, so a dry run on any branch builds,
+tests and names its artefacts correctly and publishes nothing.
+`tests/test_release_workflow.py` pins it.
+
+### Added: a stale sheet bundle stops a release
+
+`sheets/build_bundle.py` builds the sheet bundle and its manifest with the
+standard library alone; `build_dashboard.py` now calls it. Its `--check` runs
+in the release workflow's verify job and in `scripts/build_local.sh`, so a
+version bump without a rebuild fails in seconds, naming the command to run,
+instead of shipping a manifest for another version.
+
+---
+
 ## Released in 20260926-dev
 
 ### Added: a survey sheet upgrades itself, from its own menu

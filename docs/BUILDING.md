@@ -146,16 +146,24 @@ Tag with a bare `YYYYMMDD` datestamp matching the `version` file:
 
 ```sh
 echo 20260811 > version
+python3 sheets/build_bundle.py        # the sheet bundle carries the version
 git commit -am "Release 20260811"
 git tag 20260811
 git push origin main --tags
 ```
 
 The `Release` workflow checks the tag matches the version file, verifies the
-checkout contains everything the build needs, then builds and smoke-tests
+checkout contains everything the build needs and that the sheet bundle was
+rebuilt for this version, then builds and smoke-tests
 binaries for Linux, Windows and macOS, signs the artefacts, and publishes a
 release with notes taken from `CHANGELOG.md` and checksums attached.
 
 A version with a suffix — `20260811-rc1` — is published as a prerelease. To
 build everything without publishing, run the workflow manually from the Actions
-tab with `dry_run` left on.
+tab with `dry_run` left on. That works from any branch, `dev` included: the
+artefacts are named from the version file and attached to the run.
+
+Survey sheets are not released this way at all. They follow a branch — `main`
+by default — so merging to `main` releases sheet code, and a test sheet can
+follow `dev` to try it first. See [Trying sheet code before it is
+released](../sheets/README.md#trying-sheet-code-before-it-is-released).
