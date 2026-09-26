@@ -1,10 +1,10 @@
 # EDLD CHANGELOG
 
-Last updated: 20260925
+Last updated: 20260926
 
 ---
 
-## Unreleased
+## Released in 20260926-dev
 
 ### Added: a survey sheet upgrades itself, from its own menu
 
