@@ -43,6 +43,8 @@ def _on(branch: str, name: str) -> str:
 RELEASE_URL = _on("main", "release.json")
 BUNDLE_URL = _on("main", "edld_sheet.js")
 TOKEN = "squadron-token-0123456789"
+#: The layout version the committed bundle brings a sheet to.
+LAYOUT = json.loads((SHEETS / "release.json").read_text(encoding="utf-8"))["sheet_version"]
 
 COLUMNS = re.findall(r"'([a-z_]+)'", re.search(
     r"var COLUMNS = \[(.*?)\];", (SHEETS / "Code.gs").read_text(encoding="utf-8"),
@@ -53,7 +55,7 @@ HEADERS = re.findall(r"'([^']+)'", re.search(
 
 
 def _release(version="T1", bundle=BUNDLE, **over) -> dict:
-    rel = {"version": version, "sheet_version": 1, "min_loader": 1,
+    rel = {"version": version, "sheet_version": LAYOUT, "min_loader": 1,
            "bundle": {"file": "edld_sheet.js",
                       "sha256": hashlib.sha256(bundle.encode()).hexdigest()}}
     rel.update(over)
@@ -116,7 +118,7 @@ def test_a_fresh_install_answers_with_its_versions():
     after = _run([_ping()], script_props=props, doc_props=res["docProps"])
     pong = after["results"][0]
     assert pong["ok"] and pong["columns"] == len(COLUMNS)
-    assert pong["sheet_version"] == 1
+    assert pong["sheet_version"] == LAYOUT
 
 
 def test_the_first_install_says_to_deploy_once():
@@ -213,7 +215,15 @@ def test_an_old_dashboard_gains_the_notes_column():
     res = _legacy()
     assert res["sheets"]["Queries"]["rows"][0][3:3 + len(HEADERS)] == HEADERS
     assert res["sheets"]["Dashboard"]["rows"][6][0].startswith("=IF(")
-    assert res["docProps"]["EDLD_SHEET_VERSION"] == "1"
+    assert res["docProps"]["EDLD_SHEET_VERSION"] == str(LAYOUT)
+
+
+def test_an_old_sheet_missing_a_tab_gets_just_that_tab():
+    """LEGACY_SHEETS has Dashboard, Queries and Settings but no Themes."""
+    res = _legacy()
+    assert "Themes" in res["sheets"] and res["sheets"]["Themes"]["hidden"]
+    assert "added Themes" in res["alerts"][-1]
+    assert "Settings, " not in res["alerts"][-1].split("added ")[1]
 
 
 def test_the_owners_settings_are_untouched():
@@ -227,13 +237,15 @@ def test_the_old_token_keeps_working():
     assert res["results"][1]["ok"] is True
 
 
-def test_a_receiver_only_sheet_upgrades_just_its_deposits():
+def test_a_receiver_only_sheet_gains_the_dashboard_and_keeps_its_deposits():
+    """Sheets set up by pasting Code.gs alone had nothing but Deposits."""
     res = _run([{"call": "edldUpgrade"}],
                sheets={"Deposits": copy.deepcopy(LEGACY_DEPOSITS)},
                ui=["YES", {"button": "OK", "text": TOKEN}])
-    assert set(res["sheets"]) == {"Deposits"} | {k for k in res["sheets"]
-                                                  if k.startswith("Deposits backup")}
-    assert res["sheets"]["Deposits"]["rows"][0] == COLUMNS
+    assert res["order"][:3] == ["Dashboard", "Settings", "Deposits"]
+    rows = res["sheets"]["Deposits"]["rows"]
+    assert rows[0] == COLUMNS
+    assert [r[0] for r in rows[1:]] == ["abc123def456", "fed000000001"]
 
 
 # ── the second time ───────────────────────────────────────────────────────────
@@ -408,7 +420,7 @@ def test_stepping_back_to_an_older_layout_says_so_and_undoes_nothing():
                 script_props=first["scriptProps"], doc_props=first["docProps"],
                 ui=["YES"])
     assert "newer than this code expects" in back["alerts"][0]
-    assert back["docProps"]["EDLD_SHEET_VERSION"] == "1"
+    assert back["docProps"]["EDLD_SHEET_VERSION"] == str(LAYOUT)
 
 
 def test_about_names_where_updates_come_from():

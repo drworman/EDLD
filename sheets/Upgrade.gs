@@ -1,7 +1,7 @@
 /**
  * EDLD sheet — the sheet's own upgrade steps.
  *
- * Bundled with Code.gs and Dashboard.gs into edld_sheet.js. Loader.gs installs
+ * Bundled with Code.gs, Dashboard.gs and Template.gs into edld_sheet.js. Loader.gs installs
  * a new bundle and then calls upgradeSheet() from it, so the steps that run
  * are always the ones that shipped with the code they prepare the sheet for.
  *
@@ -18,8 +18,9 @@
  *   - Deposits is only ever added to. No column is moved or removed, because
  *     every EDLD writing to the sheet addresses columns by position.
  *   - Settings values are the owner's. A step may add a row, never rewrite one.
- *   - Tabs a sheet does not have are skipped, not created. A receiver-only
- *     sheet upgrades its Deposits and nothing else.
+ *   - A tab that exists keeps what is in it. Missing dashboard tabs are
+ *     built (Template.gs), so a blank spreadsheet, a receiver-only sheet and
+ *     one started from the xlsx all end up the same.
  *
  * Append new steps; never edit one that has shipped.
  */
@@ -37,6 +38,15 @@ var SHEET_MIGRATIONS = [
       _sheet();                 // Code.gs: widens the Deposits header in place
       tidyDeposits_(ss);
       if (rebuildDashboard_(ss)) applyTheme();
+    }
+  },
+  {
+    to: 2,
+    name: 'Dashboard, Settings and Themes tabs, where the sheet has none',
+    run: function (ss) {
+      var made = ensureTemplate_(ss);
+      if (rebuildDashboard_(ss)) applyTheme();
+      return made.length ? 'added ' + made.join(', ') : 'all present';
     }
   }
 ];
@@ -59,14 +69,15 @@ function upgradeSheet() {
   var have = sheetVersion_();
   var todo = SHEET_MIGRATIONS.filter(function (m) { return m.to > have; });
   var result = { from: have, to: have, steps: [], backup: '' };
+  refreshVersionLine_(ss);        // every install, steps or not
   if (!todo.length) return result;
 
   result.backup = backupDeposits_(ss);
   for (var i = 0; i < todo.length; i++) {
-    todo[i].run(ss);
+    var detail = todo[i].run(ss);
     doc.setProperty(SHEET_VERSION_PROPERTY, String(todo[i].to));
     result.to = todo[i].to;
-    result.steps.push(todo[i].name);
+    result.steps.push(todo[i].name + (detail ? ' — ' + detail : ''));
   }
   return result;
 }

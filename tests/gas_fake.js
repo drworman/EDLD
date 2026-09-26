@@ -4,7 +4,9 @@
 // assert on. Formatting is not: any method the sheet code calls purely for
 // appearance (colours, fonts, borders, widths, validation, conditional
 // formats) is accepted and does nothing, via a Proxy, so a styling call added
-// later does not need this file changed. A value with a leading apostrophe is
+// later does not need this file changed. A *read* this file does not implement
+// — any get…() — throws instead: answering it with the proxy made one test
+// pass against code that never saw the value it asked for. A value with a leading apostrophe is
 // stored as the text after it, which is what Sheets does.
 //
 // Used by tests/test_sheets_loader.py. Reads a JSON scenario on stdin and
@@ -22,6 +24,9 @@ function chain(base) {
     get(t, k) {
       if (k in t) return t[k];
       if (typeof k === 'symbol' || k === 'then' || k === 'toJSON') return undefined;
+      if (/^get[A-Z]/.test(k)) {
+        return () => { throw new Error('gas_fake.js does not implement ' + k + '()'); };
+      }
       return () => p;
     },
   });
@@ -57,6 +62,8 @@ function makeSheet(ss, name, rows) {
     getLastColumn: () => rows.reduce((m, r) => { let n = r.length; while (n && (r[n - 1] === '' || r[n - 1] === null)) n--; return Math.max(m, n); }, 0),
     getMaxRows: () => Math.max(1000, rows.length),
     getMaxColumns: () => 26,
+    _frozen: 0,
+    setFrozenRows: (n) => { sheet._frozen = n; return sheet; },
     deleteRow: (r) => { rows.splice(r - 1, 1); },
     copyTo: (dest) => dest._add('Copy of ' + sheet._name, JSON.parse(JSON.stringify(rows))),
     getDataRange: () => sheet.getRange(1, 1, Math.max(1, sheet.getLastRow()), Math.max(1, sheet.getLastColumn())),
@@ -72,6 +79,7 @@ function makeSheet(ss, name, rows) {
         getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => at(r + i, col + j))),
         getDisplayValues: () => range.getValues().map(row => row.map(v => v instanceof Date ? v.toISOString().slice(0, 10) : String(v))),
         getDisplayValue: () => range.getDisplayValues()[0][0],
+        getValue: () => at(r, col),
         setValues: (vs) => { vs.forEach((row, i) => row.forEach((v, j) => put(r + i, col + j, v))); return range; },
         setValue: (v) => { put(r, col, v); return range; },
         setFormula: (f) => { put(r, col, f); return range; },
@@ -86,9 +94,18 @@ function makeSheet(ss, name, rows) {
 
 const sheets = [];
 const ss = chain({
-  _add: (name, rows) => { const s = makeSheet(ss, name, rows); sheets.push(s); return s; },
+  _add: (name, rows, index) => {
+    if (sheets.some(s => s._name === name)) throw new Error('A sheet with the name "' + name + '" already exists');
+    const s = makeSheet(ss, name, rows);
+    if (index === undefined) sheets.push(s); else sheets.splice(index, 0, s);
+    return s;
+  },
   getSheetByName: (n) => sheets.find(s => s._name === n) || null,
-  insertSheet: (n) => ss._add(n, []),
+  insertSheet: (n, index) => ss._add(n, [], index),
+  deleteSheet: (sh) => {
+    if (sheets.length < 2) throw new Error('cannot delete the only sheet');
+    sheets.splice(sheets.indexOf(sh), 1);
+  },
   getSheets: () => sheets.slice(),
   toast: (msg) => { log.toasts.push(String(msg)); },
 });
@@ -173,6 +190,7 @@ for (const step of spec.steps) {
 
 const dump = (v) => v instanceof Date ? { __date: v.toISOString() } : v;
 process.stdout.write(JSON.stringify(Object.assign(log, {
-  sheets: Object.fromEntries(sheets.map(s => [s._name, { rows: s._rows.map(r => r.map(dump)), hidden: s._hidden }])),
+  sheets: Object.fromEntries(sheets.map(s => [s._name, { rows: s._rows.map(r => r.map(dump)), hidden: s._hidden, frozen: s._frozen }])),
+  order: sheets.map(s => s._name),
   scriptProps: scriptProps._data, docProps: docProps._data,
 })));

@@ -276,7 +276,9 @@ function edldUpgrade() {
   var installed = sp.getProperty(LP_.VERSION) || '';
   var installedSha = sp.getProperty(LP_.SHA) || '';
   var current = edldQuiet_();
-  var sheetHave = current ? current.sheetVersion() : 0;
+  // Recorded on the sheet, so it is known even with no code installed.
+  var sheetHave = Number(PropertiesService.getDocumentProperties()
+                           .getProperty('EDLD_SHEET_VERSION') || 0);
 
   var rel;
   try { rel = fetchRelease_(); } catch (err) {
@@ -309,7 +311,10 @@ function edldUpgrade() {
             '\n\nFrom ' + sourceName_() + '.' +
             '\n\nThe sheet code is replaced' +
             (sheetTo > sheetHave ? ', and the layout goes from v' + sheetHave + ' to v' +
-             sheetTo + '. Deposits is copied to a hidden backup tab first' : '') +
+             sheetTo + ':' + (rel.sheet_steps || []).filter(function (st) {
+               return st.to > sheetHave; }).map(function (st) {
+               return '\n  • ' + st.name; }).join('') +
+             '\n\nDeposits is copied to a hidden backup tab first' : '') +
             '. Your deposits, settings, URL and token are kept.' +
             (sheetTo < sheetHave
               ? '\n\nThis sheet\'s layout (v' + sheetHave + ') is newer than this code ' +
@@ -444,7 +449,8 @@ function edldAbout() {
   SpreadsheetApp.getUi().alert('ED Dashboard',
     'EDLD sheet code: ' + (sp.getProperty(LP_.VERSION) || 'not installed') +
     (sha ? ' (' + sha.slice(0, 8) + ')' : '') + '\n' +
-    'Sheet layout: v' + (m ? m.sheetVersion() : 0) +
+    'Sheet layout: v' + Number(PropertiesService.getDocumentProperties()
+                                 .getProperty('EDLD_SHEET_VERSION') || 0) +
     (m ? ' (this code expects v' + m.SHEET_VERSION + ')' : '') + '\n' +
     'Loader: v' + LOADER_VERSION + '\n' +
     'Token: ' + (sp.getProperty(LP_.TOKEN) ? 'set' : 'not set') + '\n' +

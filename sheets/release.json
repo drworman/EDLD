@@ -1,11 +1,21 @@
 {
   "version": "20260926-dev",
-  "sheet_version": 1,
+  "sheet_version": 2,
+  "sheet_steps": [
+    {
+      "to": 1,
+      "name": "Notes and assessment columns; Notes on the dashboard; depletion as a date"
+    },
+    {
+      "to": 2,
+      "name": "Dashboard, Settings and Themes tabs, where the sheet has none"
+    }
+  ],
   "min_loader": 1,
   "bundle": {
     "file": "edld_sheet.js",
-    "sha256": "e562d77ddcaee1f7a5888efa5c6562a2de7a703491db05243ab126b5d701ea90",
-    "bytes": 41892
+    "sha256": "4f3c2317c84adeb2055c76f2d25e989a456e15be09178f41526f14676da98726",
+    "bytes": 54925
   },
   "loader": {
     "version": 1,

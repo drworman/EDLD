@@ -2,9 +2,11 @@
 """
 Build what a sheet's Loader.gs installs: edld_sheet.js and release.json.
 
-    edld_sheet.js   Code.gs, Dashboard.gs and Upgrade.gs, concatenated and
-                    stamped with the version, ending in the object the loader
-                    calls into. Generated; never edit it.
+    edld_sheet.js   Code.gs, Dashboard.gs, Template.gs and Upgrade.gs,
+                    concatenated and stamped with the version, with TEMPLATE —
+                    the dashboard's content, read from build_dashboard.py — and
+                    ending in the object the loader calls into. Generated;
+                    never edit it.
     release.json    The version, the bundle's file name and SHA-256, the sheet
                     layout version it brings a sheet to, and the oldest loader
                     it runs under.
@@ -31,6 +33,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import datetime as dt
 import hashlib
 import json
@@ -45,7 +48,43 @@ BUNDLE_NAME = 'edld_sheet.js'
 MANIFEST_NAME = 'release.json'
 
 #: Bundled into edld_sheet.js, in this order: later files use earlier ones.
-BUNDLE_SOURCES = ('Code.gs', 'Dashboard.gs', 'Upgrade.gs')
+BUNDLE_SOURCES = ('Code.gs', 'Dashboard.gs', 'Template.gs', 'Upgrade.gs')
+
+#: Where the template's content is defined, once, for the xlsx and the sheet.
+TEMPLATE_SOURCE = HERE / 'build_dashboard.py'
+
+
+def template_content() -> dict:
+    """The constants build_dashboard.py lists in TEMPLATE_KEYS, by name.
+
+    Read from the source rather than imported, because importing it needs
+    openpyxl and this must not. Each is a plain literal; anything else is a
+    build error here rather than a surprise in somebody's sheet.
+    """
+    tree = ast.parse(TEMPLATE_SOURCE.read_text(encoding='utf-8'))
+    found: dict = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        try:
+            value = ast.literal_eval(node.value)
+        except ValueError:
+            continue
+        if isinstance(target, ast.Name):
+            found[target.id] = value
+        elif isinstance(target, ast.Tuple) and isinstance(value, tuple):
+            for elt, v in zip(target.elts, value):
+                if isinstance(elt, ast.Name):
+                    found[elt.id] = v
+    keys = found.get('TEMPLATE_KEYS')
+    if not keys:
+        sys.exit('build_dashboard.py: TEMPLATE_KEYS not found')
+    missing = [k for k in keys if k not in found]
+    if missing:
+        sys.exit(f"build_dashboard.py: TEMPLATE_KEYS names {', '.join(missing)}, "
+                 f"which are not plain literals there")
+    return {k: found[k] for k in keys}
 
 #: What the bundle hands the loader. Loader.gs calls exactly these.
 BUNDLE_EXPORTS = """return {
@@ -81,6 +120,9 @@ def build_bundle(version: str) -> str:
         + ', '.join(BUNDLE_SOURCES) + ' — do not edit.\n'
         '// Loader.gs runs this as the body of a function; see sheets/README.md.\n',
         f"var EDLD_VERSION = {version!r};\n",
+        '/** The dashboard template, from build_dashboard.py. Used by Template.gs. */\n'
+        'var TEMPLATE = ' + json.dumps(template_content(), ensure_ascii=False,
+                                      indent=1) + ';\n',
     ]
     for name in BUNDLE_SOURCES:
         text = (HERE / name).read_text(encoding='utf-8').replace('\r\n', '\n')
@@ -100,13 +142,18 @@ def _gs_int(path: pathlib.Path, pattern: str) -> int:
 def build_release(version: str, bundle_text: str) -> dict:
     """The manifest Loader.gs reads before it fetches anything else."""
     upgrade = (HERE / 'Upgrade.gs').read_text(encoding='utf-8')
-    steps = [int(n) for n in re.findall(r'^\s*to:\s*(\d+),', upgrade, re.M)]
+    found = re.findall(r"^\s*to:\s*(\d+),\s*\n\s*name:\s*'((?:[^'\\]|\\.)*)'",
+                       upgrade, re.M)
+    steps = [int(n) for n, _ in found]
     if not steps or steps != sorted(steps) or len(set(steps)) != len(steps):
-        sys.exit('Upgrade.gs: SHEET_MIGRATIONS must have rising, unique `to:` versions')
+        sys.exit('Upgrade.gs: SHEET_MIGRATIONS must have rising, unique `to:` '
+                 'versions, each followed by its name')
     data = bundle_text.encode('utf-8')
     return {
         'version': version,
         'sheet_version': steps[-1],
+        # So Upgrade can say what it will do before it fetches any code.
+        'sheet_steps': [{'to': int(n), 'name': name} for n, name in found],
         'min_loader': _gs_int(HERE / 'Upgrade.gs', r'var MIN_LOADER = (\d+);'),
         'bundle': {
             # Relative: fetched from beside this manifest, on the same branch.

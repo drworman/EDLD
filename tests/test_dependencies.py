@@ -104,7 +104,9 @@ def test_pypa_packaging_is_declared_for_builds():
 
 @pytest.mark.parametrize("name", sorted(_imports(["tests", "packaging"])))
 def test_every_test_and_build_import_is_in_requirements_dev(name):
-    if name in ("build_common",):          # the spec's sibling module
+    # Imported by file name from a sibling directory — the spec's
+    # build_common, the sheet builders, one test reusing another's harness.
+    if any((ROOT / d / f"{name}.py").is_file() for d in ("packaging", "sheets", "tests")):
         return
     assert _dist(name) in _declared(ROOT / "requirements-dev.txt"), (
         f"{name} is imported by tests or packaging but not declared in "

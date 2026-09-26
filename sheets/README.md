@@ -13,6 +13,7 @@ Everything here is off until you turn it on.
 | `Mining_Dashboard.xlsx` | Optional starting spreadsheet: a themed, filterable, sortable dashboard over `Deposits`. |
 | `Code.gs` | Source: the receiver, which accepts deposits from EDLD and writes the `Deposits` tab. |
 | `Dashboard.gs` | Source: the dashboard's theme, click-to-sort and formula repair. |
+| `Template.gs` | Source: builds the Dashboard, Settings, Queries and Themes tabs a sheet does not have. |
 | `Upgrade.gs` | Source: the sheet's upgrade steps, run by Upgrade after new code is installed. |
 | `edld_sheet.js` | Generated: the three sources bundled, which is what the loader installs. Never edit. |
 | `release.json` | Generated: the version, the bundle's file name and SHA-256, and what it needs. |
@@ -35,14 +36,15 @@ want them to stop.
 
 ## Setting it up
 
-**1. Make or open the spreadsheet.** Any Google Sheet. The script creates a tab
-called `Deposits` and writes its own header row, so an empty sheet is fine.
+**1. Make or open the spreadsheet.** Any Google Sheet — a new, blank one is
+the usual start. Installing builds everything: the Dashboard, Settings and
+Deposits tabs, and the hidden Queries and Themes tabs behind them, and removes
+Google's empty `Sheet1`. An existing sheet keeps its tabs and gains only the
+ones it is missing. See [The dashboard](#the-dashboard) below.
 
-If you want the dashboard, start from the template instead: in Google Drive,
-New → File upload → `Mining_Dashboard.xlsx`, then open it and File → Save as
-Google Sheets. It arrives with an empty `Deposits` tab already carrying the
-header row, so the receiver writes straight into it. See [The
-dashboard](#the-dashboard) below.
+Importing `Mining_Dashboard.xlsx` (Drive → New → File upload, then File → Save
+as Google Sheets) gives the same starting point, if you would rather begin from
+a file; you still paste the loader into it afterwards.
 
 **2. Paste the loader.** Extensions → Apps Script. Replace everything in
 `Code.gs` with the contents of `Loader.gs` from this directory (the file's name
@@ -173,7 +175,9 @@ picked another — tells you what it will change, and on your say-so:
 4. re-applies the theme.
 
 Deposits are only ever added to, your Settings values are left as they are,
-and the URL and token do not change. EDLD's own writes wait while it runs.
+and the URL and token do not change. A dashboard tab the sheet does not have is
+built; one it has is never rewritten. The release line in Settings!D1 follows
+each upgrade unless you have replaced it with your own text. EDLD's own writes wait while it runs.
 Running it again on an up-to-date sheet says so and changes nothing. "Up to
 date" is decided by the code's hash, not its version, so a branch whose version
 file has not moved still installs each new build. **ED Dashboard → About**
@@ -276,8 +280,11 @@ it anyway.
 
 ## The dashboard
 
-`Mining_Dashboard.xlsx` is a read side for people who open the sheet rather than
-run EDLD. It is a template, not a copy of anybody's data: the `Deposits` tab
+The dashboard is a read side for people who open the sheet rather than run
+EDLD. Installing builds it (`Template.gs`), and `Mining_Dashboard.xlsx` is the
+same thing as a file; both come from the constants in `build_dashboard.py`, and
+`tests/test_sheets_template.py` checks the two say the same thing cell for
+cell. Either way it is a template, not a copy of anybody's data: `Deposits`
 holds only its header row, and Settings holds placeholders.
 
 **Settings.** Put your squadron's name in B1 and the maintaining commander in
@@ -316,9 +323,9 @@ hidden `Themes` tab: add a column before Custom and it joins the list.
 Applying the theme replaces every conditional formatting rule on the Dashboard
 tab. Rules of your own belong in `styleDashboard_` in `Dashboard.gs`.
 
-**If the table shows nothing at all** after importing — no header when a filter
-is set — the import dropped a formula. ED Dashboard → Repair dashboard formulas
-rewrites them. The template stores its Sheets-only formulas in the wrapper
+**If the table shows nothing at all** — no header when a filter is set — a
+formula has been lost. ED Dashboard → Repair dashboard formulas rewrites them,
+and rebuilds any dashboard tab that has been deleted. The template stores its Sheets-only formulas in the wrapper
 Google uses for its own xlsx export, which Sheets unwraps on import; the repair
 is there for the case where it does not.
 

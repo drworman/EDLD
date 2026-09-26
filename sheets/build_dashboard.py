@@ -123,6 +123,47 @@ LAST_ROW = 1000
 ROLE_ROW0 = 10   # Settings!A10 — ED.ROLE_FIRST_ROW
 NOTES_ROW = 24   # ED.NOTES_ROW
 
+# Everything below this line and above is the template's *content*, and is also
+# what Template.gs builds a missing tab from: build_bundle.py reads these
+# constants out of this file (TEMPLATE_KEYS) into the bundle. Keep each one a
+# plain literal — no f-strings, no expressions — so it can be read without
+# importing this module, and tests/test_sheets_template.py checks that a tab
+# built in the sheet matches the one in Mining_Dashboard.xlsx.
+
+DASH_TITLE_FORMULA = ('=IF(Settings!B1<>"",Settings!B1 & ": Mining Data",'
+                      'IF(Settings!B2<>"","CMDR " & Settings!B2 & "\'s Mining Data",""))')
+DASH_SUBTITLE_FORMULA = ('=IF(A1=Settings!B1 & ": Mining Data",'
+                         '"Maintained by CMDR: " & Settings!B2,"")')
+DASH_LABELS = {'A4': 'System', 'B4': 'Commodity', 'E4': 'Sort By', 'F4': 'Order'}
+SORT_ORDERS = ['Ascending', 'Descending']
+
+#: Settings!D1. Upgrade rewrites it for each release, but only while it still
+#: reads like this, so an owner's own text there is left alone.
+VERSION_LINE = 'Mining Dashboard v{version} powered by EDLD'
+SETTINGS_LABELS = {'A1': 'Squadron', 'A2': 'Maintainer', 'A4': 'DASHBOARD THEME',
+                   'A5': 'Theme', 'A6': 'Title Font', 'A7': 'Body Font'}
+SETTINGS_HINTS = {'C5': 'Pick a preset, or "Custom" to use your own hex codes below',
+                  'C6': 'Google Fonts — any Sheets font name works'}
+COLOR_TABLE_HEADERS = ['Color Role', 'Custom Hex', '', 'Active Hex', '', 'Used For']
+HEX_ERROR = 'Enter a colour as #RRGGBB, e.g. #FF7100'
+THEMES_NOTE = ('Add your own scheme: insert a column before "Custom", name it in row 1 '
+               'and put hex codes below. It joins the Settings theme list. "Custom" '
+               'mirrors Settings!B10:B21; edit it there.')
+
+#: Column widths in characters: Dashboard A:K, Settings A:H, Themes A then each.
+DASH_WIDTHS = [18, 22, 11, 14, 24, 13, 11, 8, 14, 40, 3]
+SETTINGS_WIDTHS = [18, 36, 5, 12, 5, 34, 4, 4]
+THEMES_WIDTHS = [16, 14]
+
+#: What build_bundle.py copies into the bundle as TEMPLATE, for Template.gs.
+TEMPLATE_KEYS = ['HEADERS', 'PLACEHOLDER_SQUADRON', 'PLACEHOLDER_MAINTAINER',
+                 'ROLES', 'THEMES', 'DEFAULT_THEME', 'FONTS', 'TITLE_FONT',
+                 'BODY_FONT', 'MONO_FONT', 'SETTINGS_NOTES', 'ROLE_ROW0',
+                 'NOTES_ROW', 'DASH_TITLE_FORMULA', 'DASH_SUBTITLE_FORMULA',
+                 'DASH_LABELS', 'SORT_ORDERS', 'VERSION_LINE', 'SETTINGS_LABELS',
+                 'SETTINGS_HINTS', 'COLOR_TABLE_HEADERS', 'HEX_ERROR',
+                 'THEMES_NOTE', 'SETTINGS_WIDTHS', 'THEMES_WIDTHS']
+
 
 # ── Formula plumbing ─────────────────────────────────────────────────────────
 
@@ -199,9 +240,8 @@ def build_dashboard(wb, formulas):
     ds.title = 'Dashboard'
     paint(ds, LAST_ROW, MARGIN, C['Background'], C['Text'])
 
-    ds['A1'] = ('=IF(Settings!B1<>"",Settings!B1 & ": Mining Data",'
-                'IF(Settings!B2<>"","CMDR " & Settings!B2 & "\'s Mining Data",""))')
-    ds['A2'] = '=IF(A1=Settings!B1 & ": Mining Data","Maintained by CMDR: " & Settings!B2,"")'
+    ds['A1'] = DASH_TITLE_FORMULA
+    ds['A2'] = DASH_SUBTITLE_FORMULA
     ds['E2'] = '=Settings!D1'
     ds.merge_cells(f'E2:{LAST}2')
     ds['A1'].font = font(C['Title'], TITLE_FONT, bold=True, size=20)
@@ -215,8 +255,9 @@ def build_dashboard(wb, formulas):
         ds.cell(3, c).fill = fill(C['Accent'])
 
     # Filters (A:B) and sort (E:F)
-    ds['A4'], ds['B4'], ds['E4'], ds['F4'] = 'System', 'Commodity', 'Sort By', 'Order'
-    ds['E5'], ds['F5'] = HEADERS[0], 'Ascending'
+    for a, label in DASH_LABELS.items():
+        ds[a] = label
+    ds['E5'], ds['F5'] = HEADERS[0], SORT_ORDERS[0]
     for a in ('A4', 'B4', 'E4', 'F4'):
         ds[a].font = font(C['Text Dim'], bold=True, size=9)
     for a in ('A5', 'B5', 'E5', 'F5'):
@@ -229,7 +270,7 @@ def build_dashboard(wb, formulas):
 
     for sqref, f1 in (('A5', 'Queries!$A$1:$A$1000'), ('B5', 'Queries!$B$1:$B$1000'),
                       ('E5', f'Queries!$D$1:${Q_LAST}$1'),
-                      ('F5', '"Ascending,Descending"')):
+                      ('F5', '"' + ','.join(SORT_ORDERS) + '"')):
         dv = DataValidation(type='list', formula1=f1, allow_blank=True)
         ds.add_data_validation(dv)
         dv.add(sqref)
@@ -275,7 +316,7 @@ def build_dashboard(wb, formulas):
     for p, bg in bands:
         cf.add(allr, rule(f'AND($A8<>"",$I8="",MOD(ROW(),2)={p})', bg, C['Text']))
 
-    for col, w in zip('ABCDEFGHIJK', [18, 22, 11, 14, 24, 13, 11, 8, 14, 40, 3]):
+    for col, w in zip('ABCDEFGHIJK', DASH_WIDTHS):
         ds.column_dimensions[col].width = w
     ds.column_dimensions.group(get_column_letter(MARGIN + 1), 'Z', hidden=True)
     ds.sheet_view.showGridLines = False
@@ -287,21 +328,19 @@ def build_dashboard(wb, formulas):
 def build_settings(wb, version):
     st = wb.create_sheet('Settings')
     paint(st, 40, 8, C['Background'], C['Text'])
-    st['A1'], st['B1'] = 'Squadron', PLACEHOLDER_SQUADRON
-    st['A2'], st['B2'] = 'Maintainer', PLACEHOLDER_MAINTAINER
-    st['D1'] = f'Mining Dashboard v{version} powered by EDLD'
+    for a, label in SETTINGS_LABELS.items():
+        st[a] = label
+    st['B1'], st['B2'] = PLACEHOLDER_SQUADRON, PLACEHOLDER_MAINTAINER
+    st['D1'] = VERSION_LINE.format(version=version)
     st.merge_cells('D1:H1')
     st['D1'].font = font(C['Text Dim'], size=9)
     st['D1'].alignment = Alignment(horizontal='right')
 
-    st['A4'] = 'DASHBOARD THEME'
-    st['A5'], st['B5'] = 'Theme', DEFAULT_THEME
-    st['A6'], st['B6'] = 'Title Font', TITLE_FONT
-    st['A7'], st['B7'] = 'Body Font', BODY_FONT
-    st['C5'] = 'Pick a preset, or "Custom" to use your own hex codes below'
-    st['C6'] = 'Google Fonts — any Sheets font name works'
+    st['B5'], st['B6'], st['B7'] = DEFAULT_THEME, TITLE_FONT, BODY_FONT
+    for a, hint in SETTINGS_HINTS.items():
+        st[a] = hint
 
-    for j, t in enumerate(['Color Role', 'Custom Hex', '', 'Active Hex', '', 'Used For']):
+    for j, t in enumerate(COLOR_TABLE_HEADERS):
         cell = st.cell(ROLE_ROW0 - 1, 1 + j, t)
         cell.fill = fill(C['Accent'])
         cell.font = font(C['Accent Text'], bold=True)
@@ -347,13 +386,13 @@ def build_settings(wb, version):
         formula1=f'AND(LEN(B{ROLE_ROW0})=7,LEFT(B{ROLE_ROW0},1)="#",'
                  f'ISNUMBER(HEX2DEC(MID(B{ROLE_ROW0},2,6))))',
         showErrorMessage=True, errorTitle='Hex colour',
-        error='Enter a colour as #RRGGBB, e.g. #FF7100')
+        error=HEX_ERROR)
     for dv, ref in ((dv_theme, 'B5'), (dv_font, 'B6:B7'),
                     (dv_hex, f'B{ROLE_ROW0}:B{ROLE_ROW0 + len(ROLES) - 1}')):
         st.add_data_validation(dv)
         dv.add(ref)
 
-    for col, w in zip('ABCDEFGH', [18, 36, 5, 12, 5, 34, 4, 4]):
+    for col, w in zip('ABCDEFGH', SETTINGS_WIDTHS):
         st.column_dimensions[col].width = w
     st.sheet_view.showGridLines = False
     st.sheet_properties.tabColor = h(C['Text Dim'])
@@ -412,14 +451,11 @@ def build_themes(wb):
         cc.fill = fill(C['Panel'])
         cc.font = font(C['Text'])
         cc.alignment = Alignment(horizontal='center')
-    note = th.cell(len(ROLES) + 3, 1,
-                   'Add your own scheme: insert a column before "Custom", name it in row 1 and put '
-                   'hex codes below. It joins the Settings theme list. "Custom" mirrors '
-                   f'Settings!B{ROLE_ROW0}:B{ROLE_ROW0 + len(ROLES) - 1}; edit it there.')
+    note = th.cell(len(ROLES) + 3, 1, THEMES_NOTE)
     note.font = font(C['Text Dim'], italic=True)
-    th.column_dimensions['A'].width = 16
+    th.column_dimensions['A'].width = THEMES_WIDTHS[0]
     for j in range(len(names)):
-        th.column_dimensions[get_column_letter(2 + j)].width = 14
+        th.column_dimensions[get_column_letter(2 + j)].width = THEMES_WIDTHS[1]
     th.sheet_view.showGridLines = False
     th.freeze_panes = 'B2'
     th.sheet_properties.tabColor = h(C['Text Dim'])

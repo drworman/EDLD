@@ -191,13 +191,12 @@ function copyActiveToCustom() {
  */
 function repairFormulas() {
   const ss = SpreadsheetApp.getActive();
-  if (!rebuildDashboard_(ss)) {
-    ss.toast('This sheet has no Dashboard and Queries tabs to repair.', 'ED Dashboard');
-    return;
-  }
+  const made = ensureTemplate_(ss);       // Template.gs: tabs somebody deleted
+  rebuildDashboard_(ss);
   tidyDeposits_(ss);
   applyTheme();
-  ss.toast('Dashboard formulas and layout rewritten.', 'ED Dashboard');
+  ss.toast('Dashboard formulas and layout rewritten' +
+           (made.length ? '; rebuilt ' + made.join(', ') : '') + '.', 'ED Dashboard');
 }
 
 /** Everything Repair does to the Dashboard and Queries tabs. False if absent. */

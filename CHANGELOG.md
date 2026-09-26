@@ -6,6 +6,40 @@ Last updated: 20260926
 
 ## Unreleased
 
+### Fixed: installing into a blank spreadsheet built no dashboard
+
+Pasting `Loader.gs` into a new spreadsheet and running Install produced a bare
+`Deposits` tab beside Google's empty `Sheet1`, and nothing else. The upgrade
+steps only ever adjusted tabs a sheet already had, on the assumption that every
+sheet began as an import of `Mining_Dashboard.xlsx` — which the loader made
+unnecessary and nobody would think to do first.
+
+Upgrade now builds whichever of Dashboard, Settings, Queries and Themes a sheet
+is missing (`sheets/Template.gs`, sheet layout v2), orders them, hides Queries
+and Themes, and removes Google's empty default tab once there are real ones —
+only an empty tab with that kind of name, and only when something was built.
+A tab that exists is never rewritten. So a blank spreadsheet, a sheet that only
+ever had the receiver, and one started from the xlsx all end up the same, and a
+sheet already on layout v1 gains its tabs on its next Upgrade. **Repair
+dashboard formulas** rebuilds a tab that has been deleted.
+
+The content is not written twice. `build_bundle.py` reads the template's
+constants out of `build_dashboard.py` — which now keeps every label, hint,
+placeholder, preset and formula as a named literal — into the bundle as
+`TEMPLATE`, and `tests/test_sheets_template.py` builds the tabs in a sheet and
+compares them with the xlsx cell for cell. That comparison found one fault
+before it shipped: a role description beginning with an apostrophe lost it,
+because Sheets reads a leading `'` as its "this is text" marker. Template text
+now goes through the same escaping as deposit values.
+
+Settings!D1, the release line, is refreshed on every install unless the owner
+has put their own text there. The manifest lists each layout step by name, so
+Upgrade's confirmation says what it will do before it fetches anything.
+
+`tests/gas_fake.js` now refuses any read it does not implement. It used to
+answer them with a placeholder, which let a test pass against code that never
+saw the value it asked for.
+
 ### Fixed: a sheet could only upgrade from a tagged release
 
 Upgrade fetched the sheet code from the git tag the manifest named, so it
