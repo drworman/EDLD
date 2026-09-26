@@ -297,11 +297,24 @@ def test_a_script_without_the_notes_columns_fails_the_test():
     """It would accept every write and drop the note without a word."""
     res = _ping(24)
     assert res.ok is False
-    assert "notes" in res.error and "Code.gs" in res.error
+    assert "notes" in res.error and "Upgrade" in res.error
 
 
 def test_a_current_script_passes_the_test():
     assert _ping(len(COLUMNS)).ok
+
+
+def test_an_out_of_date_sheet_is_told_to_upgrade_itself():
+    assert "ED Dashboard > Upgrade" in _ping(24).error
+
+
+def test_a_passing_test_names_the_release_the_sheet_runs():
+    def opener(url, data, timeout):
+        return json.dumps({"ok": True, "pong": True, "columns": len(COLUMNS),
+                           "version": "20261001", "sheet_version": 1})
+    res = SheetsPublisher("https://script.google.com/macros/s/X/exec", "t",
+                          opener=opener).test_connection()
+    assert res.summary() == "sheet reachable — EDLD 20261001, layout v1"
 
 
 def test_a_script_that_does_not_say_is_not_failed_for_it():

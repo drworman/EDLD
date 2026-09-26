@@ -1,9 +1,9 @@
 /**
  * EDLD mining dashboard — theme, header sorting, and formula repair.
  *
- * Lives beside Code.gs in the same Apps Script project: Extensions > Apps Script,
- * "+" > Script, name it Dashboard, paste this in, save, reload the spreadsheet.
- * It does not replace Code.gs. The two share nothing but the spreadsheet.
+ * Bundled with Code.gs and Upgrade.gs into edld_sheet.js, which Loader.gs
+ * installs and runs; nobody pastes this file. The menu is built by the loader
+ * from MENU below, so an upgrade can change what the menu offers.
  *
  * What it does
  * ------------
@@ -23,11 +23,9 @@
  *          them from FORMULAS below. build_dashboard.py reads FORMULAS from this
  *          file, so this is the one place they are defined.
  *
- *          It is also the upgrade. A sheet started from an older template
- *          keeps that template's table; Repair rewrites the formulas, the
- *          header list the sort reads, and the column layout, so pasting in a
- *          newer Dashboard.gs and running it brings the table up to date —
- *          the Notes column included — without re-importing anything.
+ *          It also lays the table out for the current column set, which is
+ *          why Upgrade.gs runs the same code: a sheet from an older template
+ *          comes out the same as a fresh one, without re-importing anything.
  */
 
 const ED = {
@@ -107,15 +105,16 @@ const FORMULAS = {
 
 // ------------------------------------------------------------------ triggers & menu
 
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('ED Dashboard')
-    .addItem('Apply theme', 'applyTheme')
-    .addItem('Copy active theme to Custom', 'copyActiveToCustom')
-    .addSeparator()
-    .addItem('Repair dashboard formulas', 'repairFormulas')
-    .addToUi();
-}
+/**
+ * The menu's own items, above the loader's Upgrade / Set sheet token / About.
+ * Loader.gs maps each to a fixed dispatcher, so this list can change in an
+ * upgrade without the pasted loader changing.
+ */
+const MENU = [
+  { label: 'Apply theme', run: () => applyTheme() },
+  { label: 'Copy active theme to Custom', run: () => copyActiveToCustom() },
+  { label: 'Repair dashboard formulas', run: () => repairFormulas() },
+];
 
 function onEdit(e) {
   if (!e || !e.range) return;
@@ -162,6 +161,7 @@ function onSelectionChange(e) {
 
 function applyTheme() {
   const ss = SpreadsheetApp.getActive();
+  if (!ss.getSheetByName(ED.SETTINGS)) return;   // a receiver-only sheet
   const t = readTheme_(ss);
   const dash = ss.getSheetByName(ED.DASH);
   const set = ss.getSheetByName(ED.SETTINGS);
@@ -191,8 +191,20 @@ function copyActiveToCustom() {
  */
 function repairFormulas() {
   const ss = SpreadsheetApp.getActive();
+  if (!rebuildDashboard_(ss)) {
+    ss.toast('This sheet has no Dashboard and Queries tabs to repair.', 'ED Dashboard');
+    return;
+  }
+  tidyDeposits_(ss);
+  applyTheme();
+  ss.toast('Dashboard formulas and layout rewritten.', 'ED Dashboard');
+}
+
+/** Everything Repair does to the Dashboard and Queries tabs. False if absent. */
+function rebuildDashboard_(ss) {
   const dash = ss.getSheetByName(ED.DASH);
   const q = ss.getSheetByName(ED.QUERIES);
+  if (!dash || !q) return false;
   const H = ED.HEADERS, n = H.length;
 
   // Room for the layout below, on a sheet somebody has trimmed.
@@ -237,24 +249,7 @@ function repairFormulas() {
   dash.getRange(ED.DATA_FIRST_ROW, 1, dataRows, ED.DATA_COLS).setVerticalAlignment('top');
   dash.getRange(ED.HEADER_ROW, ED.NOTES_COL, dataRows + 1, 1)
     .setWrap(true).setHorizontalAlignment('left');
-
-  // Sheets from before depletion became a date alone carry the word in the
-  // amount column. EDLD ignores it on read; clear it so the table does too.
-  const deps = ss.getSheetByName('Deposits');
-  if (deps && deps.getLastRow() > 1) {
-    const head = deps.getRange(1, 1, 1, deps.getLastColumn()).getValues()[0];
-    const col = head.indexOf('amount') + 1;
-    if (col > 0) {
-      const rng = deps.getRange(2, col, deps.getLastRow() - 1, 1);
-      const vals = rng.getValues();
-      if (vals.some(v => v[0] === 'Depleted')) {
-        rng.setValues(vals.map(v => [v[0] === 'Depleted' ? '' : v[0]]));
-      }
-    }
-  }
-
-  applyTheme();
-  ss.toast('Dashboard formulas and layout rewritten.', 'ED Dashboard');
+  return true;
 }
 
 // ------------------------------------------------------------------ theme resolution

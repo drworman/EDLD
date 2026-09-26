@@ -5,9 +5,10 @@
  * POSTs batches of deposits here; this script decides what is new, what has
  * changed, and what to ignore.
  *
- * Setup is in sheets/README.md. The short version: Extensions > Apps Script,
- * paste this in, set TOKEN below, Deploy > New deployment > Web app,
- * "Execute as: Me", "Who has access: Anyone with the link".
+ * Not pasted into a sheet on its own any more. This file, Dashboard.gs and
+ * Upgrade.gs are bundled by build_dashboard.py into edld_sheet.js, which
+ * Loader.gs — the one file a sheet owner pastes — installs and upgrades from
+ * the sheet's own menu. Setup is in sheets/README.md.
  *
  * Why the dedupe lives here rather than in EDLD
  * ---------------------------------------------
@@ -28,11 +29,21 @@
 /**
  * Shared secret. EDLD sends it as "Authorization: Bearer <token>"; Apps Script
  * strips that header from web app requests, so it is re-sent in the body too
- * and read from there. Change it to something long and random before you
- * deploy, and change it again to revoke access — anyone holding the old one
- * stops being able to write, and the URL does not have to change.
+ * and read from there.
+ *
+ * It lives in the script's properties, set from the sheet with ED Dashboard >
+ * Set sheet token, not in this file. An upgrade replaces this file, and a
+ * token written into it would be replaced along with it — every commander's
+ * configured token would stop working at once. Change it to revoke access:
+ * anyone holding the old one stops being able to write, and the URL does not
+ * have to change.
  */
-var TOKEN = 'CHANGE-ME-BEFORE-DEPLOYING';
+var TOKEN_PROPERTY = 'EDLD_TOKEN';
+
+function _token() {
+  return String(PropertiesService.getScriptProperties()
+                  .getProperty(TOKEN_PROPERTY) || '');
+}
 
 /** Sheet tab that deposits are written to. Created if absent. */
 var SHEET_NAME = 'Deposits';
@@ -106,15 +117,24 @@ function doPost(e) {
   try {
     var body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
 
-    if (!TOKEN || TOKEN === 'CHANGE-ME-BEFORE-DEPLOYING') {
-      return _json({ ok: false, error: 'server token not configured' });
+    var token = _token();
+    if (!token) {
+      return _json({ ok: false, error: 'server token not configured — in the ' +
+                     'sheet, run ED Dashboard > Set sheet token' });
     }
-    if (String(body.token || '') !== TOKEN) {
+    if (String(body.token || '') !== token) {
       return _json({ ok: false, error: 'bad token' });
     }
 
     if (body.ping) {
-      return _json({ ok: true, pong: true, columns: COLUMNS.length });
+      // What is installed, so EDLD's Test connection can say which side is
+      // behind rather than only that something is.
+      return _json({
+        ok: true, pong: true, columns: COLUMNS.length,
+        version: typeof EDLD_VERSION === 'undefined' ? '' : EDLD_VERSION,
+        sheet_version: Number(PropertiesService.getDocumentProperties()
+                                .getProperty('EDLD_SHEET_VERSION') || 0)
+      });
     }
 
     // Read: everything this sheet knows about one body.

@@ -190,6 +190,11 @@ class PublishResult:
     deposits: list[dict] = field(default_factory=list)
     #: How many columns the sheet's script knows, where it says (ping only).
     columns: int = 0
+    #: The EDLD release installed in the sheet, and its layout version (ping).
+    version: str = ""
+    sheet_version: int = 0
+    #: A line to show instead of the publish counts, for a successful ping.
+    info: str = ""
 
     @property
     def accounted(self) -> int:
@@ -198,6 +203,8 @@ class PublishResult:
     def summary(self) -> str:
         if not self.ok:
             return f"publish failed — {self.error}"
+        if self.info:
+            return self.info
 
         return (
             f"published {self.added} new, "
@@ -462,6 +469,10 @@ class SheetsPublisher:
             columns = int(data.get("columns", 0) or 0)
         except (TypeError, ValueError):
             columns = 0
+        try:
+            sheet_version = int(data.get("sheet_version", 0) or 0)
+        except (TypeError, ValueError):
+            sheet_version = 0
 
         return PublishResult(
             ok=True,
@@ -470,6 +481,8 @@ class SheetsPublisher:
             unchanged=unchanged,
             deposits=list(data.get("deposits") or []),
             columns=columns,
+            version=str(data.get("version", "") or ""),
+            sheet_version=sheet_version,
         )
 
     # ── public API ───────────────────────────────────────────────────────────
@@ -493,11 +506,18 @@ class SheetsPublisher:
             missing = ", ".join(COLUMNS[result.columns:])
             result.ok = False
             result.error = (
-                f"the sheet's script is out of date — it stores "
-                f"{result.columns} columns and this EDLD sends {len(COLUMNS)} "
-                f"(missing: {missing}). Paste the current sheets/Code.gs into "
-                f"the sheet's Apps Script and deploy a new version"
+                f"the sheet is out of date — it stores {result.columns} "
+                f"columns and this EDLD sends {len(COLUMNS)} (missing: "
+                f"{missing}). In the sheet, run ED Dashboard > Upgrade; a "
+                f"sheet from before the Upgrade menu needs sheets/Loader.gs "
+                f"pasted in once — see sheets/README.md"
             )
+        elif result.ok:
+            # Which release the sheet runs, where it says; a script from
+            # before the loader reports neither and is simply "reachable".
+            result.info = "sheet reachable" + (
+                f" — EDLD {result.version}, layout v{result.sheet_version}"
+                if result.version else "")
 
         self._log(
             f"sheet test — {result.summary()}"

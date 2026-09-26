@@ -1,0 +1,14 @@
+{
+  "version": "20260924-dev",
+  "sheet_version": 1,
+  "min_loader": 1,
+  "bundle": {
+    "url": "https://raw.githubusercontent.com/drworman/EDLD/20260924-dev/sheets/edld_sheet.js",
+    "sha256": "7ec0b465b66814a1efeba273afc6bb95585cee5fe700725471cb7c20aed99aab",
+    "bytes": 41895
+  },
+  "loader": {
+    "version": 1,
+    "url": "https://raw.githubusercontent.com/drworman/EDLD/20260924-dev/sheets/Loader.gs"
+  }
+}

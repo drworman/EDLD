@@ -35,8 +35,13 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="needs node")
 _HARNESS = r"""
 const fs = require('fs');
 const spec = JSON.parse(fs.readFileSync(0, 'utf8'));
-let src = fs.readFileSync(spec.code, 'utf8')
-  .replace("var TOKEN = 'CHANGE-ME-BEFORE-DEPLOYING';", "var TOKEN = 'tok';");
+let src = fs.readFileSync(spec.code, 'utf8');
+const props = (init) => { const d = Object.assign({}, init);
+  return { getProperty: (k) => (k in d ? d[k] : null), setProperty: (k, v) => { d[k] = String(v); } }; };
+globalThis.PropertiesService = {
+  getScriptProperties: ((p) => () => p)(props({ EDLD_TOKEN: 'tok' })),
+  getDocumentProperties: ((p) => () => p)(props({})),
+};
 
 const raw = [];                        // every value as written, before storing
 function store(v) {

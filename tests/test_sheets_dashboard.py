@@ -170,9 +170,16 @@ def test_committed_template_is_a_fresh_build(tmp_path):
     version = re.search(r"v(\S+) powered", committed["Settings"]["D1"].value).group(1)
     fresh_path = tmp_path / "fresh.xlsx"
     subprocess.run([sys.executable, str(BUILD), "--out", str(fresh_path),
-                    "--version", version], check=True, capture_output=True)
+                    "--version", version, "--bundle-dir", str(tmp_path)],
+                   check=True, capture_output=True)
     assert _snapshot(_load(fresh_path)) == _snapshot(committed), (
         "sheets/Mining_Dashboard.xlsx is stale; run python3 sheets/build_dashboard.py")
+    # The loader's bundle and manifest come from the same run, from the same
+    # sources; a stale one is code a sheet would install that is not the code
+    # in this commit.
+    for name in ("edld_sheet.js", "release.json"):
+        assert (tmp_path / name).read_bytes() == (SHEETS / name).read_bytes(), (
+            f"sheets/{name} is stale; run python3 sheets/build_dashboard.py")
 
 
 def test_wrapped_formulas_unwrap_to_dashboard_gs_and_fit_xlsx_strings():
