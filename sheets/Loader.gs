@@ -3,9 +3,17 @@
  *
  * Paste this as the only file in the sheet's Apps Script project, save,
  * reload the sheet, and run ED Dashboard > Upgrade. That fetches EDLD's sheet
- * code from the latest release, checks it, stores it in this project's
- * properties and brings the sheet's layout up to date. Every later release is
- * the same menu item. Full instructions: sheets/README.md in the EDLD repo.
+ * code, checks it, stores it in this project's properties and brings the
+ * sheet's layout up to date. Every later release is the same menu item. Full
+ * instructions: sheets/README.md in the EDLD repo.
+ *
+ * Where updates come from
+ * -----------------------
+ * A branch of the EDLD repository: sheets/release.json on that branch, and the
+ * bundle it names from beside it. No tag and no GitHub Release is involved, so
+ * a sheet can follow dev to test sheet code before any of it is released.
+ * Sheets follow main unless their owner picks another branch with ED Dashboard
+ * > Update from branch…; merging to main is what releases sheet code.
  *
  * Why a loader
  * ------------
@@ -20,8 +28,8 @@
  *
  * What it trusts
  * --------------
- * Code comes only from the release manifest's URL, only from
- * raw.githubusercontent.com, and only if its SHA-256 matches the manifest. The
+ * Code comes only from raw.githubusercontent.com, only from beside the
+ * manifest that names it, and only if its SHA-256 matches that manifest. The
  * hash catches a truncated or corrupted download; it does not make the code
  * more trustworthy than the repository it came from, which is the same trust
  * as pasting it by hand. Nothing is installed without the owner confirming
@@ -34,17 +42,21 @@
 
 var LOADER_VERSION = 1;
 
-/** Where the latest release is described. Override with the property below. */
-var EDLD_RELEASE_URL =
-    'https://raw.githubusercontent.com/drworman/EDLD/main/sheets/release.json';
+/** This repository's raw file host. A fork changes this line and nothing else. */
+var EDLD_REPO_RAW = 'https://raw.githubusercontent.com/drworman/EDLD';
+
+/** The branch a sheet follows until its owner picks another. */
+var EDLD_DEFAULT_BRANCH = 'main';
 
 var LP_ = {
   CODE: 'EDLD_CODE_',            // EDLD_CODE_0, EDLD_CODE_1, …
   PARTS: 'EDLD_CODE_PARTS',
   SHA: 'EDLD_CODE_SHA256',
   VERSION: 'EDLD_CODE_VERSION',
+  FROM: 'EDLD_CODE_FROM',        // the manifest URL the installed code came from
   TOKEN: 'EDLD_TOKEN',           // read by Code.gs
-  RELEASE_URL: 'EDLD_RELEASE_URL'
+  BRANCH: 'EDLD_BRANCH',         // set from the menu
+  RELEASE_URL: 'EDLD_RELEASE_URL' // a full manifest URL; overrides the branch
 };
 
 /** Property values are capped at 9 kB; characters, not bytes, are counted here. */
@@ -92,7 +104,7 @@ function edldQuiet_() {
   try { return edld_(); } catch (err) { console.error(err); return null; }
 }
 
-function storeCode_(src, version, sha) {
+function storeCode_(src, version, sha, from) {
   var sp = PropertiesService.getScriptProperties();
   var old = parseInt(sp.getProperty(LP_.PARTS) || '0', 10);
   var props = {};
@@ -103,6 +115,7 @@ function storeCode_(src, version, sha) {
   props[LP_.PARTS] = String(parts);
   props[LP_.SHA] = sha;
   props[LP_.VERSION] = version;
+  props[LP_.FROM] = from;
   sp.setProperties(props, false);                 // one write, all or nothing
   for (var j = parts; j < old; j++) sp.deleteProperty(LP_.CODE + j);
   edldModule_ = null;
@@ -140,6 +153,7 @@ function onOpen(e) {
   }
   if (items.length) menu.addSeparator();
   menu.addItem(m ? 'Upgrade…' : 'Install / Upgrade…', 'edldUpgrade')
+      .addItem('Update from branch…', 'edldSetBranch')
       .addItem('Set sheet token…', 'edldSetToken')
       .addItem('About', 'edldAbout')
       .addToUi();
@@ -179,27 +193,80 @@ function edldMenu7() { edldMenu_(7); }
 function fetchText_(url) {
   if (!/^https:\/\/raw\.githubusercontent\.com\//.test(url)) {
     throw new Error('refusing to fetch from ' + url +
-                    ' — releases come only from raw.githubusercontent.com');
+                    ' — sheet code comes only from raw.githubusercontent.com');
   }
   var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
   if (res.getResponseCode() !== 200) {
-    throw new Error('could not fetch ' + url + ' (HTTP ' + res.getResponseCode() + ')');
+    var err = new Error('could not fetch ' + url + ' (HTTP ' + res.getResponseCode() + ')');
+    err.status = res.getResponseCode();
+    throw err;
   }
   return res.getContentText('UTF-8');
 }
 
+var BRANCH_RE_ = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/;
+
+function branch_() {
+  var b = PropertiesService.getScriptProperties().getProperty(LP_.BRANCH);
+  return b && BRANCH_RE_.test(b) ? b : EDLD_DEFAULT_BRANCH;
+}
+
+function overridden_() {
+  return !!PropertiesService.getScriptProperties().getProperty(LP_.RELEASE_URL);
+}
+
 function releaseUrl_() {
   return PropertiesService.getScriptProperties().getProperty(LP_.RELEASE_URL) ||
-         EDLD_RELEASE_URL;
+         EDLD_REPO_RAW + '/' + branch_() + '/sheets/release.json';
+}
+
+/** Where updates come from, in words. */
+function sourceName_() {
+  if (overridden_()) return releaseUrl_();
+  var b = branch_();
+  return 'branch ' + b + (b === EDLD_DEFAULT_BRANCH ? ' (releases)' : ' (development builds)');
+}
+
+/**
+ * A file named by the manifest, from beside the manifest. Only a bare file
+ * name is accepted, so a manifest cannot send the loader anywhere else.
+ */
+function besideManifest_(manifestUrl, file) {
+  if (!/^[A-Za-z0-9._-]+$/.test(String(file || ''))) {
+    throw new Error('the release manifest names its bundle as "' + file +
+                    '"; only a file name beside the manifest is accepted');
+  }
+  return manifestUrl.replace(/[^\/]*$/, file);
 }
 
 /** Fetch and check the release manifest. Throws with a readable message. */
 function fetchRelease_() {
-  var rel = JSON.parse(fetchText_(releaseUrl_()));
-  if (!rel.version || !rel.bundle || !rel.bundle.url || !rel.bundle.sha256) {
+  var url = releaseUrl_();
+  var rel;
+  try {
+    rel = JSON.parse(fetchText_(url));
+  } catch (err) {
+    if (err.status === 404) {
+      throw new Error('there is no sheet release on ' + sourceName_() +
+                      ' — ' + url + ' was not found. ' +
+                      (overridden_() ? 'Check the EDLD_RELEASE_URL script property.'
+                                     : 'Pick another branch with ED Dashboard > ' +
+                                       'Update from branch…, or wait until one is merged.'));
+    }
+    throw err;
+  }
+  if (!rel.version || !rel.bundle || !rel.bundle.file || !rel.bundle.sha256) {
     throw new Error('the release manifest is missing version or bundle details');
   }
+  rel.manifestUrl = url;
+  rel.bundleUrl = besideManifest_(url, rel.bundle.file);
+  rel.sha256 = String(rel.bundle.sha256).toLowerCase();
   return rel;
+}
+
+/** "20260926-dev" alone, or with the bundle's hash when versions tie. */
+function label_(version, sha, other) {
+  return version + (other && sha ? ' (' + sha.slice(0, 8) + ')' : '');
 }
 
 function edldUpgrade() {
@@ -207,12 +274,14 @@ function edldUpgrade() {
   var ss = SpreadsheetApp.getActive();
   var sp = PropertiesService.getScriptProperties();
   var installed = sp.getProperty(LP_.VERSION) || '';
+  var installedSha = sp.getProperty(LP_.SHA) || '';
   var current = edldQuiet_();
   var sheetHave = current ? current.sheetVersion() : 0;
 
   var rel;
   try { rel = fetchRelease_(); } catch (err) {
-    ui.alert('Upgrade', 'Could not read the latest release.\n\n' + err.message, ui.ButtonSet.OK);
+    ui.alert('Upgrade', 'Could not read the latest release from ' + sourceName_() +
+             '. Nothing was changed.\n\n' + err.message, ui.ButtonSet.OK);
     return;
   }
   if (Number(rel.min_loader || 1) > LOADER_VERSION) {
@@ -224,28 +293,43 @@ function edldUpgrade() {
     return;
   }
   var sheetTo = Number(rel.sheet_version || 0);
-  if (installed === rel.version && current && sheetHave >= sheetTo) {
+  // By hash, not version: a development branch keeps one version across many
+  // commits, and each of them is new code to install.
+  if (current && installedSha === rel.sha256 && sheetHave >= sheetTo) {
     ui.alert('Upgrade', 'This sheet is up to date — EDLD ' + installed +
-             ', sheet layout v' + sheetHave + '.', ui.ButtonSet.OK);
+             ', sheet layout v' + sheetHave + ', from ' + sourceName_() + '.',
+             ui.ButtonSet.OK);
     return;
   }
 
-  var ask = (installed ? 'Upgrade this sheet from EDLD ' + installed + ' to ' + rel.version + '?'
+  var tie = installed === rel.version;
+  var ask = (installed ? 'Upgrade this sheet from EDLD ' + label_(installed, installedSha, tie) +
+                         ' to ' + label_(rel.version, rel.sha256, tie) + '?'
                        : 'Install EDLD ' + rel.version + ' in this sheet?') +
+            '\n\nFrom ' + sourceName_() + '.' +
             '\n\nThe sheet code is replaced' +
             (sheetTo > sheetHave ? ', and the layout goes from v' + sheetHave + ' to v' +
              sheetTo + '. Deposits is copied to a hidden backup tab first' : '') +
-            '. Your deposits, settings, URL and token are kept.';
+            '. Your deposits, settings, URL and token are kept.' +
+            (sheetTo < sheetHave
+              ? '\n\nThis sheet\'s layout (v' + sheetHave + ') is newer than this code ' +
+                'expects (v' + sheetTo + ') — usually a step back from a development ' +
+                'build. Nothing in the sheet is undone; the older code leaves the ' +
+                'newer columns alone.'
+              : '');
   if (ui.alert('Upgrade', ask, ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
 
   var src, mod;
   try {
-    src = fetchText_(rel.bundle.url);
+    src = fetchText_(rel.bundleUrl);
     var sha = sha256Hex_(src);
-    if (sha !== String(rel.bundle.sha256).toLowerCase()) {
+    if (sha !== rel.sha256) {
       throw new Error('the downloaded code does not match the release manifest ' +
                       '(SHA-256 ' + sha.slice(0, 12) + '…, expected ' +
-                      String(rel.bundle.sha256).slice(0, 12) + '…)');
+                      rel.sha256.slice(0, 12) + '…). GitHub can serve a file ' +
+                      'for a few minutes after a push changes it; if this ' +
+                      'branch was pushed just now, wait five minutes and run ' +
+                      'Upgrade again.');
     }
     mod = compile_(src);
   } catch (err) {
@@ -265,7 +349,7 @@ function edldUpgrade() {
   lock.waitLock(30000);
   var done;
   try {
-    storeCode_(src, rel.version, rel.bundle.sha256.toLowerCase());
+    storeCode_(src, rel.version, rel.sha256, rel.manifestUrl);
     done = edld_().upgradeSheet();
   } catch (err) {
     ui.alert('Upgrade', 'The upgrade stopped part way.\n\n' + err.message +
@@ -289,6 +373,34 @@ function edldUpgrade() {
   }
   ui.alert('Upgrade', lines.join('\n'), ui.ButtonSet.OK);
   onOpen();
+}
+
+// ── where updates come from ───────────────────────────────────────────────────
+
+function edldSetBranch() {
+  var ui = SpreadsheetApp.getUi();
+  var sp = PropertiesService.getScriptProperties();
+  var res = ui.prompt('Update from branch',
+    'Which branch of EDLD should this sheet take its code from?\n\n' +
+    'Now: ' + sourceName_() + '\n\n' +
+    '  main — releases. Leave the box blank for this.\n' +
+    '  dev — development builds, to try sheet changes before they are released.\n\n' +
+    'Changing this installs nothing by itself: run Upgrade afterwards.',
+    ui.ButtonSet.OK_CANCEL);
+  if (res.getSelectedButton() !== ui.Button.OK) return;
+  var branch = String(res.getResponseText() || '').trim() || EDLD_DEFAULT_BRANCH;
+  if (!BRANCH_RE_.test(branch) || branch.indexOf('..') >= 0) {
+    ui.alert('Update from branch', '"' + branch + '" is not a branch name. ' +
+             'Nothing was changed.', ui.ButtonSet.OK);
+    return;
+  }
+  if (branch === EDLD_DEFAULT_BRANCH) sp.deleteProperty(LP_.BRANCH);
+  else sp.setProperty(LP_.BRANCH, branch);
+  ui.alert('Update from branch', 'This sheet now updates from ' + sourceName_() +
+           '. Run ED Dashboard > Upgrade to install from it.' +
+           (overridden_() ? '\n\nNote: the EDLD_RELEASE_URL script property is ' +
+                            'set, and takes precedence over the branch.' : ''),
+           ui.ButtonSet.OK);
 }
 
 // ── token ─────────────────────────────────────────────────────────────────────
@@ -328,12 +440,15 @@ function askToken_(ui, firstTime) {
 function edldAbout() {
   var sp = PropertiesService.getScriptProperties();
   var m = edldQuiet_();
+  var sha = sp.getProperty(LP_.SHA) || '';
   SpreadsheetApp.getUi().alert('ED Dashboard',
-    'EDLD sheet code: ' + (sp.getProperty(LP_.VERSION) || 'not installed') + '\n' +
+    'EDLD sheet code: ' + (sp.getProperty(LP_.VERSION) || 'not installed') +
+    (sha ? ' (' + sha.slice(0, 8) + ')' : '') + '\n' +
     'Sheet layout: v' + (m ? m.sheetVersion() : 0) +
     (m ? ' (this code expects v' + m.SHEET_VERSION + ')' : '') + '\n' +
     'Loader: v' + LOADER_VERSION + '\n' +
     'Token: ' + (sp.getProperty(LP_.TOKEN) ? 'set' : 'not set') + '\n' +
-    'Releases from: ' + releaseUrl_(),
+    'Updates from: ' + sourceName_() + '\n' +
+    'Installed from: ' + (sp.getProperty(LP_.FROM) || '—'),
     SpreadsheetApp.getUi().ButtonSet.OK);
 }

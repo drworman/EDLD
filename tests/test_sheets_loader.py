@@ -2,7 +2,8 @@
 tests/test_sheets_loader.py — Installing and upgrading a sheet from its own menu.
 
 Loader.gs is the one file a sheet owner pastes; everything else arrives through
-ED Dashboard > Upgrade. These run the real Loader.gs and the real generated
+ED Dashboard > Upgrade, from a branch of the repository — main unless the
+owner picks another — with no tag or GitHub Release involved. These run the real Loader.gs and the real generated
 bundle under Node, against tests/gas_fake.js, and check what an owner would
 notice: that an old sheet comes through with every deposit intact, that
 nothing is installed that does not match the release, that the token the
@@ -18,6 +19,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -30,9 +32,16 @@ BUNDLE = (SHEETS / "edld_sheet.js").read_text(encoding="utf-8")
 NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="needs node")
 
-RELEASE_URL = re.search(r"var EDLD_RELEASE_URL =\s*'([^']+)'",
-                        LOADER.read_text(encoding="utf-8")).group(1)
-BUNDLE_URL = "https://raw.githubusercontent.com/drworman/EDLD/T1/sheets/edld_sheet.js"
+REPO_RAW = re.search(r"var EDLD_REPO_RAW = '([^']+)'",
+                     LOADER.read_text(encoding="utf-8")).group(1)
+
+
+def _on(branch: str, name: str) -> str:
+    return f"{REPO_RAW}/{branch}/sheets/{name}"
+
+
+RELEASE_URL = _on("main", "release.json")
+BUNDLE_URL = _on("main", "edld_sheet.js")
 TOKEN = "squadron-token-0123456789"
 
 COLUMNS = re.findall(r"'([a-z_]+)'", re.search(
@@ -45,15 +54,18 @@ HEADERS = re.findall(r"'([^']+)'", re.search(
 
 def _release(version="T1", bundle=BUNDLE, **over) -> dict:
     rel = {"version": version, "sheet_version": 1, "min_loader": 1,
-           "bundle": {"url": BUNDLE_URL,
+           "bundle": {"file": "edld_sheet.js",
                       "sha256": hashlib.sha256(bundle.encode()).hexdigest()}}
     rel.update(over)
     return rel
 
 
 def _run(steps, *, sheets=None, script_props=None, doc_props=None, ui=None,
-         release=None, bundle=BUNDLE) -> dict:
+         release=None, bundle=BUNDLE, branch="main", urls=None) -> dict:
+    """Run the loader with ``release`` and ``bundle`` published on ``branch``."""
     rel = release if release is not None else _release(bundle=bundle)
+    published = {_on(branch, "release.json"): json.dumps(rel),
+                 _on(branch, "edld_sheet.js"): bundle}
     spec = {
         "files": [str(LOADER)],
         "steps": steps,
@@ -61,7 +73,7 @@ def _run(steps, *, sheets=None, script_props=None, doc_props=None, ui=None,
         "scriptProps": script_props or {},
         "docProps": doc_props or {},
         "ui": ui or [],
-        "urls": {RELEASE_URL: json.dumps(rel), rel["bundle"]["url"]: bundle},
+        "urls": urls if urls is not None else published,
     }
     out = subprocess.run([NODE, str(FAKE)], input=json.dumps(spec),
                          capture_output=True, text=True, timeout=60)
@@ -236,7 +248,9 @@ def test_upgrading_an_up_to_date_sheet_changes_nothing():
 
 def test_a_later_release_keeps_the_token_and_asks_nothing_else():
     first = _install()
-    later = _run([{"call": "edldUpgrade"}], release=_release(version="T2"),
+    newer = BUNDLE + "\n// T2\n"
+    later = _run([{"call": "edldUpgrade"}], bundle=newer,
+                 release=_release(version="T2", bundle=newer),
                  script_props=first["scriptProps"], doc_props=first["docProps"],
                  ui=["YES"])
     assert later["scriptProps"]["EDLD_CODE_VERSION"] == "T2"
@@ -260,12 +274,22 @@ def test_code_that_does_not_match_the_manifest_is_not_installed():
     assert res["scriptProps"] == {}
 
 
-def test_code_from_anywhere_but_github_raw_is_not_fetched():
+@pytest.mark.parametrize("named", ["https://example.com/edld_sheet.js",
+                                   "../main/sheets/edld_sheet.js", "a/b.js", ""])
+def test_a_manifest_cannot_send_the_loader_anywhere_else(named):
+    """The bundle comes from beside the manifest or not at all."""
     rel = _release()
-    rel["bundle"]["url"] = "https://example.com/edld_sheet.js"
+    rel["bundle"]["file"] = named
     res = _run([{"call": "edldUpgrade"}], release=rel, ui=["YES"])
-    assert "refusing" in res["alerts"][-1]
-    assert "https://example.com/edld_sheet.js" not in res["fetched"]
+    assert res["scriptProps"] == {}
+    assert res["fetched"] == [RELEASE_URL]
+
+
+def test_a_release_url_elsewhere_is_not_fetched():
+    elsewhere = "https://example.com/release.json"
+    res = _run([{"call": "edldUpgrade"}], script_props={"EDLD_RELEASE_URL": elsewhere},
+               urls={elsewhere: json.dumps(_release())})
+    assert "refusing" in res["alerts"][-1] and res["fetched"] == []
 
 
 def test_a_release_needing_a_newer_loader_says_so_and_stops():
@@ -293,8 +317,119 @@ def test_stored_code_that_was_altered_is_refused_on_use():
 def test_the_committed_manifest_describes_the_committed_bundle():
     rel = json.loads((SHEETS / "release.json").read_text(encoding="utf-8"))
     assert rel["bundle"]["sha256"] == hashlib.sha256(BUNDLE.encode()).hexdigest()
-    assert rel["version"] == (ROOT / "version").read_text(encoding="utf-8").strip()
-    assert rel["bundle"]["url"].endswith(f"/{rel['version']}/sheets/edld_sheet.js")
+    assert rel["version"] == (ROOT / "version").read_text(encoding="utf-8").strip(), (
+        "release.json is stale — the version file changed and the bundle was not "
+        "rebuilt. Run python3 sheets/build_bundle.py and commit the result.")
+    assert rel["bundle"]["file"] == "edld_sheet.js"
+    assert rel["loader"]["file"] == "Loader.gs"
     loader_version = int(re.search(r"var LOADER_VERSION = (\d+);",
                                    LOADER.read_text(encoding="utf-8")).group(1))
     assert rel["min_loader"] <= loader_version == rel["loader"]["version"]
+
+
+# ── following a branch ────────────────────────────────────────────────────────
+
+def _pick_branch(answer: str, props=None) -> dict:
+    return _run([{"call": "edldSetBranch"}], script_props=props,
+                ui=[{"button": "OK", "text": answer}])
+
+
+def test_a_sheet_follows_main_until_told_otherwise():
+    res = _install()
+    assert res["fetched"] == [RELEASE_URL, BUNDLE_URL]
+    assert res["scriptProps"]["EDLD_CODE_FROM"] == RELEASE_URL
+
+
+def test_following_dev_takes_manifest_and_bundle_from_dev_with_no_tag():
+    """What testing sheet code before a release needs: a pushed branch."""
+    props = _pick_branch("dev")["scriptProps"]
+    assert props["EDLD_BRANCH"] == "dev"
+    res = _run([{"call": "edldUpgrade"}], branch="dev", script_props=props,
+               ui=["YES", {"button": "OK", "text": TOKEN}])
+    assert res["fetched"] == [_on("dev", "release.json"), _on("dev", "edld_sheet.js")]
+    assert res["scriptProps"]["EDLD_CODE_VERSION"] == "T1"
+    assert "branch dev" in res["alerts"][0]
+
+
+def test_a_branch_with_a_slash_works():
+    props = _pick_branch("exp/server-mode")["scriptProps"]
+    res = _run([{"call": "edldUpgrade"}], branch="exp/server-mode", script_props=props,
+               ui=["YES", {"button": "OK", "text": TOKEN}])
+    assert res["scriptProps"]["EDLD_CODE_VERSION"] == "T1"
+
+
+def test_a_blank_branch_goes_back_to_main():
+    props = _pick_branch("dev")["scriptProps"]
+    assert "EDLD_BRANCH" not in _pick_branch("", props)["scriptProps"]
+
+
+@pytest.mark.parametrize("bad", ["-rf", "a..b", "has space", "x" * 101])
+def test_a_branch_that_is_not_a_branch_name_is_refused(bad):
+    res = _pick_branch(bad)
+    assert "EDLD_BRANCH" not in res["scriptProps"]
+    assert "not a branch name" in res["alerts"][-1]
+
+
+def test_a_branch_with_no_release_says_so():
+    """main has no sheets/release.json until the loader is merged."""
+    res = _run([{"call": "edldUpgrade"}], urls={})
+    msg = res["alerts"][-1]
+    assert "no sheet release on branch main" in msg and "Update from branch" in msg
+    assert res["scriptProps"] == {}
+
+
+def test_a_new_build_with_the_same_version_is_installed():
+    """On dev the version file stays put across commits; the hash does not."""
+    first = _install(branch="dev", script_props={"EDLD_BRANCH": "dev"})
+    rebuilt = BUNDLE + "\n// another dev commit\n"
+    again = _run([{"call": "edldUpgrade"}], branch="dev", bundle=rebuilt,
+                 release=_release(bundle=rebuilt),
+                 script_props=first["scriptProps"], doc_props=first["docProps"],
+                 ui=["YES"])
+    new_sha = hashlib.sha256(rebuilt.encode()).hexdigest()
+    assert again["scriptProps"]["EDLD_CODE_SHA256"] == new_sha
+    assert new_sha[:8] in again["alerts"][0], "the hashes tell two T1s apart"
+
+
+def test_a_stale_raw_copy_is_explained():
+    """raw.githubusercontent.com caches for minutes after a push, so the
+    manifest and the bundle can briefly disagree."""
+    rel = _release(bundle=BUNDLE + "// newer, not yet served")
+    res = _run([{"call": "edldUpgrade"}], release=rel, ui=["YES"])
+    assert "wait five minutes" in res["alerts"][-1]
+    assert res["scriptProps"] == {}
+
+
+def test_stepping_back_to_an_older_layout_says_so_and_undoes_nothing():
+    first = _install()
+    older = BUNDLE + "\n// main, older\n"
+    back = _run([{"call": "edldUpgrade"}], bundle=older,
+                release=_release(version="T0", bundle=older, sheet_version=0),
+                script_props=first["scriptProps"], doc_props=first["docProps"],
+                ui=["YES"])
+    assert "newer than this code expects" in back["alerts"][0]
+    assert back["docProps"]["EDLD_SHEET_VERSION"] == "1"
+
+
+def test_about_names_where_updates_come_from():
+    res = _run([{"call": "edldAbout"}], script_props={"EDLD_BRANCH": "dev"})
+    assert "branch dev (development builds)" in res["alerts"][0]
+
+
+# ── the manifest is rebuilt when it must be ───────────────────────────────────
+
+def test_the_bundle_check_passes_on_this_commit():
+    out = subprocess.run([sys.executable, str(SHEETS / "build_bundle.py"), "--check"],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout + out.stderr
+
+
+def test_the_bundle_check_fails_after_a_version_bump(tmp_path):
+    """The mistake that shipped a manifest naming the wrong version."""
+    for name in ("edld_sheet.js", "release.json"):
+        (tmp_path / name).write_bytes((SHEETS / name).read_bytes())
+    out = subprocess.run([sys.executable, str(SHEETS / "build_bundle.py"), "--check",
+                          "--out-dir", str(tmp_path), "--version", "29991231"],
+                         capture_output=True, text=True)
+    assert out.returncode == 1
+    assert "stale" in out.stdout and "build_bundle.py" in out.stdout
