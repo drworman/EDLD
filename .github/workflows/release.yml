@@ -13,15 +13,26 @@ name: Release
 # inside every binary and every archive. Read docs/LICENSING.md before changing
 # how these artefacts are produced.
 #
-# Two triggers:
+# Three triggers:
 #
-#   1. push: tags: ['*']
+#   1. push: tags: ['[0-9]*']
 #      Fires on any tag push or force-push, from any branch.
 #      Use for test builds: git push origin YYYYMMDD
 #      Re-trigger: git push --force origin YYYYMMDD
 #
 #   2. release: types: [published]
 #      Fires when you publish a release in the GitHub UI.
+#
+#   3. workflow_dispatch (Actions > Release > Run workflow)
+#      Builds and smoke-tests any branch — dev included — without a tag. With
+#      dry_run left on (the default) nothing is published; the binaries are
+#      attached to the run as artefacts. Artefacts are named from the version
+#      file, never from the branch.
+#
+# The version every job uses is the verify job's output, read from the version
+# file. The workflow-level VERSION below is the ref name, which is the version
+# only on a tag; on a branch it is the branch's name, and comparing the binary
+# against that failed every dispatch run on dev.
 #
 # Artifacts:
 #   EDLD-{version}-linux-x86_64.tar.gz            binary
@@ -124,6 +135,14 @@ jobs:
           fi
           echo "All required paths present."
 
+      # The sheet bundle and its manifest are generated from sheets/*.gs and
+      # the version file, and committed, because survey sheets install them
+      # straight from the branch. Bumping the version without rebuilding ships
+      # a manifest that names the wrong version. Standard library only.
+      - name: Sheet bundle is current
+        shell: bash
+        run: python3 sheets/build_bundle.py --check
+
 # -- Job 2: Binaries ---------------------------------------------------------
 
   binaries:
@@ -138,6 +157,9 @@ jobs:
     # configured. Job-level env is visible to step `if`, so the skip-when-absent
     # behaviour now works as documented.
     env:
+      # The version file, via verify — not the ref name, which on a manual
+      # run from a branch is the branch. See the note at the top.
+      VERSION: ${{ needs.verify.outputs.version }}
       WIN_CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
       MAC_CERT: ${{ secrets.MACOS_CERT_P12_BASE64 }}
     strategy:
@@ -464,7 +486,9 @@ jobs:
   checksums:
     name: Aggregate checksums
     runs-on: ubuntu-latest
-    needs: [binaries]
+    needs: [verify, binaries]
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
 
     steps:
       - name: Checkout

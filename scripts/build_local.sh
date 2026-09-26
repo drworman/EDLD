@@ -94,6 +94,11 @@ if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; th
 fi
 echo "  all required paths present"
 
+# The same sheet-bundle check the workflow's verify job runs, so a version
+# bump without a rebuild is caught here rather than on the tag.
+"$PY" sheets/build_bundle.py --check \
+  || die "Run: $PY sheets/build_bundle.py   (then commit sheets/edld_sheet.js and sheets/release.json)"
+
 # ── Build tooling ────────────────────────────────────────────────────────────
 "$PY" - <<'EOF' || die "Build dependencies missing. Run: pip install -r requirements-dev.txt"
 import importlib.util, sys
