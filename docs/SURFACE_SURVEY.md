@@ -94,7 +94,10 @@ position and never recomputed. That is what the shared sheet matches on.
 Publishing needs a Google Sheet with a small Apps Script bound to it. No Google
 Cloud project, no OAuth, no client library: a URL and a token, which is also all
 a squadron leader has to hand out. Setup is in
-[`sheets/README.md`](../sheets/README.md); the script is `sheets/Code.gs`.
+[`sheets/README.md`](../sheets/README.md). The sheet's owner pastes one file,
+`sheets/Loader.gs`, once; after that the sheet installs and upgrades its own
+code and layout from its **ED Dashboard → Upgrade…** menu, keeping its data,
+URL and token.
 
 It reads as well as writes. Arriving at a body, EDLD asks the sheet what is
 known about it and merges the answer in, so the in-game compass can point at
@@ -125,8 +128,8 @@ a template, `sheets/Mining_Dashboard.xlsx`: filter by system or commodity, sort
 by any column, with the rows banded and depleted sites struck through, in one
 of five HUD colour schemes or your own. Start the sheet from it instead of from
 a blank one and the receiver writes into it unchanged. It is optional — the
-sharing above works the same either way. Setup, and the companion script that
-applies the colours and adds click-to-sort, are in
+sharing above works the same either way. The code the loader installs also
+applies its colours and adds click-to-sort; setup is in
 [`sheets/README.md`](../sheets/README.md#the-dashboard).
 
 ### Test data

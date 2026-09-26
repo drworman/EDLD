@@ -9,10 +9,14 @@ Everything here is off until you turn it on.
 
 | File | What it is |
 |---|---|
-| `Code.gs` | The receiver. Accepts deposits from EDLD and writes the `Deposits` tab. |
+| `Loader.gs` | **The one file you paste into the sheet.** Installs and upgrades everything else from the sheet's own menu. |
 | `Mining_Dashboard.xlsx` | Optional starting spreadsheet: a themed, filterable, sortable dashboard over `Deposits`. |
-| `Dashboard.gs` | Optional companion to the template: applies the theme, adds click-to-sort, repairs formulas. |
-| `build_dashboard.py` | Regenerates `Mining_Dashboard.xlsx`. Only needed if you change the template. |
+| `Code.gs` | Source: the receiver, which accepts deposits from EDLD and writes the `Deposits` tab. |
+| `Dashboard.gs` | Source: the dashboard's theme, click-to-sort and formula repair. |
+| `Upgrade.gs` | Source: the sheet's upgrade steps, run by Upgrade after new code is installed. |
+| `edld_sheet.js` | Generated: the three sources bundled, which is what the loader installs. Never edit. |
+| `release.json` | Generated: the version, the bundle's address and SHA-256, and what it needs. |
+| `build_dashboard.py` | Regenerates the template, the bundle and the manifest. |
 
 ## What you are setting up
 
@@ -39,29 +43,27 @@ Google Sheets. It arrives with an empty `Deposits` tab already carrying the
 header row, so the receiver writes straight into it. See [The
 dashboard](#the-dashboard) below.
 
-**2. Open the script editor.** Extensions → Apps Script. Delete whatever is in
-`Code.gs` and paste in the contents of `Code.gs` from this directory.
+**2. Paste the loader.** Extensions → Apps Script. Replace everything in
+`Code.gs` with the contents of `Loader.gs` from this directory (the file's name
+in the editor does not matter), and save. It is the only file the project
+needs, and the only one you will ever paste: everything else is installed and
+upgraded from the sheet's menu. Why it works that way is in [Upgrading a
+sheet](#upgrading-a-sheet).
 
-Using the template? Also add `Dashboard.gs`: the **+** beside Files → Script,
-name it `Dashboard`, paste. It sits beside `Code.gs` rather than replacing it;
-the two share a project and nothing else.
+**3. Install.** Reload the spreadsheet. An **ED Dashboard** menu appears; run
+**Install / Upgrade…**. Google asks you to authorise the script the first time
+— it needs to fetch the release from GitHub and to change this spreadsheet.
+It will also warn that the app is unverified: that is the normal notice for a
+script you added yourself and have not submitted to Google for review.
+Advanced → Go to *(project name)*.
 
-**3. Set a token.** Near the top:
-
-```js
-var TOKEN = 'CHANGE-ME-BEFORE-DEPLOYING';
-```
-
-Replace it with something long and random. This is the only thing standing
-between your sheet and anyone who learns the URL. A password manager's generate
-button is fine; so is:
-
-```sh
-head -c 32 /dev/urandom | base64
-```
-
-The script refuses to accept anything at all while the token is still the
-placeholder, so a half-finished setup fails closed rather than open.
+Upgrade shows the version it found and asks before installing anything. It
+then asks for a **token**: leave the box blank and it generates one and shows
+it to you. The token is the only thing standing between your sheet and anyone
+who learns the URL, and it is kept in the script's properties rather than in
+any file, so upgrades never touch it. **ED Dashboard → Set sheet token…**
+changes it later. Until one is set, the script refuses every write, so a
+half-finished setup fails closed rather than open.
 
 **4. Deploy.** Deploy → New deployment → gear icon → Web app.
 
@@ -112,9 +114,9 @@ their own `config.toml` and their finds start landing in your sheet.
 Who can *read* the sheet is a separate question, settled the way it always was:
 the sheet's own Share button. EDLD does not touch it.
 
-To revoke someone, change `TOKEN` in the script and redeploy (Deploy → Manage
-deployments → pencil → New version). Everyone keeps the same URL and everyone
-gets the new token except the person you are removing.
+To revoke someone, run **ED Dashboard → Set sheet token…** and give the new
+token to everyone but the person you are removing. It takes effect on the next
+request — no redeploy — and everyone keeps the same URL.
 
 ## Duplicates
 
@@ -154,19 +156,71 @@ Blank cells are always filled in. Any text Sheets would run as a formula —
 starting with `=`, `+`, `-` or `@` — is stored as text, so a note cannot
 execute in anyone's copy of the sheet.
 
-### Updating an existing sheet
+## Upgrading a sheet
 
-A sheet set up before notes needs the current `Code.gs`: paste it over the old
-one and publish a new version (Deploy → Manage deployments → pencil → New
-version). The URL and token stay the same. Its header row gains the new columns
-on the next write. Until then it accepts writes and drops the fields it has no
-column for — the **Test connection** button in Options says so rather than
+After upgrading EDLD, open the sheet and run **ED Dashboard → Upgrade…**. It
+reads the latest release, tells you what it will change, and on your say-so:
+
+1. fetches the sheet code for that release and checks its SHA-256 against the
+   release manifest — a mismatch installs nothing;
+2. copies `Deposits` to a hidden tab named `Deposits backup <date>`;
+3. installs the code and runs the sheet's upgrade steps — new columns, the
+   dashboard's formulas and layout, tidying data an older version wrote —
+   recording each as it completes, so an interrupted upgrade resumes where it
+   stopped;
+4. re-applies the theme.
+
+Deposits are only ever added to, your Settings values are left as they are,
+and the URL and token do not change. EDLD's own writes wait while it runs.
+Running it again on an up-to-date sheet says so and changes nothing. **ED
+Dashboard → About** shows what is installed.
+
+**Test connection** in EDLD's Options names the release the sheet runs, and
+fails with "run ED Dashboard > Upgrade" when the sheet is too old to store
+everything this EDLD sends. An out-of-date sheet still accepts writes; it drops
+the fields it has no column for, which is why the test says so rather than
 reporting success.
 
-A sheet started from the dashboard template also wants the current
-`Dashboard.gs`; paste it in and run **ED Dashboard → Repair dashboard
-formulas**, which adds the Notes column, re-lays the table and clears any old
-`Depleted` amounts. Nothing needs re-importing.
+### A sheet set up before the Upgrade menu
+
+Sheets set up by pasting `Code.gs` (and `Dashboard.gs`) have no Upgrade menu,
+so they need this once:
+
+1. Open Extensions → Apps Script and **copy your token** — the text between the
+   quotes in `var TOKEN = '…'` near the top of `Code.gs`. The loader asks for
+   it; giving it the same one means nobody's EDLD needs changing.
+2. Delete every file in the project, then paste `Loader.gs` as its only file
+   and save.
+3. Reload the spreadsheet and run **ED Dashboard → Install / Upgrade…**. Paste
+   the token when asked.
+4. Deploy → Manage deployments → pencil → Version: **New version** → Deploy.
+   The web app keeps its URL. This is the last redeploy the sheet needs: from
+   now on the deployment runs the loader, and the loader runs whatever Upgrade
+   last installed.
+
+Until step 4 the web app still runs the old script, so writes keep working
+throughout.
+
+### Why a loader
+
+An Apps Script project can rewrite its own files only through the Apps Script
+API, and that API is off in the hidden Cloud project every sheet script gets.
+Turning it on means a Cloud console visit for every sheet owner, which is
+exactly what this setup promises you never need. So `Loader.gs` never changes:
+it keeps the entry points Google calls — the web app, the menu, the edit
+triggers — and runs the real code, which Upgrade stores in the script's
+properties and the loader re-checks against its SHA-256 every time it loads it.
+
+The check guards against a damaged download or stored copy. It does not make
+the code more trustworthy than this repository, which is the same trust as
+pasting it by hand: code comes only from the address in the release manifest,
+only from `raw.githubusercontent.com`, and never without you confirming the
+version. A release that needs a newer loader says so and stops; that is the one
+case where a sheet needs another paste.
+
+To test a release before it is on `main` — or to follow a fork — set the
+script property `EDLD_RELEASE_URL` (Project Settings → Script properties) to
+that `release.json`'s raw address.
 
 ## Things worth knowing
 
@@ -204,7 +258,7 @@ whatever is in `Deposits`, so they fill themselves as commanders publish.
 Deposits flagged `is_test` are left out, as they are from EDLD's own reads.
 
 **Sorting.** Sort By and Order (E5:F5) sort the table; the header of the sorted
-column carries ▲ or ▼. With `Dashboard.gs` installed, clicking a header does the
+column carries ▲ or ▼. With EDLD installed in the sheet, clicking a header does the
 same: once to sort by it, again to reverse. Amount and Density sort by rank —
 Low, Medium, High, the levels EDLD records — rather than alphabetically. The sort is shared, since it
 lives in two cells: whoever clicks last decides it for everyone viewing.
@@ -222,13 +276,13 @@ the rest of the row aligns with their first line.
 **Theme.** Settings B5 picks one of five presets — Classic HUD, Federation,
 Empire, Alliance, Thargoid — or Custom, which uses the hex codes in B10:B21.
 B6:B7 pick the title and body fonts. The template arrives in Classic HUD;
-changing any of this needs `Dashboard.gs`, because Sheets cannot colour a cell
+changing any of this needs EDLD installed in the sheet, because Sheets cannot colour a cell
 from a formula and something has to apply the codes. It re-applies on every
 edit to Settings, or from the **ED Dashboard** menu. More presets go on the
 hidden `Themes` tab: add a column before Custom and it joins the list.
 
-`Dashboard.gs` replaces every conditional formatting rule on the Dashboard tab
-each time it applies the theme. Rules of your own belong in `styleDashboard_`.
+Applying the theme replaces every conditional formatting rule on the Dashboard
+tab. Rules of your own belong in `styleDashboard_` in `Dashboard.gs`.
 
 **If the table shows nothing at all** after importing — no header when a filter
 is set — the import dropped a formula. ED Dashboard → Repair dashboard formulas
@@ -259,6 +313,29 @@ right fields in `Code.gs` `COLUMNS`, the sort rank must match the levels in
 `core/mining_db.py`, and the two copies of Classic HUD must agree. Changing
 `COLUMNS` — appending, as it always should be — leaves the letters valid; the
 test is there for the day something is inserted instead.
+
+### The bundle and releases
+
+The same build writes `edld_sheet.js` — `Code.gs`, `Dashboard.gs` and
+`Upgrade.gs` joined into the body the loader runs — and `release.json`, which
+names the bundle at this version's tag with its SHA-256, the sheet layout
+version it brings a sheet to, and the oldest loader it runs under. Both are
+committed; the loader reads `release.json` from `main` and fetches the bundle
+from the tag it names, so **rebuild after bumping `version` and before tagging**.
+`tests/test_sheets_dashboard.py` fails if either is stale, and
+`tests/test_sheets_loader.py` checks the manifest matches the `version` file.
+
+A change that needs the sheet itself changed — a column, a tab, a layout —
+is a new entry at the end of `SHEET_MIGRATIONS` in `Upgrade.gs`, with the next
+`to:` number. The rules for a step are at the top of that file; the short
+version is that it must be safe to run twice and may only add to `Deposits`.
+`tests/test_sheets_loader.py` runs the loader, the bundle and an old sheet
+through a full upgrade under Node, with `tests/gas_fake.js` standing in for
+Google's services.
+
+Raise `LOADER_VERSION` in `Loader.gs` only when the loader itself must change,
+and `MIN_LOADER` in `Upgrade.gs` only when a bundle cannot run under an older
+one: every raise is another paste for every sheet owner.
 
 Do not round-trip the template through Excel or LibreOffice. Neither can
 evaluate the dashboard's formulas, and saving from either replaces them with

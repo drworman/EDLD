@@ -247,14 +247,15 @@ Enabled                  = false
 #
 # This section is the optional other half: publishing your survey to a Google
 # Sheet and reading back what other commanders found.  Setup is in
-# sheets/README.md — you need a sheet, the Apps Script from sheets/Code.gs
-# bound to it, and the URL and token it gives you.  Experimental.
+# sheets/README.md — you need a sheet with sheets/Loader.gs pasted into its
+# Apps Script, and the URL and token it gives you.  The sheet upgrades itself
+# from its own ED Dashboard > Upgrade menu.  Experimental.
 #
 [SurfaceSurvey]
 Enabled          = false   # master switch for sharing; recording works regardless
 
 # WebAppURL      = "https://script.google.com/macros/s/.../exec"
-# Token          = ""      # the shared secret set in Code.gs; treat it as a password
+# Token          = ""      # the sheet's shared secret (ED Dashboard > Set sheet token); treat it as a password
 # ReporterName   = ""      # fills the reported_by column; blank publishes anonymously
 
 # Fetch          = true    # read other commanders' deposits on arriving at a body

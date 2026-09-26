@@ -6,6 +6,50 @@ Last updated: 20260925
 
 ## Unreleased
 
+### Added: a survey sheet upgrades itself, from its own menu
+
+Upgrading a shared sheet meant pasting new script files into Apps Script,
+redeploying, and hoping nothing was missed — for every sheet, every release.
+Now the owner pastes one file, `sheets/Loader.gs`, once. After that, upgrading
+EDLD and then running **ED Dashboard → Upgrade…** in the sheet is the whole
+job.
+
+Upgrade reads `sheets/release.json` from `main`, shows the owner the version and
+what will change, and on their say-so fetches the sheet code from that
+release's tag, checks its SHA-256 against the manifest, copies `Deposits` to a
+hidden backup tab, installs the code and runs the sheet's upgrade steps. Steps
+are recorded as they complete, so an interrupted upgrade resumes; running it
+on an up-to-date sheet says so and changes nothing. Deposits are only ever
+added to, Settings values are left alone, EDLD's writes wait on the same lock
+while it runs, and the web app's URL and token do not change.
+
+The code cannot replace its own files: the Apps Script API that would allow it
+is off in the hidden Cloud project every sheet script gets, and turning it on
+is a Cloud console visit per owner — exactly what the sheet promises nobody
+needs. So `Loader.gs` never changes. It holds the entry points Google calls and
+runs the real code, which Upgrade stores in the script's properties and the
+loader re-checks against its hash every time it loads it. Code is fetched only
+from `raw.githubusercontent.com` and only at the address the manifest names. A
+release that needs a newer loader says so and stops.
+
+The token moves out of the code, which an upgrade replaces, into the script's
+properties: **ED Dashboard → Set sheet token…** sets or changes it, and
+revoking a commander no longer needs a redeploy. **About** shows what is
+installed, and **Test connection** in EDLD names the release a sheet runs and,
+when it is too old, says to run Upgrade.
+
+A sheet set up before this needs one last manual pass — copy the token, paste
+`Loader.gs` over the old files, run Upgrade, redeploy once — described in
+`sheets/README.md`. Existing deposits, the URL and the token all carry over.
+
+`build_dashboard.py` now also writes `sheets/edld_sheet.js`, the bundle the
+loader installs (`Code.gs`, `Dashboard.gs` and the new `Upgrade.gs`), and
+`sheets/release.json`; both are committed and must be rebuilt after bumping
+`version`, which the tests enforce. `tests/test_sheets_loader.py` runs the real
+loader and bundle under Node against a stand-in for Google's services
+(`tests/gas_fake.js`), taking an old template sheet through a full upgrade and
+checking every refusal.
+
 ### Added: notes on a surface deposit
 
 The deposit window (**Ctrl+D**) has a **Notes** box at the bottom, several
@@ -28,13 +72,11 @@ a wrapped **Notes** column at the end of its table. Anything Sheets would run
 as a formula — text starting with `=`, `+`, `-` or `@` — is now stored as
 text, in every column, so a note cannot execute in a reader's copy of the sheet.
 
-An existing sheet needs the current `sheets/Code.gs` deployed as a new version;
-the header widens itself on the next write. An old script accepts writes and
-drops the fields it has no column for, so **Test connection** now compares the
-script's column count with EDLD's and says so instead of reporting success.
-A sheet from the dashboard template also wants the current `Dashboard.gs` and a
-run of **ED Dashboard → Repair dashboard formulas**, which now upgrades an
-older template's table in place.
+An existing sheet gets the columns, the Notes column and everything else here
+from **ED Dashboard → Upgrade…** — see the next entry. An old script accepts
+writes and drops the fields it has no column for, so **Test connection** now
+compares the script's column count with EDLD's and says so instead of
+reporting success.
 
 The survey store moves to schema version 2, adding the columns; existing
 deposits are kept and nothing is re-queued for publishing.
