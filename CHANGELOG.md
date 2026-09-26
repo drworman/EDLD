@@ -4,7 +4,7 @@ Last updated: 20260926
 
 ---
 
-## Unreleased
+## Released in 20260926
 
 ### Fixed: installing into a blank spreadsheet built no dashboard
 
@@ -85,10 +85,6 @@ standard library alone; `build_dashboard.py` now calls it. Its `--check` runs
 in the release workflow's verify job and in `scripts/build_local.sh`, so a
 version bump without a rebuild fails in seconds, naming the command to run,
 instead of shipping a manifest for another version.
-
----
-
-## Released in 20260926-dev
 
 ### Added: a survey sheet upgrades itself, from its own menu
 
@@ -297,6 +293,10 @@ terminal mode the queue grew for as long as EDLD ran, which is precisely the
 mode people leave running through day-long AFK sessions. Terminal mode now
 empties it.
 
+---
+
+## Released in 20260923
+
 ### Added: a Radio tab in the Crew / Alerts window
 
 Radio Sidewinder, Hutton Orbital Radio and Radio Skvortsov can now be played
@@ -444,6 +444,17 @@ sort rank against `AMOUNT_LEVELS` and `DENSITY_LEVELS` in `core/mining_db.py`,
 the script's fallback palette against the template's, and that the committed
 template is what the build produces now. openpyxl, which the build and the
 last check use, is in `requirements-dev.txt`; it is never bundled.
+
+### Fixed: the radio could not load in any release binary
+
+miniaudio's compiled half imports cffi's C runtime, `_cffi_backend`, from its
+own C initialiser. PyInstaller follows Python imports, not ones made from C,
+and nothing in Python imports `_cffi_backend`, so it was left out of the
+bundle. All three binaries built without complaint and would have shipped with
+a Radio tab that failed on the first press of Play. The `--selftest` radio
+check added with the Radio tab caught it on every platform in the release
+workflow, before anything was published. `_cffi_backend` is now a named hidden
+import, and `tests/test_dependencies.py` checks it stays one.
 
 ### Fixed: the binaries carried none of their dependencies' licence texts
 
